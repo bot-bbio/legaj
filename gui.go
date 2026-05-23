@@ -525,7 +525,7 @@ func buildDashboardTab() fyne.CanvasObject {
 	resultsScroll := container.NewVScroll(state.SearchResultsBox)
 	resultsScroll.SetMinSize(fyne.NewSize(450, 240))
 
-	searchBtn := widget.NewButtonWithIcon("Find Jobs (Gemini Search Grounding)", theme.SearchIcon(), func() {
+	searchBtn := widget.NewButtonWithIcon("Find Jobs", theme.SearchIcon(), func() {
 		if searchKeyword.Text == "" || searchLocation.Text == "" {
 			dialog.ShowInformation("Required Info", "Please enter job keyword and location.", state.Window)
 			return
@@ -535,68 +535,147 @@ func buildDashboardTab() fyne.CanvasObject {
 			return
 		}
 
-		progress := dialog.NewProgressInfinite("Searching Active Jobs", "Querying Gemini API with Google Search Grounding...", state.Window)
+		progress := dialog.NewProgressInfinite("Searching Active Jobs", "Querying Google Search via Gemini Grounding — verifying links...", state.Window)
 		progress.Show()
 
 		go func() {
-			prompt := fmt.Sprintf(`Search Google for active job postings matching keywords "%s" in location "%s".
-Find at least 3-5 real, active job postings from the last 14 days.
-For each posting, return a JSON array containing objects with:
-- "company": Name of the company.
-- "role": Job title.
-- "location": Job location.
-- "link": Direct link to apply or job posting URL.
-- "description": A concise 1-sentence description of the key requirements.
+			prompt := fmt.Sprintf(`You are a job search assistant with Google Search access.
 
-Output ONLY a valid JSON array. Do not include markdown code block formatting (no backticks) or explanations.`, searchKeyword.Text, searchLocation.Text)
+Search for ACTIVE job postings for "%s" in "%s" right now. Use Google Search to find real, current listings posted within the last 30 days from job boards such as LinkedIn, Indeed, Glassdoor, Greenhouse, Lever, Workday, and direct company career pages.
+
+Return EXACTLY 10 job postings. For each posting you MUST provide the full, direct, working URL to the job application page — not the homepage of the company, not a search results page, but the specific job listing URL.
+
+Return a JSON array with exactly this structure, no other text:
+[
+  {
+    "company": "Company Name",
+    "role": "Exact Job Title",
+    "location": "City, State or Remote",
+    "link": "https://full-direct-url-to-job-listing",
+    "description": "One sentence summarizing the key skills and responsibilities required."
+  }
+]
+
+Rules:
+- Every link must be a real, complete URL starting with https://
+- Do not include placeholder, example, or made-up URLs
+- Prefer LinkedIn Easy Apply or Greenhouse/Lever links as they are most reliable
+- If you cannot find 10 real listings, return as many verified ones as you can find`, searchKeyword.Text, searchLocation.Text)
 
 			resJson, err := callGeminiWithSearchGo(state.ApiKey, prompt)
+			if err != nil {
+				fyne.Do(func() {
+					progress.Hide()
+					dialog.ShowError(err, state.Window)
+				})
+				return
+			}
+
+			// Extract JSON array from response
+			cleanJson := strings.TrimSpace(resJson)
+			if idx := strings.Index(cleanJson, "["); idx >= 0 {
+				cleanJson = cleanJson[idx:]
+			}
+			if idx := strings.LastIndex(cleanJson, "]"); idx >= 0 {
+				cleanJson = cleanJson[:idx+1]
+			}
+
+			type JobResult struct {
+				Company     string `json:"company"`
+				Role        string `json:"role"`
+				Location    string `json:"location"`
+				Link        string `json:"link"`
+				Description string `json:"description"`
+			}
+
+			var rawResults []JobResult
+			err = json.Unmarshal([]byte(cleanJson), &rawResults)
+			if err != nil {
+				fyne.Do(func() {
+					progress.Hide()
+					dialog.ShowError(fmt.Errorf("Failed to parse search results.\n\nRaw response:\n%s\n\nError: %v", resJson, err), state.Window)
+				})
+				return
+			}
+
+			// Verify each link concurrently with a 5-second timeout
+			type verifiedResult struct {
+				job   JobResult
+				alive bool
+			}
+
+			httpClient := &http.Client{
+				Timeout: 5 * time.Second,
+				CheckRedirect: func(req *http.Request, via []*http.Request) error {
+					if len(via) >= 5 {
+						return fmt.Errorf("too many redirects")
+					}
+					return nil
+				},
+			}
+
+			verifyCh := make(chan verifiedResult, len(rawResults))
+			for _, job := range rawResults {
+				j := job
+				go func() {
+					alive := false
+					if j.Link != "" && strings.HasPrefix(j.Link, "http") {
+						// Try HEAD first, fall back to GET if server rejects HEAD
+						resp, err := httpClient.Head(j.Link)
+						if err != nil || resp.StatusCode >= 400 {
+							resp2, err2 := httpClient.Get(j.Link)
+							if err2 == nil && resp2.StatusCode < 400 {
+								resp2.Body.Close()
+								alive = true
+							}
+						} else {
+							resp.Body.Close()
+							alive = true
+						}
+					}
+					verifyCh <- verifiedResult{job: j, alive: alive}
+				}()
+			}
+
+			var verified []JobResult
+			for range rawResults {
+				v := <-verifyCh
+				if v.alive {
+					verified = append(verified, v.job)
+				}
+			}
+
 			fyne.Do(func() {
 				progress.Hide()
-				if err != nil {
-					dialog.ShowError(err, state.Window)
-					return
-				}
-
-				var results []struct {
-					Company     string `json:"company"`
-					Role        string `json:"role"`
-					Location    string `json:"location"`
-					Link        string `json:"link"`
-					Description string `json:"description"`
-				}
-				// Strip markdown fences if the model wrapped the JSON
-				cleanJson := strings.TrimSpace(resJson)
-				if idx := strings.Index(cleanJson, "["); idx >= 0 {
-					cleanJson = cleanJson[idx:]
-				}
-				if idx := strings.LastIndex(cleanJson, "]"); idx >= 0 {
-					cleanJson = cleanJson[:idx+1]
-				}
-				err = json.Unmarshal([]byte(cleanJson), &results)
-				if err != nil {
-					dialog.ShowError(fmt.Errorf("Failed to parse search results.\nRaw response:\n%s\n\nError: %v", resJson, err), state.Window)
-					return
-				}
 
 				state.SearchResultsBox.Objects = nil
-				for _, res := range results {
+
+				if len(verified) == 0 {
+					state.SearchResultsBox.Add(widget.NewLabel("No verified live job postings found. Try adjusting your keywords or location."))
+					state.SearchResultsBox.Refresh()
+					return
+				}
+
+				for _, res := range verified {
 					r := res
 					compLabel := widget.NewLabelWithStyle(r.Company, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-					roleLabel := widget.NewLabel(fmt.Sprintf("%s - %s", r.Role, r.Location))
+					roleLabel := widget.NewLabel(fmt.Sprintf("%s  ·  %s", r.Role, r.Location))
 					descLabel := widget.NewLabel(r.Description)
 					descLabel.Wrapping = fyne.TextWrapWord
 
-					openBtn := widget.NewButtonWithIcon("Open Posting", theme.HelpIcon(), func() {
+					openBtn := widget.NewButtonWithIcon("View Posting", theme.HelpIcon(), func() {
 						openLink(r.Link)
 					})
 
 					trackTailorBtn := widget.NewButtonWithIcon("Track & Tailor", theme.DocumentCreateIcon(), func() {
 						runTrackAndTailorAutomation(r.Company, r.Role, r.Location, r.Link, r.Description)
 					})
+					trackTailorBtn.Importance = widget.HighImportance
+
+					verifiedBadge := widget.NewLabelWithStyle("✓ Verified", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
 
 					cardContent := container.NewVBox(
-						compLabel,
+						container.NewHBox(compLabel, layout.NewSpacer(), verifiedBadge),
 						roleLabel,
 						descLabel,
 						container.NewHBox(openBtn, trackTailorBtn),

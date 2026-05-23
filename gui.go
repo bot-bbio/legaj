@@ -7,7 +7,9 @@ import (
 	"image/color"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -135,6 +137,75 @@ func callGeminiGo(apiKey, promptText string, isJson bool) (string, error) {
 	return text, nil
 }
 
+func callGeminiWithSearchGo(apiKey, promptText string) (string, error) {
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=%s", apiKey)
+	
+	requestBody := map[string]interface{}{
+		"contents": []interface{}{
+			map[string]interface{}{
+				"parts": []interface{}{
+					map[string]interface{}{
+						"text": promptText,
+					},
+				},
+			},
+		},
+		"tools": []interface{}{
+			map[string]interface{}{
+				"googleSearchRetrieval": map[string]interface{}{},
+			},
+		},
+		"generationConfig": map[string]interface{}{
+			"responseMimeType": "application/json",
+		},
+	}
+
+	jsonBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonBytes))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var apiResp struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+
+	err = json.Unmarshal(bodyBytes, &apiResp)
+	if err != nil {
+		return "", err
+	}
+
+	if len(apiResp.Candidates) == 0 || len(apiResp.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("empty response from Gemini API")
+	}
+
+	text := apiResp.Candidates[0].Content.Parts[0].Text
+	text = strings.TrimPrefix(text, "```json")
+	text = strings.TrimSuffix(text, "```")
+	text = strings.TrimSpace(text)
+	return text, nil
+}
+
 // AppState holds the application's global GUI state
 type AppState struct {
 	App             fyne.App
@@ -146,15 +217,16 @@ type AppState struct {
 	Email           string
 	Password        string
 	ImapServer      string
+	SaveFolder      string
 	
 	// Dashboard widgets
-	WishlistLabel   *widget.Label
-	AppliedLabel    *widget.Label
-	InterviewLabel  *widget.Label
-	OfferLabel      *widget.Label
-	RejectedLabel   *widget.Label
-	RecentList      *container.AppTabs // Tab or box
-	RecentBox       *fyne.Container
+	WishlistLabel     *widget.Label
+	AppliedLabel      *widget.Label
+	InterviewLabel    *widget.Label
+	OfferLabel        *widget.Label
+	RejectedLabel     *widget.Label
+	RecentBox         *fyne.Container
+	SearchResultsBox  *fyne.Container
 
 	// Profile widgets
 	NameEntry       *widget.Entry
@@ -171,7 +243,7 @@ type AppState struct {
 	ProjContainer   *fyne.Container
 
 	// Tracker widgets
-	TrackerList     *widget.List
+	TrackerTable    *widget.Table
 	TrackerSelected *JobApplication
 
 	// Tailoring widgets
@@ -196,6 +268,7 @@ type AppState struct {
 	SettingsEmail      *widget.Entry
 	SettingsPassword   *widget.Entry
 	SettingsImapServer *widget.Entry
+	SettingsSaveFolder *widget.Entry
 }
 
 type Flashcard struct {
@@ -236,12 +309,32 @@ func startFyneGUI() {
 	os.MkdirAll("outputs", 0755)
 	os.MkdirAll("references", 0755)
 
-	// Load stored configurations (.env and JSON structures)
+	// Load stored configurations (.env)
 	loadConfigurations()
-	loadProfileData()
-	loadTrackerData()
 
-	// Initialize UI sections
+	// Initialize basic structures with empty values
+	state.Profile = &Profile{
+		PersonalInfo: PersonalInfo{Name: "", Email: "", Phone: "", Location: "", Linkedin: "", Website: ""},
+		TargetRoles:  []string{},
+		Education:    []Education{},
+		Experience:   []Experience{},
+		Projects:     []Project{},
+		Skills:       map[string][]string{"technical": {}, "product_management": {}},
+	}
+	state.Applications = []JobApplication{}
+	state.SelectedAppIdx = -1
+
+	// Setup default save path if none
+	if state.SaveFolder == "" {
+		gdrive := `G:\My Drive\Personal Labour Mobile\Cover Letter PDFs\AI Cover Letters`
+		if _, err := os.Stat(gdrive); err == nil {
+			state.SaveFolder = gdrive
+		} else {
+			state.SaveFolder = `C:\Users\molus\projects\legaj\outputs`
+		}
+	}
+
+	// Initialize UI sections (build all tabs and widgets)
 	dashboardTab := buildDashboardTab()
 	profileTab := buildProfileTab()
 	trackerTab := buildTrackerTab()
@@ -261,6 +354,22 @@ func startFyneGUI() {
 	tabs.SetTabLocation(container.TabLocationTop)
 
 	state.Window.SetContent(tabs)
+
+	// Load stored profile and Excel rows asynchronously
+	go func() {
+		loadProfileData()
+		loadTrackerData()
+		fyne.Do(func() {
+			refreshUI()
+			fillProfileForm()
+
+			// Onboarding Wizard triggers on startup if profile is uninitialized
+			if forceWizard || state.Profile.PersonalInfo.Name == "" {
+				showOnboardingWizard()
+			}
+		})
+	}()
+
 	state.Window.ShowAndRun()
 }
 
@@ -269,7 +378,6 @@ func startFyneGUI() {
 // -------------------------------------------------------------
 
 func loadConfigurations() {
-	// Simple .env parser
 	state.SelectedAppIdx = -1
 	bytes, err := os.ReadFile(".env")
 	if err == nil {
@@ -292,6 +400,8 @@ func loadConfigurations() {
 					state.Password = val
 				case "LEGAJ_IMAP_SERVER":
 					state.ImapServer = val
+				case "LEGAJ_SAVE_FOLDER":
+					state.SaveFolder = val
 				}
 			}
 		}
@@ -299,8 +409,8 @@ func loadConfigurations() {
 }
 
 func saveConfigurations() error {
-	content := fmt.Sprintf("GEMINI_API_KEY=%s\nLEGAJ_EMAIL=%s\nLEGAJ_PASSWORD=%s\nLEGAJ_IMAP_SERVER=%s\n",
-		state.ApiKey, state.Email, state.Password, state.ImapServer)
+	content := fmt.Sprintf("GEMINI_API_KEY=%s\nLEGAJ_EMAIL=%s\nLEGAJ_PASSWORD=%s\nLEGAJ_IMAP_SERVER=%s\nLEGAJ_SAVE_FOLDER=%s\n",
+		state.ApiKey, state.Email, state.Password, state.ImapServer, state.SaveFolder)
 	return os.WriteFile(".env", []byte(content), 0644)
 }
 
@@ -358,18 +468,35 @@ func loadTrackerData() {
 }
 
 func reloadAllViews() {
-	loadProfileData()
-	loadTrackerData()
+	go func() {
+		loadProfileData()
+		loadTrackerData()
+		fyne.Do(func() {
+			refreshUI()
+		})
+	}()
+}
+
+func refreshUI() {
 	updateDashboardStats()
-	updateTrackerList()
+	if state.TrackerTable != nil {
+		state.TrackerTable.Refresh()
+	}
 	updateDropdownSelectors()
+}
+
+func openLink(urlString string) {
+	u, err := url.Parse(urlString)
+	if err == nil {
+		state.App.OpenURL(u)
+	}
 }
 
 // -------------------------------------------------------------
 // View Builders
 // -------------------------------------------------------------
 
-// 1. DASHBOARD VIEW
+// 1. DASHBOARD VIEW WITH SEARCH GROUNDING
 func buildDashboardTab() fyne.CanvasObject {
 	state.WishlistLabel = widget.NewLabelWithStyle("0", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
 	state.AppliedLabel = widget.NewLabelWithStyle("0", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
@@ -381,30 +508,119 @@ func buildDashboardTab() fyne.CanvasObject {
 		createKPICard("Wishlist", state.WishlistLabel, color.RGBA{R: 59, G: 130, B: 246, A: 255}),
 		createKPICard("Applied", state.AppliedLabel, color.RGBA{R: 6, G: 182, B: 212, A: 255}),
 		createKPICard("Interviewing", state.InterviewLabel, color.RGBA{R: 245, G: 158, B: 11, A: 255}),
-		createKPICard("Offers Recieved", state.OfferLabel, color.RGBA{R: 16, G: 185, B: 129, A: 255}),
+		createKPICard("Offers Received", state.OfferLabel, color.RGBA{R: 16, G: 185, B: 129, A: 255}),
 		createKPICard("Rejected", state.RejectedLabel, color.RGBA{R: 239, G: 68, B: 68, A: 255}),
 	)
 
 	state.RecentBox = container.NewVBox()
 	recentScroll := container.NewVScroll(state.RecentBox)
-	recentScroll.SetMinSize(fyne.NewSize(450, 300))
+	recentScroll.SetMinSize(fyne.NewSize(450, 160))
 
-	recentCard := widget.NewCard("Recent Job Applications", "", recentScroll)
+	recentCard := widget.NewCard("Recent Applications", "", recentScroll)
 
-	tipsCard := widget.NewCard("Job Search Best Practices", "", container.NewVBox(
-		widget.NewLabel("🎯 Tailor for each application: Use the Document Tailoring tab to rewrite your bullets."),
-		widget.NewLabel("⏰ Log submissions: Update statuses immediately so your numbers match real progress."),
-		widget.NewLabel("🧠 Practice Mock Interviews: Review flashcards prior to scheduling hiring calls."),
+	// Job Discovery section using Gemini Search Grounding
+	searchKeyword := widget.NewEntry()
+	searchKeyword.SetPlaceHolder("e.g. Product Manager")
+	searchLocation := widget.NewEntry()
+	searchLocation.SetPlaceHolder("e.g. New York, NY")
+
+	state.SearchResultsBox = container.NewVBox()
+	resultsScroll := container.NewVScroll(state.SearchResultsBox)
+	resultsScroll.SetMinSize(fyne.NewSize(450, 240))
+
+	searchBtn := widget.NewButtonWithIcon("Find Jobs (Gemini Search Grounding)", theme.SearchIcon(), func() {
+		if searchKeyword.Text == "" || searchLocation.Text == "" {
+			dialog.ShowInformation("Required Info", "Please enter job keyword and location.", state.Window)
+			return
+		}
+		if state.ApiKey == "" {
+			dialog.ShowInformation("API Key Missing", "Please configure your Gemini API Key in Settings first.", state.Window)
+			return
+		}
+
+		progress := dialog.NewProgressInfinite("Searching Active Jobs", "Querying Gemini API with Google Search Grounding...", state.Window)
+		progress.Show()
+
+		go func() {
+			prompt := fmt.Sprintf(`Search Google for active job postings matching keywords "%s" in location "%s".
+Find at least 3-5 real, active job postings from the last 14 days.
+For each posting, return a JSON array containing objects with:
+- "company": Name of the company.
+- "role": Job title.
+- "location": Job location.
+- "link": Direct link to apply or job posting URL.
+- "description": A concise 1-sentence description of the key requirements.
+
+Output ONLY a valid JSON array. Do not include markdown code block formatting (no backticks) or explanations.`, searchKeyword.Text, searchLocation.Text)
+
+			resJson, err := callGeminiWithSearchGo(state.ApiKey, prompt)
+			fyne.Do(func() {
+				progress.Hide()
+				if err != nil {
+					dialog.ShowError(err, state.Window)
+					return
+				}
+
+				var results []struct {
+					Company     string `json:"company"`
+					Role        string `json:"role"`
+					Location    string `json:"location"`
+					Link        string `json:"link"`
+					Description string `json:"description"`
+				}
+				err = json.Unmarshal([]byte(resJson), &results)
+				if err != nil {
+					dialog.ShowError(fmt.Errorf("Failed to parse search results: %v", err), state.Window)
+					return
+				}
+
+				state.SearchResultsBox.Objects = nil
+				for _, res := range results {
+					r := res
+					compLabel := widget.NewLabelWithStyle(r.Company, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+					roleLabel := widget.NewLabel(fmt.Sprintf("%s - %s", r.Role, r.Location))
+					descLabel := widget.NewLabel(r.Description)
+					descLabel.Wrapping = fyne.TextWrapWord
+
+					openBtn := widget.NewButtonWithIcon("Open Posting", theme.HelpIcon(), func() {
+						openLink(r.Link)
+					})
+
+					trackTailorBtn := widget.NewButtonWithIcon("Track & Tailor", theme.DocumentCreateIcon(), func() {
+						runTrackAndTailorAutomation(r.Company, r.Role, r.Location, r.Link, r.Description)
+					})
+
+					cardContent := container.NewVBox(
+						compLabel,
+						roleLabel,
+						descLabel,
+						container.NewHBox(openBtn, trackTailorBtn),
+					)
+					state.SearchResultsBox.Add(widget.NewCard("", "", cardContent))
+				}
+				state.SearchResultsBox.Refresh()
+			})
+		}()
+	})
+
+	searchForm := container.New(layout.NewFormLayout(),
+		widget.NewLabel("Keywords"), searchKeyword,
+		widget.NewLabel("Location"), searchLocation,
+	)
+
+	searchCard := widget.NewCard("Job Discovery Engine", "Search active postings and auto-tailor/track assets instantly", container.NewVBox(
+		searchForm,
+		searchBtn,
+		widget.NewSeparator(),
+		resultsScroll,
 	))
-
-	updateDashboardStats()
 
 	content := container.NewVBox(
 		canvas.NewText("Welcome to LeGaJ", theme.PrimaryColor()),
 		widget.NewLabel("Your premium native assistant to structure resumes, tailor content, and log trackers."),
 		widget.NewSeparator(),
 		kpiGrid,
-		container.NewGridWithColumns(2, recentCard, tipsCard),
+		container.NewGridWithColumns(2, recentCard, searchCard),
 	)
 
 	return container.NewScroll(content)
@@ -509,7 +725,6 @@ func buildProfileTab() fyne.CanvasObject {
 					return
 				}
 
-
 				parsePrompt := fmt.Sprintf(`
 You are an expert resume parsing AI. Extract the resume text below and convert it into a valid JSON object matching the following structure exactly. Do not add comments or additional text. Output ONLY valid JSON.
 
@@ -527,12 +742,12 @@ Structure:
   "education": [
     {
       "institution": "University Name",
-      "degree": "Degree (e.g. BS, BA)",
-      "major": "Major subject",
-      "graduation_date": "Month Year or Year",
+      "degree": "Degree",
+      "major": "Major",
+      "graduation_date": "Date",
       "location": "City, State",
-      "gpa": "GPA (optional)",
-      "details": "Awards, honors, or description (optional)"
+      "gpa": "",
+      "details": ""
     }
   ],
   "experience": [
@@ -548,17 +763,10 @@ Structure:
       ]
     }
   ],
-  "projects": [
-    {
-      "name": "Project Name",
-      "description": "Short description of project",
-      "technologies": ["Tech 1", "Tech 2"],
-      "details": "Bullet point of achievements or specifics"
-    }
-  ],
+  "projects": [],
   "skills": {
-    "technical": ["Python", "SQL", "etc."],
-    "product_management": ["Agile", "Figma", "etc."]
+    "technical": ["Python"],
+    "product_management": []
   }
 }
 
@@ -601,44 +809,42 @@ Resume Text:
 		widget.NewLabel("Email Address"), state.EmailEntry,
 		widget.NewLabel("Phone Number"), state.PhoneEntry,
 		widget.NewLabel("Location"), state.LocEntry,
-		widget.NewLabel("LinkedIn URL"), state.LinkedinEntry,
-		widget.NewLabel("Website URL"), state.WebsiteEntry,
-		widget.NewLabel("Target Roles (csv)"), state.RolesEntry,
-		widget.NewLabel("Technical Skills (csv)"), state.TechSkillsEntry,
-		widget.NewLabel("Other Skills (csv)"), state.PmSkillsEntry,
+		widget.NewLabel("LinkedIn Link"), state.LinkedinEntry,
+		widget.NewLabel("Portfolio/Website"), state.WebsiteEntry,
+		widget.NewLabel("Target Job Titles"), state.RolesEntry,
+		widget.NewLabel("Technical Skills"), state.TechSkillsEntry,
+		widget.NewLabel("Product/Other Skills"), state.PmSkillsEntry,
 	)
 
-	// Experience lists with add buttons
-	addExpBtn := widget.NewButton("+ Add Experience", func() {
-		state.Profile.Experience = append(state.Profile.Experience, Experience{Company: "New Company", Role: "Role", Location: "", StartDate: "", EndDate: "", Bullets: []string{}})
-		renderExperienceForm()
-	})
-	addEduBtn := widget.NewButton("+ Add Education", func() {
-		state.Profile.Education = append(state.Profile.Education, Education{Institution: "University", Degree: "", Major: "", GraduationDate: "", GPA: "", Details: ""})
+	addEduBtn := widget.NewButton("Add Education", func() {
+		state.Profile.Education = append(state.Profile.Education, Education{})
 		renderEducationForm()
 	})
-	addProjBtn := widget.NewButton("+ Add Project", func() {
-		state.Profile.Projects = append(state.Profile.Projects, Project{Name: "New Project", Description: "", Technologies: []string{}, Details: ""})
+	addExpBtn := widget.NewButton("Add Experience", func() {
+		state.Profile.Experience = append(state.Profile.Experience, Experience{})
+		renderExperienceForm()
+	})
+	addProjBtn := widget.NewButton("Add Project", func() {
+		state.Profile.Projects = append(state.Profile.Projects, Project{})
 		renderProjectForm()
 	})
 
-	mainScroll := container.NewVScroll(container.NewVBox(
-		container.NewHBox(canvas.NewText("Base Profile Information", theme.PrimaryColor()), layout.NewSpacer(), importBtn),
-		contactForm,
+	profileContent := container.NewVBox(
+		container.NewHBox(importBtn, saveBtn),
 		widget.NewSeparator(),
-		container.NewHBox(widget.NewLabelWithStyle("Professional Experience", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), layout.NewSpacer(), addExpBtn),
-		state.ExpContainer,
+		widget.NewCard("Personal Information", "", contactForm),
 		widget.NewSeparator(),
-		container.NewHBox(widget.NewLabelWithStyle("Education History", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), layout.NewSpacer(), addEduBtn),
+		container.NewHBox(widget.NewLabelWithStyle("Education Section", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), addEduBtn),
 		state.EduContainer,
 		widget.NewSeparator(),
-		container.NewHBox(widget.NewLabelWithStyle("Projects", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), layout.NewSpacer(), addProjBtn),
-		state.ProjContainer,
+		container.NewHBox(widget.NewLabelWithStyle("Experience Section", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), addExpBtn),
+		state.ExpContainer,
 		widget.NewSeparator(),
-		saveBtn,
-	))
-	mainScroll.SetMinSize(fyne.NewSize(0, 500))
-	return mainScroll
+		container.NewHBox(widget.NewLabelWithStyle("Projects Section", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), addProjBtn),
+		state.ProjContainer,
+	)
+
+	return container.NewScroll(profileContent)
 }
 
 func fillProfileForm() {
@@ -653,16 +859,11 @@ func fillProfileForm() {
 	state.WebsiteEntry.SetText(state.Profile.PersonalInfo.Website)
 
 	state.RolesEntry.SetText(strings.Join(state.Profile.TargetRoles, ", "))
-	
-	if tech, ok := state.Profile.Skills["technical"]; ok {
-		state.TechSkillsEntry.SetText(strings.Join(tech, ", "))
-	}
-	if other, ok := state.Profile.Skills["product_management"]; ok {
-		state.PmSkillsEntry.SetText(strings.Join(other, ", "))
-	}
+	state.TechSkillsEntry.SetText(strings.Join(state.Profile.Skills["technical"], ", "))
+	state.PmSkillsEntry.SetText(strings.Join(state.Profile.Skills["product_management"], ", "))
 
-	renderExperienceForm()
 	renderEducationForm()
+	renderExperienceForm()
 	renderProjectForm()
 }
 
@@ -675,8 +876,14 @@ func renderExperienceForm() {
 		roleEnt.SetText(exp.Role)
 		locEnt := widget.NewEntry()
 		locEnt.SetText(exp.Location)
+		
 		datesEnt := widget.NewEntry()
-		datesEnt.SetText(fmt.Sprintf("%s - %s", exp.StartDate, exp.EndDate))
+		dateVal := exp.StartDate
+		if exp.EndDate != "" {
+			dateVal += " - " + exp.EndDate
+		}
+		datesEnt.SetText(dateVal)
+
 		bulletsEnt := widget.NewMultiLineEntry()
 		bulletsEnt.SetText(strings.Join(exp.Bullets, "\n"))
 		bulletsEnt.SetMinRowsVisible(4)
@@ -692,7 +899,7 @@ func renderExperienceForm() {
 			widget.NewLabel("Role"), roleEnt,
 			widget.NewLabel("Location"), locEnt,
 			widget.NewLabel("Dates"), datesEnt,
-			widget.NewLabel("Bullets (Line-by-line)"), bulletsEnt,
+			widget.NewLabel("Bullets"), bulletsEnt,
 		)
 		
 		card := widget.NewCard(fmt.Sprintf("Experience #%d", idx+1), "", container.NewVBox(expForm, delBtn))
@@ -865,34 +1072,58 @@ func splitDates(s string) (string, string) {
 	return s, ""
 }
 
-// 3. JOB TRACKER VIEW
+// 3. JOB TRACKER SPREADSHEET TABLE VIEW
 func buildTrackerTab() fyne.CanvasObject {
-	state.TrackerList = widget.NewList(
-		func() int {
-			return len(state.Applications)
+	// Table widget setup for spreadsheet-like grid layout
+	state.TrackerTable = widget.NewTable(
+		func() (int, int) {
+			return len(state.Applications) + 1, 5 // +1 for headers
 		},
 		func() fyne.CanvasObject {
-			icon := widget.NewIcon(theme.DocumentIcon())
-			compLabel := widget.NewLabelWithStyle("Company", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-			roleLabel := widget.NewLabel("Role / Location")
-			statusLabel := widget.NewLabel("Applied")
-			return container.NewHBox(icon, container.NewVBox(compLabel, roleLabel), layout.NewSpacer(), statusLabel)
+			label := widget.NewLabel("Cell content")
+			label.Wrapping = fyne.TextWrapOff
+			return label
 		},
-		func(id widget.ListItemID, item fyne.CanvasObject) {
-			app := state.Applications[id]
-			box := item.(*fyne.Container)
-			vbox := box.Objects[1].(*fyne.Container)
-			
-			vbox.Objects[0].(*widget.Label).SetText(app.Company)
-			vbox.Objects[1].(*widget.Label).SetText(fmt.Sprintf("%s (%s)", app.Role, app.Location))
-			box.Objects[3].(*widget.Label).SetText(app.Status)
+		func(id widget.TableCellID, cell fyne.CanvasObject) {
+			label := cell.(*widget.Label)
+			if id.Row == 0 {
+				headers := []string{"Company", "Role", "Location", "Date", "Status"}
+				label.SetText(headers[id.Col])
+				label.TextStyle = fyne.TextStyle{Bold: true}
+			} else {
+				if id.Row-1 < len(state.Applications) {
+					app := state.Applications[id.Row-1]
+					switch id.Col {
+					case 0:
+						label.SetText(app.Company)
+					case 1:
+						label.SetText(app.Role)
+					case 2:
+						label.SetText(app.Location)
+					case 3:
+						label.SetText(app.Date)
+					case 4:
+						label.SetText(app.Status)
+					}
+					label.TextStyle = fyne.TextStyle{}
+				}
+			}
 		},
 	)
 
-	state.TrackerList.OnSelected = func(id widget.ListItemID) {
-		app := state.Applications[id]
-		state.TrackerSelected = &app
-		state.SelectedAppIdx = id
+	// Set column widths to look like spreadsheet grid
+	state.TrackerTable.SetColumnWidth(0, 150)
+	state.TrackerTable.SetColumnWidth(1, 200)
+	state.TrackerTable.SetColumnWidth(2, 120)
+	state.TrackerTable.SetColumnWidth(3, 100)
+	state.TrackerTable.SetColumnWidth(4, 100)
+
+	state.TrackerTable.OnSelected = func(id widget.TableCellID) {
+		if id.Row > 0 && id.Row-1 < len(state.Applications) {
+			app := state.Applications[id.Row-1]
+			state.TrackerSelected = &app
+			state.SelectedAppIdx = id.Row - 1
+		}
 	}
 
 	addBtn := widget.NewButtonWithIcon("Add Application", theme.ContentAddIcon(), func() {
@@ -901,7 +1132,7 @@ func buildTrackerTab() fyne.CanvasObject {
 
 	updateBtn := widget.NewButtonWithIcon("Update Status", theme.DocumentCreateIcon(), func() {
 		if state.TrackerSelected == nil {
-			dialog.ShowInformation("Selection Required", "Please select a job application card first.", state.Window)
+			dialog.ShowInformation("Selection Required", "Please select a job cell in the table first.", state.Window)
 			return
 		}
 		openAddJobModal(state.TrackerSelected)
@@ -918,27 +1149,29 @@ func buildTrackerTab() fyne.CanvasObject {
 
 		go func() {
 			outText, err := RunManageApplications("sync", state.Email, state.Password, state.ImapServer)
-			progress.Hide()
-			if err != nil {
-				dialog.ShowError(err, state.Window)
-				return
-			}
-			dialog.ShowInformation("Sync complete", outText, state.Window)
-			reloadAllViews()
+			fyne.Do(func() {
+				progress.Hide()
+				if err != nil {
+					dialog.ShowError(err, state.Window)
+					return
+				}
+				dialog.ShowInformation("Sync complete", outText, state.Window)
+				reloadAllViews()
+			})
 		}()
 	})
 
 	controlBar := container.NewHBox(addBtn, updateBtn, syncBtn)
 	
-	listCard := widget.NewCard("Tracked Job Cards", "Select any job card to perform details updates", state.TrackerList)
-	listCardContainer := container.NewBorder(nil, nil, nil, nil, listCard)
+	tableCard := widget.NewCard("Job Tracker Spreadsheet", "Click any row cell to select an application card", state.TrackerTable)
+	tableContainer := container.NewBorder(nil, nil, nil, nil, tableCard)
 
-	return container.NewBorder(controlBar, nil, nil, nil, listCardContainer)
+	return container.NewBorder(controlBar, nil, nil, nil, tableContainer)
 }
 
 func updateTrackerList() {
-	if state.TrackerList != nil {
-		state.TrackerList.Refresh()
+	if state.TrackerTable != nil {
+		state.TrackerTable.Refresh()
 	}
 }
 
@@ -991,18 +1224,21 @@ func openAddJobModal(job *JobApplication) {
 		go func() {
 			var err error
 			if job != nil {
-				// Update
 				_, err = RunManageApplications("update", compEnt.Text, roleEnt.Text, statusSelect.Selected, notesEnt.Text)
 			} else {
-				// Add
-				_, err = RunManageApplications("add", compEnt.Text, roleEnt.Text, locEnt.Text, linkEnt.Text, "Resume_Generated.pdf", compEnt.Text+"_Cover_Letter.pdf", notesEnt.Text)
+				resPdfName := fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(compEnt.Text, " ", "_"))
+				clPdfName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(compEnt.Text, " ", "_"))
+				_, err = RunManageApplications("add", compEnt.Text, roleEnt.Text, locEnt.Text, linkEnt.Text, resPdfName, clPdfName, notesEnt.Text)
 			}
-			progress.Hide()
-			if err != nil {
-				dialog.ShowError(err, state.Window)
-				return
-			}
-			reloadAllViews()
+			
+			fyne.Do(func() {
+				progress.Hide()
+				if err != nil {
+					dialog.ShowError(err, state.Window)
+					return
+				}
+				reloadAllViews()
+			})
 		}()
 	}, state.Window)
 	d.Resize(fyne.NewSize(500, 450))
@@ -1012,16 +1248,19 @@ func openAddJobModal(job *JobApplication) {
 // 4. DOCUMENT TAILORING VIEW
 func buildTailoringTab() fyne.CanvasObject {
 	state.TailorJobSelect = widget.NewSelect([]string{}, func(selected string) {
-		// prefill requirement field or original text if found
+		// Prefill requirements if matching job is found
 	})
 	updateDropdownSelectors()
 
 	state.TailorReqsEntry = widget.NewMultiLineEntry()
-	state.TailorReqsEntry.SetPlaceHolder("Paste job requirements / description responsibilities here...")
+	state.TailorReqsEntry.SetPlaceHolder("Paste job description requirements and responsibilities here...")
 	state.TailorReqsEntry.SetMinRowsVisible(6)
 
-	state.OriginalPreview = widget.NewLabel("Original bullet points will appear here.")
-	state.TailoredPreview = widget.NewLabel("Tailored bullet points will appear here.")
+	state.OriginalPreview = widget.NewLabel("Original experience bullet points will appear here.")
+	state.TailoredPreview = widget.NewLabel("Tailored experience bullet points will appear here.")
+	state.OriginalPreview.Wrapping = fyne.TextWrapWord
+	state.TailoredPreview.Wrapping = fyne.TextWrapWord
+
 	state.TailorCompare = container.NewGridWithColumns(2,
 		widget.NewCard("Base Resume Experience Bullets", "", container.NewScroll(state.OriginalPreview)),
 		widget.NewCard("Tailored/Rewritten Experience Bullets", "", container.NewScroll(state.TailoredPreview)),
@@ -1041,21 +1280,17 @@ func buildTailoringTab() fyne.CanvasObject {
 		progress := dialog.NewProgressInfinite("Tailoring Resume", "Comparing profile details & rewriting bullets...", state.Window)
 		progress.Show()
 
-		go func() {
-			// Trigger Python tailor script
-			outText, err := RunTailorResume("references/user-profile.json", "references/user-profile-tailored.json")
+		tailorProfileAsync(state.TailorReqsEntry.Text, func(diffText string, err error) {
 			progress.Hide()
 			if err != nil {
 				dialog.ShowError(err, state.Window)
 				return
 			}
-
-			// Parse original vs tailored comparison to show in preview labels
 			state.OriginalPreview.SetText("See references/user-profile.json for original experiences.")
-			state.TailoredPreview.SetText(outText)
+			state.TailoredPreview.SetText(diffText)
 			state.TailorCompare.Show()
 			state.TailorCompare.Refresh()
-		}()
+		})
 	})
 
 	compileResumeBtn := widget.NewButtonWithIcon("Compile Tailored PDF", theme.DocumentIcon(), func() {
@@ -1063,14 +1298,16 @@ func buildTailoringTab() fyne.CanvasObject {
 		progress.Show()
 
 		go func() {
-			outputPath := "outputs/Resume_Generated_Tailored.pdf"
+			outputPath := filepath.Join(state.SaveFolder, "Resume_Generated_Tailored.pdf")
 			outText, err := RunGenerateResume("references/user-profile-tailored.json", outputPath)
-			progress.Hide()
-			if err != nil {
-				dialog.ShowError(err, state.Window)
-				return
-			}
-			dialog.ShowInformation("PDF Generated", fmt.Sprintf("%s\nSaved to: %s", outText, outputPath), state.Window)
+			fyne.Do(func() {
+				progress.Hide()
+				if err != nil {
+					dialog.ShowError(err, state.Window)
+					return
+				}
+				dialog.ShowInformation("PDF Generated", fmt.Sprintf("%s\nSaved to: %s", outText, outputPath), state.Window)
+			})
 		}()
 	})
 
@@ -1091,17 +1328,48 @@ func buildTailoringTab() fyne.CanvasObject {
 		progress.Show()
 
 		go func() {
-			outputPath := fmt.Sprintf("outputs/%s_Cover_Letter.pdf", strings.ReplaceAll(comp, " ", "_"))
-			// Draft standard draft prompt to CLI
-			draftPrompt := fmt.Sprintf("Drafting cover letter for %s role at %s based on requirements: %s", role, comp, state.TailorReqsEntry.Text)
+			outputPath := filepath.Join(state.SaveFolder, fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(comp, " ", "_")))
 			
-			outText, err := RunGenerateCoverLetter("references/user-profile.json", draftPrompt, outputPath)
-			progress.Hide()
+			// Draft prompt aligning with style guide
+			profileBytes, _ := os.ReadFile("references/user-profile.json")
+			draftPrompt := fmt.Sprintf(`Write a professional 4-paragraph cover letter for Roberto Montero for the role of "%s" at "%s".
+Use the following job description and requirements:
+%s
+
+Use the applicant's experience and background from their profile:
+%s
+
+Structure the cover letter exactly as follows:
+- The first paragraph must state: "My name is Roberto Montero and I write to you regarding the [Exact Role Title] role at [Company Name]." Followed by a connection of my background (Market Research and Property Management) and drive to learn with the desire to transition into a fast-paced environment.
+- The second paragraph must highlight my senior research roles (GLG, Quadrant Strategies), conducting research operations for tech companies.
+- The third paragraph must highlight the Leasing Manager role at Live in Bing, overseeing $15 Million in assets and overhauling the sales pipeline through COVID-19.
+- The fourth paragraph must summarize my adaptability and end with: "I look forward to discussing this opportunity further and I hope to hear from you soon!"
+
+Format: Start with the recipient address block and the current date (formatted like e.g. "22 January 2025") at the top, then the salutation "To Whom it May Concern,", then the body, then the sign-off "Sincerely,", then "Roberto Montero".
+Output ONLY the cover letter text, no conversational intro or outro.`, role, comp, state.TailorReqsEntry.Text, string(profileBytes))
+
+			coverLetterDraftText, err := callGeminiGo(state.ApiKey, draftPrompt, false)
 			if err != nil {
-				dialog.ShowError(err, state.Window)
+				fyne.Do(func() {
+					progress.Hide()
+					dialog.ShowError(err, state.Window)
+				})
 				return
 			}
-			dialog.ShowInformation("Cover Letter Generated", fmt.Sprintf("%s\nSaved to: %s", outText, outputPath), state.Window)
+
+			tempDraftPath := filepath.Join("outputs", "temp_manual_draft.txt")
+			os.WriteFile(tempDraftPath, []byte(coverLetterDraftText), 0644)
+			defer os.Remove(tempDraftPath)
+
+			outText, err := RunGenerateCoverLetter("references/user-profile.json", tempDraftPath, outputPath)
+			fyne.Do(func() {
+				progress.Hide()
+				if err != nil {
+					dialog.ShowError(err, state.Window)
+					return
+				}
+				dialog.ShowInformation("Cover Letter Generated", fmt.Sprintf("%s\nSaved to: %s", outText, outputPath), state.Window)
+			})
 		}()
 	})
 
@@ -1132,6 +1400,48 @@ func updateDropdownSelectors() {
 		state.PrepJobSelect.Options = list
 		state.PrepJobSelect.Refresh()
 	}
+}
+
+func tailorProfileAsync(jobDescription string, callback func(string, error)) {
+	go func() {
+		baseProfileBytes, err := os.ReadFile("references/user-profile.json")
+		if err != nil {
+			fyne.Do(func() { callback("", err) })
+			return
+		}
+
+		prompt := fmt.Sprintf(`You are an expert resume writer. Tailor the applicant's experience bullet points and skills in the base profile JSON to align with the target job description.
+
+Base Profile JSON:
+%s
+
+Target Job Description:
+%s
+
+Mandates:
+1. For each experience, rewrite relevant bullet points to emphasize accomplishments that align with the job requirements.
+2. YOU MUST strictly preserve all historical metrics (percentages, dollar values, size of teams) and truthfulness.
+3. Elevate and rank the most critical keywords in the skills section.
+4. Keep the exact same JSON structure. Do not add or remove jobs.
+5. Output ONLY valid JSON matching the profile schema. No explanations, no markdown blocks.`, string(baseProfileBytes), jobDescription)
+
+		tailoredJson, err := callGeminiGo(state.ApiKey, prompt, true)
+		if err != nil {
+			fyne.Do(func() { callback("", err) })
+			return
+		}
+
+		err = os.WriteFile("references/user-profile-tailored.json", []byte(tailoredJson), 0644)
+		if err != nil {
+			fyne.Do(func() { callback("", err) })
+			return
+		}
+
+		diffText, err := RunTailorResume("references/user-profile.json", "references/user-profile-tailored.json")
+		fyne.Do(func() {
+			callback(diffText, err)
+		})
+	}()
 }
 
 // 5. INTERVIEW PREPARATION VIEW
@@ -1198,7 +1508,6 @@ func buildPrepTab() fyne.CanvasObject {
 		progress.Show()
 
 		go func() {
-			// Save simple mock JSON data to trigger prep script
 			parts := strings.SplitN(state.PrepJobSelect.Selected, " - ", 2)
 			comp := parts[0]
 			role := ""
@@ -1206,7 +1515,6 @@ func buildPrepTab() fyne.CanvasObject {
 				role = parts[1]
 			}
 
-			// Draft basic template prep json
 			mockData := InterviewPrepData{
 				CompanyProfile: fmt.Sprintf("Preparing for %s role at %s. Focus on behavioral STAR method.", role, comp),
 				ElevatorPitch:  fmt.Sprintf("Hi, I am Roberto. I have experience in product management and optimization metrics. Ready to join %s.", comp),
@@ -1226,19 +1534,20 @@ func buildPrepTab() fyne.CanvasObject {
 
 			outText, err := RunPrepareInterview(dataPath, "all")
 			os.Remove(dataPath)
-			progress.Hide()
+			fyne.Do(func() {
+				progress.Hide()
+				if err != nil {
+					dialog.ShowError(err, state.Window)
+					return
+				}
 
-			if err != nil {
-				dialog.ShowError(err, state.Window)
-				return
-			}
+				state.Flashcards = mockData.Flashcards
+				state.CurrentCardIdx = 0
+				showCard(0)
 
-			state.Flashcards = mockData.Flashcards
-			state.CurrentCardIdx = 0
-			showCard(0)
-
-			state.PrepStatus.SetText(outText)
-			state.FlashcardBox.Show()
+				state.PrepStatus.SetText(outText)
+				state.FlashcardBox.Show()
+			})
 		}()
 	})
 
@@ -1265,23 +1574,26 @@ func showCard(idx int) {
 	state.CardIndicator.SetText(fmt.Sprintf("%d / %d", idx+1, len(state.Flashcards)))
 }
 
-// 6. SETTINGS VIEW
+// 6. SETTINGS VIEW WITH CREDITS AND HELP
 func buildSettingsTab() fyne.CanvasObject {
 	state.SettingsApiKey = widget.NewPasswordEntry()
 	state.SettingsEmail = widget.NewEntry()
 	state.SettingsPassword = widget.NewPasswordEntry()
 	state.SettingsImapServer = widget.NewEntry()
+	state.SettingsSaveFolder = widget.NewEntry()
 
 	state.SettingsApiKey.SetText(state.ApiKey)
 	state.SettingsEmail.SetText(state.Email)
 	state.SettingsPassword.SetText(state.Password)
 	state.SettingsImapServer.SetText(state.ImapServer)
+	state.SettingsSaveFolder.SetText(state.SaveFolder)
 
 	saveBtn := widget.NewButtonWithIcon("Save Configurations", theme.DocumentSaveIcon(), func() {
 		state.ApiKey = state.SettingsApiKey.Text
 		state.Email = state.SettingsEmail.Text
 		state.Password = state.SettingsPassword.Text
 		state.ImapServer = state.SettingsImapServer.Text
+		state.SaveFolder = state.SettingsSaveFolder.Text
 
 		err := saveConfigurations()
 		if err != nil {
@@ -1291,19 +1603,478 @@ func buildSettingsTab() fyne.CanvasObject {
 		dialog.ShowInformation("Success", "Settings written to secure local .env configuration.", state.Window)
 	})
 
+	wizardBtn := widget.NewButtonWithIcon("Run Setup Wizard", theme.DocumentCreateIcon(), func() {
+		showOnboardingWizard()
+	})
+
 	form := container.New(layout.NewFormLayout(),
 		widget.NewLabel("Gemini API Key"), state.SettingsApiKey,
+		widget.NewLabel("Save Folder"), state.SettingsSaveFolder,
 		widget.NewLabel("Email Address"), state.SettingsEmail,
 		widget.NewLabel("IMAP App Password"), state.SettingsPassword,
 		widget.NewLabel("IMAP Server"), state.SettingsImapServer,
+	)
+
+	// Help and Documentation
+	helpDoc := widget.NewCard("LeGaJ Help & Documentation", "", container.NewVBox(
+		widget.NewLabel("1. Overview: Matches profile details to job postings, tailors experiences, drafts cover letters, and logs tracked row states in Excel."),
+		widget.NewLabel("2. Save Directory: Output PDFs (Resume/Cover Letter) compile into your Custom Save Folder (defaults to Google Drive)."),
+		widget.NewLabel("3. Templates: Formatting applies Times New Roman styling and strict single-page constraints."),
+	))
+
+	// Hyperlinked Creator Credits
+	githubBtn := widget.NewButtonWithIcon("GitHub: /bot-bbio", theme.HelpIcon(), func() {
+		openLink("https://github.com/bot-bbio")
+	})
+	linkedinBtn := widget.NewButtonWithIcon("LinkedIn: /alvvays", theme.HelpIcon(), func() {
+		openLink("https://linkedin.com/in/alvvays")
+	})
+	creditsRow := container.NewHBox(
+		widget.NewLabel("Credits:"),
+		githubBtn,
+		linkedinBtn,
 	)
 
 	content := container.NewVBox(
 		canvas.NewText("Settings & Configurations", theme.PrimaryColor()),
 		widget.NewLabel("Manage local API keys and configurations securely stored in your .env file."),
 		form,
-		saveBtn,
+		container.NewHBox(saveBtn, wizardBtn),
+		widget.NewSeparator(),
+		helpDoc,
+		widget.NewSeparator(),
+		creditsRow,
 	)
 
 	return container.NewScroll(content)
+}
+
+// -------------------------------------------------------------
+// ONBOARDING SETUP WIZARD
+// -------------------------------------------------------------
+
+func showOnboardingWizard() {
+	wizardWindow := state.App.NewWindow("LeGaJ - Setup Wizard")
+	wizardWindow.Resize(fyne.NewSize(650, 500))
+
+	// Step 1: Welcome & Paths
+	apiKeyEntry := widget.NewPasswordEntry()
+	apiKeyEntry.SetText(state.ApiKey)
+
+	resumePathLabel := widget.NewLabel("No resume file selected")
+	resumePathLabel.Wrapping = fyne.TextWrapOff
+	selectResumeBtn := widget.NewButtonWithIcon("Choose Resume File", theme.DocumentIcon(), func() {
+		fd := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+			if err != nil || reader == nil {
+				return
+			}
+			resumePathLabel.SetText(reader.URI().Path())
+			reader.Close()
+		}, wizardWindow)
+		fd.SetFilter(storage.NewExtensionFileFilter([]string{".pdf", ".docx", ".txt", ".md"}))
+		fd.Show()
+	})
+
+	saveFolderLabel := widget.NewLabel(state.SaveFolder)
+	saveFolderLabel.Wrapping = fyne.TextWrapOff
+	selectFolderBtn := widget.NewButtonWithIcon("Choose Save Folder", theme.FolderOpenIcon(), func() {
+		od := dialog.NewFolderOpen(func(list fyne.ListableURI, err error) {
+			if err != nil || list == nil {
+				return
+			}
+			saveFolderLabel.SetText(list.Path())
+		}, wizardWindow)
+		od.Show()
+	})
+
+	step1 := container.NewVBox(
+		widget.NewLabelWithStyle("Welcome to LeGaJ!", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("Let's configure your API key, resume, and output folder to get you started."),
+		widget.NewSeparator(),
+		container.New(layout.NewFormLayout(),
+			widget.NewLabel("Gemini API Key"), apiKeyEntry,
+			widget.NewLabel("Base Resume"), container.NewHBox(selectResumeBtn, resumePathLabel),
+			widget.NewLabel("Save Folder"), container.NewHBox(selectFolderBtn, saveFolderLabel),
+		),
+	)
+
+	// Step 2: Preference & Parse
+	roleEntry := widget.NewEntry()
+	roleEntry.SetText("Product Manager")
+	progressLabel := widget.NewLabel("")
+	
+	// Step 3 Bypass Option: allow manual bypass if parsing fails
+	bypassBtn := widget.NewButton("Manually Enter Details (Bypass)", nil)
+	bypassBtn.Hide()
+
+	step2 := container.NewVBox(
+		widget.NewLabelWithStyle("Preferences & Profile Parsing", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("Define your target job role. Gemini will parse and structure your resume details."),
+		widget.NewSeparator(),
+		container.New(layout.NewFormLayout(),
+			widget.NewLabel("Target Job Role"), roleEntry,
+		),
+		progressLabel,
+		bypassBtn,
+	)
+
+	// Step 3: Verify Parsed Details
+	nameEntry := widget.NewEntry()
+	emailEntry := widget.NewEntry()
+	phoneEntry := widget.NewEntry()
+	locEntry := widget.NewEntry()
+
+	step3Form := container.New(layout.NewFormLayout(),
+		widget.NewLabel("Full Name"), nameEntry,
+		widget.NewLabel("Email Address"), emailEntry,
+		widget.NewLabel("Phone Number"), phoneEntry,
+		widget.NewLabel("Location"), locEntry,
+	)
+
+	step3 := container.NewVBox(
+		widget.NewLabelWithStyle("Verify Your Profile Details", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("Confirm or edit your personal info before finalizing:"),
+		widget.NewSeparator(),
+		step3Form,
+	)
+
+	stepContainer := container.NewMax(step1)
+	
+	nextBtn := widget.NewButton("Next", nil)
+	backBtn := widget.NewButton("Back", nil)
+	backBtn.Disable()
+
+	currentStep := 1
+
+	updateButtons := func() {
+		if currentStep == 1 {
+			backBtn.Disable()
+			nextBtn.SetText("Next")
+		} else if currentStep == 2 {
+			backBtn.Enable()
+			nextBtn.SetText("Parse Resume & Continue")
+		} else if currentStep == 3 {
+			backBtn.Enable()
+			nextBtn.SetText("Finish Setup")
+		}
+	}
+
+	bypassAction := func() {
+		currentStep = 3
+		stepContainer.Objects = []fyne.CanvasObject{step3}
+		stepContainer.Refresh()
+		updateButtons()
+		
+		// Prefill form with empty or whatever we have
+		nameEntry.SetText("")
+		emailEntry.SetText("")
+		phoneEntry.SetText("")
+		locEntry.SetText("")
+	}
+	bypassBtn.OnTapped = bypassAction
+
+	nextBtn.OnTapped = func() {
+		if currentStep == 1 {
+			if apiKeyEntry.Text == "" {
+				dialog.ShowInformation("Required Info", "Please enter your Gemini API Key.", wizardWindow)
+				return
+			}
+			if resumePathLabel.Text == "No resume file selected" {
+				dialog.ShowInformation("Required Info", "Please select your base resume file.", wizardWindow)
+				return
+			}
+			state.ApiKey = apiKeyEntry.Text
+			state.SaveFolder = saveFolderLabel.Text
+
+			currentStep = 2
+			stepContainer.Objects = []fyne.CanvasObject{step2}
+			stepContainer.Refresh()
+			updateButtons()
+		} else if currentStep == 2 {
+			if roleEntry.Text == "" {
+				dialog.ShowInformation("Required Info", "Please enter your target job role.", wizardWindow)
+				return
+			}
+
+			progressLabel.SetText("Reading resume and parsing structure via Gemini...")
+			nextBtn.Disable()
+			backBtn.Disable()
+			bypassBtn.Show()
+
+			go func() {
+				outText, err := RunParseResume(resumePathLabel.Text)
+				if err != nil {
+					fyne.Do(func() {
+						dialog.ShowError(err, wizardWindow)
+						progressLabel.SetText("Failed parsing file. You can bypass using the button below.")
+						nextBtn.Enable()
+						backBtn.Enable()
+					})
+					return
+				}
+
+				parsePrompt := fmt.Sprintf(`
+You are an expert resume parsing AI. Extract the resume text below and convert it into a valid JSON object matching the following structure exactly. Do not add comments or additional text. Output ONLY valid JSON.
+
+Structure:
+{
+  "personal_info": {
+    "name": "Full Name",
+    "email": "Email Address",
+    "phone": "Phone Number",
+    "location": "City, State",
+    "linkedin": "linkedin URL (optional)",
+    "website": "portfolio or personal website URL (optional)"
+  },
+  "target_roles": ["Role 1"],
+  "education": [
+    {
+      "institution": "University",
+      "degree": "Degree",
+      "major": "Major",
+      "graduation_date": "Date",
+      "location": "Location",
+      "gpa": "",
+      "details": ""
+    }
+  ],
+  "experience": [
+    {
+      "company": "Company",
+      "role": "Role",
+      "location": "Location",
+      "start_date": "Start",
+      "end_date": "End",
+      "bullets": [
+        "Bullet 1"
+      ]
+    }
+  ],
+  "projects": [],
+  "skills": {
+    "technical": ["Python"],
+    "product_management": []
+  }
+}
+
+Resume Text:
+%s`, outText)
+
+				parsedJsonStr, err := callGeminiGo(state.ApiKey, parsePrompt, true)
+				if err != nil {
+					fyne.Do(func() {
+						dialog.ShowError(err, wizardWindow)
+						progressLabel.SetText("Failed calling Gemini API. You can bypass using the button below.")
+						nextBtn.Enable()
+						backBtn.Enable()
+					})
+					return
+				}
+
+				os.WriteFile("references/user-profile.json", []byte(parsedJsonStr), 0644)
+				loadProfileData()
+
+				fyne.Do(func() {
+					nameEntry.SetText(state.Profile.PersonalInfo.Name)
+					emailEntry.SetText(state.Profile.PersonalInfo.Email)
+					phoneEntry.SetText(state.Profile.PersonalInfo.Phone)
+					locEntry.SetText(state.Profile.PersonalInfo.Location)
+
+					// Show warning formatting highlights if email/phone missing
+					if state.Profile.PersonalInfo.Email == "" {
+						emailEntry.SetPlaceHolder("Warning: Missing email address")
+					}
+					if state.Profile.PersonalInfo.Phone == "" {
+						phoneEntry.SetPlaceHolder("Warning: Missing phone number")
+					}
+
+					currentStep = 3
+					stepContainer.Objects = []fyne.CanvasObject{step3}
+					stepContainer.Refresh()
+					updateButtons()
+					nextBtn.Enable()
+					backBtn.Enable()
+					bypassBtn.Hide()
+				})
+			}()
+		} else if currentStep == 3 {
+			// Save changes and configure app
+			state.Profile.PersonalInfo.Name = nameEntry.Text
+			state.Profile.PersonalInfo.Email = emailEntry.Text
+			state.Profile.PersonalInfo.Phone = phoneEntry.Text
+			state.Profile.PersonalInfo.Location = locEntry.Text
+			
+			if len(state.Profile.TargetRoles) == 0 {
+				state.Profile.TargetRoles = []string{roleEntry.Text}
+			} else {
+				state.Profile.TargetRoles[0] = roleEntry.Text
+			}
+
+			saveProfileData()
+			saveConfigurations()
+
+			dialog.ShowInformation("Setup Finished", "Profile saved successfully!", wizardWindow)
+			
+			reloadAllViews()
+			wizardWindow.Close()
+		}
+	}
+
+	backBtn.OnTapped = func() {
+		if currentStep == 2 {
+			currentStep = 1
+			stepContainer.Objects = []fyne.CanvasObject{step1}
+			stepContainer.Refresh()
+			updateButtons()
+			bypassBtn.Hide()
+		} else if currentStep == 3 {
+			currentStep = 2
+			stepContainer.Objects = []fyne.CanvasObject{step2}
+			stepContainer.Refresh()
+			updateButtons()
+		}
+	}
+
+	wizardWindow.SetContent(container.NewBorder(
+		nil,
+		container.NewHBox(backBtn, layout.NewSpacer(), nextBtn),
+		nil,
+		nil,
+		stepContainer,
+	))
+	wizardWindow.Show()
+}
+
+// -------------------------------------------------------------
+// TRACK & TAILOR AUTOMATION PIPELINE
+// -------------------------------------------------------------
+
+func runTrackAndTailorAutomation(company, role, location, link, desc string) {
+	progress := dialog.NewProgressInfinite("Pipeline Automating", "Tracking row, tailoring resume, drafting cover letter, compiling PDFs...", state.Window)
+	progress.Show()
+
+	go func() {
+		// 1. Add to excel tracker
+		resumePdfName := fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(company, " ", "_"))
+		coverLetterPdfName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(company, " ", "_"))
+		
+		_, err := RunManageApplications("add", company, role, location, link, resumePdfName, coverLetterPdfName, "Auto-tailored and tracked.")
+		if err != nil {
+			fyne.Do(func() {
+				progress.Hide()
+				dialog.ShowError(err, state.Window)
+			})
+			return
+		}
+
+		// 2. Tailor resume JSON
+		baseProfileBytes, err := os.ReadFile("references/user-profile.json")
+		if err != nil {
+			fyne.Do(func() {
+				progress.Hide()
+				dialog.ShowError(err, state.Window)
+			})
+			return
+		}
+
+		tailorPrompt := fmt.Sprintf(`You are an expert resume writer. Tailor the applicant's experience bullet points and skills in the base profile JSON to align with the target job description.
+
+Base Profile JSON:
+%s
+
+Target Job Description:
+%s
+
+Mandates:
+1. For each experience, rewrite relevant bullet points to emphasize accomplishments that align with the job requirements.
+2. YOU MUST strictly preserve all historical metrics (percentages, dollar values, size of teams) and truthfulness.
+3. Elevate and rank the most critical keywords in the skills section.
+4. Keep the exact same JSON structure. Do not add or remove jobs.
+5. Output ONLY valid JSON matching the profile schema. No explanations, no markdown blocks.`, string(baseProfileBytes), desc)
+
+		tailoredJson, err := callGeminiGo(state.ApiKey, tailorPrompt, true)
+		if err != nil {
+			fyne.Do(func() {
+				progress.Hide()
+				dialog.ShowError(err, state.Window)
+			})
+			return
+		}
+
+		// Write tailored profile
+		err = os.WriteFile("references/user-profile-tailored.json", []byte(tailoredJson), 0644)
+		if err != nil {
+			fyne.Do(func() {
+				progress.Hide()
+				dialog.ShowError(err, state.Window)
+			})
+			return
+		}
+
+		// 3. Compile resume PDF to save folder
+		resumeOutputPath := filepath.Join(state.SaveFolder, resumePdfName)
+		_, err = RunGenerateResume("references/user-profile-tailored.json", resumeOutputPath)
+		if err != nil {
+			fyne.Do(func() {
+				progress.Hide()
+				dialog.ShowError(err, state.Window)
+			})
+			return
+		}
+
+		// 4. Draft Cover Letter aligning with the style guide
+		coverPrompt := fmt.Sprintf(`Write a professional 4-paragraph cover letter for Roberto Montero for the role of "%s" at "%s".
+Use the following job description and requirements:
+%s
+
+Use the applicant's experience and background from their profile:
+%s
+
+Structure the cover letter exactly as follows:
+- The first paragraph must state: "My name is Roberto Montero and I write to you regarding the [Exact Role Title] role at [Company Name]." Followed by a connection of my background (Market Research and Property Management) and drive to learn with the desire to transition into a fast-paced environment.
+- The second paragraph must highlight my senior research roles (GLG, Quadrant Strategies), conducting research operations for tech companies.
+- The third paragraph must highlight the Leasing Manager role at Live in Bing, overseeing $15 Million in assets and overhauling the sales pipeline through COVID-19.
+- The fourth paragraph must summarize my adaptability and end with: "I look forward to discussing this opportunity further and I hope to hear from you soon!"
+
+Format: Start with the recipient address block and the current date (formatted like e.g. "22 January 2025") at the top, then the salutation "To Whom it May Concern,", then the body, then the sign-off "Sincerely,", then "Roberto Montero".
+Output ONLY the cover letter text, no conversational intro or outro.`, role, company, desc, string(baseProfileBytes))
+
+		coverLetterDraftText, err := callGeminiGo(state.ApiKey, coverPrompt, false)
+		if err != nil {
+			fyne.Do(func() {
+				progress.Hide()
+				dialog.ShowError(err, state.Window)
+			})
+			return
+		}
+
+		// Save draft cover letter to temp file
+		tempDraftPath := filepath.Join("outputs", "temp_auto_draft.txt")
+		err = os.WriteFile(tempDraftPath, []byte(coverLetterDraftText), 0644)
+		if err != nil {
+			fyne.Do(func() {
+				progress.Hide()
+				dialog.ShowError(err, state.Window)
+			})
+			return
+		}
+		defer os.Remove(tempDraftPath)
+
+		// 5. Compile Cover Letter PDF to save folder
+		coverOutputPath := filepath.Join(state.SaveFolder, coverLetterPdfName)
+		_, err = RunGenerateCoverLetter("references/user-profile.json", tempDraftPath, coverOutputPath)
+		if err != nil {
+			fyne.Do(func() {
+				progress.Hide()
+				dialog.ShowError(err, state.Window)
+			})
+			return
+		}
+
+		fyne.Do(func() {
+			progress.Hide()
+			dialog.ShowInformation("Pipeline Complete", fmt.Sprintf("Successfully tracked job, tailored resume, and compiled PDFs!\n\nSaved Resume: %s\nSaved Cover Letter: %s", resumeOutputPath, coverOutputPath), state.Window)
+			reloadAllViews()
+		})
+	}()
 }

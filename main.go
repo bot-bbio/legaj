@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+var forceWizard bool
+
 func main() {
 	// Initialize directories
 	os.MkdirAll("outputs", 0755)
@@ -22,6 +24,11 @@ func main() {
 	command := os.Args[1]
 
 	switch command {
+	case "wizard":
+		forceWizard = true
+		startFyneGUI()
+		return
+
 	case "help", "-h", "--help":
 		printUsage()
 		os.Exit(0)
@@ -59,6 +66,7 @@ func printUsage() {
 	fmt.Println("\nUsage:")
 	fmt.Println("  legaj <command> [arguments]")
 	fmt.Println("\nAvailable Commands:")
+	fmt.Println("  wizard                Launch the step-by-step onboarding setup wizard.")
 	fmt.Println("  parse-resume          Extract text from a resume file (PDF/DOCX/TXT/MD).")
 	fmt.Println("  tailor-resume         Compare a base profile with a tailored profile.")
 	fmt.Println("  design-resume         Compile a profile JSON into a PDF resume.")

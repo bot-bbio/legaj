@@ -152,11 +152,8 @@ func callGeminiWithSearchGo(apiKey, promptText string) (string, error) {
 		},
 		"tools": []interface{}{
 			map[string]interface{}{
-				"googleSearchRetrieval": map[string]interface{}{},
+				"google_search": map[string]interface{}{},
 			},
-		},
-		"generationConfig": map[string]interface{}{
-			"responseMimeType": "application/json",
 		},
 	}
 
@@ -568,9 +565,17 @@ Output ONLY a valid JSON array. Do not include markdown code block formatting (n
 					Link        string `json:"link"`
 					Description string `json:"description"`
 				}
-				err = json.Unmarshal([]byte(resJson), &results)
+				// Strip markdown fences if the model wrapped the JSON
+				cleanJson := strings.TrimSpace(resJson)
+				if idx := strings.Index(cleanJson, "["); idx >= 0 {
+					cleanJson = cleanJson[idx:]
+				}
+				if idx := strings.LastIndex(cleanJson, "]"); idx >= 0 {
+					cleanJson = cleanJson[:idx+1]
+				}
+				err = json.Unmarshal([]byte(cleanJson), &results)
 				if err != nil {
-					dialog.ShowError(fmt.Errorf("Failed to parse search results: %v", err), state.Window)
+					dialog.ShowError(fmt.Errorf("Failed to parse search results.\nRaw response:\n%s\n\nError: %v", resJson, err), state.Window)
 					return
 				}
 

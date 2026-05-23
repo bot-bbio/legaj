@@ -30,6 +30,10 @@
     {
       "name": "legaj:manage-apps",
       "directory": "skills/application-manager"
+    },
+    {
+      "name": "legaj:wizard",
+      "directory": "skills/wizard"
     }
   ]
 }

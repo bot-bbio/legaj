@@ -67,7 +67,7 @@ type Profile struct {
 }
 
 func callGeminiGo(apiKey, promptText string, isJson bool) (string, error) {
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=%s", apiKey)
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=%s", apiKey)
 	
 	requestBody := map[string]interface{}{
 		"contents": []interface{}{

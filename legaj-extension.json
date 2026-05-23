@@ -1,0 +1,35 @@
+{
+  "name": "legaj",
+  "version": "1.0.0",
+  "description": "LeGaJ - Let's Get a Job application agent harness.",
+  "commands": [
+    {
+      "name": "legaj:parse-resume",
+      "directory": "skills/resume-parser"
+    },
+    {
+      "name": "legaj:tailor-resume",
+      "directory": "skills/resume-tailor"
+    },
+    {
+      "name": "legaj:design-resume",
+      "directory": "skills/resume-designer"
+    },
+    {
+      "name": "legaj:write-cover-letter",
+      "directory": "skills/cover-letter-writer"
+    },
+    {
+      "name": "legaj:prep-interview",
+      "directory": "skills/interview-prepper"
+    },
+    {
+      "name": "legaj:search-jobs",
+      "directory": "skills/job-searcher"
+    },
+    {
+      "name": "legaj:manage-apps",
+      "directory": "skills/application-manager"
+    }
+  ]
+}

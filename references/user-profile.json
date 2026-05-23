@@ -1,0 +1,84 @@
+{
+  "personal_info": {
+    "name": "Roberto Montero",
+    "email": "0.Roberto.Montero@gmail.com",
+    "phone": "813.597.5308",
+    "location": "Bronx, NY",
+    "linkedin": "linkedin.com/in/roberto-montero",
+    "website": "robertomontero.dev"
+  },
+  "target_roles": [
+    "Product Manager",
+    "Technical Product Manager",
+    "Product Operations"
+  ],
+  "education": [
+    {
+      "institution": "State University of New York",
+      "degree": "Bachelor of Science",
+      "major": "Computer Science & Business Administration",
+      "graduation_date": "May 2022",
+      "location": "New York, NY",
+      "gpa": "3.6/4.0",
+      "details": "Graduated with Honors. President of the Product Management Club."
+    }
+  ],
+  "experience": [
+    {
+      "company": "TechInnovate Solutions",
+      "role": "Associate Product Manager",
+      "location": "New York, NY",
+      "start_date": "June 2023",
+      "end_date": "Present",
+      "bullets": [
+        "Led cross-functional team of 8 engineers and designers to launch a new analytics dashboard, increasing daily active users (DAU) by 18% within 3 months.",
+        "Conducted 30+ user interviews to identify core friction points in customer onboarding, resulting in a redesigned flow that boosted conversion rate by 12%.",
+        "Defined product requirements (PRDs), prioritized the backlog using RICE framework, and managed bi-weekly sprint planning sessions.",
+        "Analyzed product usage data using SQL and Amplitude to deliver monthly KPI reports to executive stakeholders."
+      ]
+    },
+    {
+      "company": "Startup Hub",
+      "role": "Product Analyst Intern",
+      "location": "Remote",
+      "start_date": "September 2022",
+      "end_date": "May 2023",
+      "bullets": [
+        "Collaborated with senior product managers to conduct market research and competitive analysis for a new fintech feature.",
+        "Mapped user journeys and created low-fidelity wireframes in Figma to align engineering and business teams.",
+        "Wrote SQL queries to extract data for A/B testing of payment flow checkout steps, increasing checkout completion by 5%."
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": "JobHuntTracker CLI",
+      "description": "An open-source CLI tool built in Python to help job seekers parse resumes and track their applications locally.",
+      "technologies": ["Python", "SQLite", "ReportLab"],
+      "details": "Created automated resume tailoring features that align experience bullet points with specific job descriptions using semantic similarity."
+    }
+  ],
+  "skills": {
+    "product_management": [
+      "Agile/Scrum",
+      "Roadmapping",
+      "PRD Writing",
+      "User Research",
+      "Backlog Prioritization"
+    ],
+    "technical": [
+      "Python",
+      "SQL",
+      "Figma",
+      "Amplitude",
+      "Git",
+      "Jira"
+    ],
+    "business": [
+      "Market Analysis",
+      "A/B Testing",
+      "KPI Tracking",
+      "Cross-functional Leadership"
+    ]
+  }
+}

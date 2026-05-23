@@ -1,0 +1,32 @@
+# Binaries and executables
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+legaj
+
+# Python cache & virtualenv
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Local configuration & secrets
+.env
+credentials.json
+token.json
+
+# Local job tracker data (to prevent leaking personal applications)
+references/job-tracker.xlsx
+outputs/
+
+# OS specific files
+.DS_Store
+Thumbs.db

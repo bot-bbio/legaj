@@ -127,29 +127,38 @@ def build_resume_pdf(profile_path, output_path):
     if experience:
         draw_section_line("Professional Experience")
         for exp in experience:
-            # Job Header: Company (Left) and Date (Right)
             company = exp.get("company", "")
             dates = f"{exp.get('start_date', '')} - {exp.get('end_date', '')}"
             role = exp.get("role", "")
             loc = exp.get("location", "")
+
+            # Line 1: Company (Left) and Location (Right)
+            company_para = Paragraph(f"<b>{company}</b>", item_header_style)
+            loc_para = Paragraph(loc, ParagraphStyle('RightLoc', parent=body_style, fontName='Times-Roman', fontSize=9.5, alignment=2))
             
-            header_table = Table(
-                [[Paragraph(f"<b>{role}</b> - {company}", item_header_style), 
-                  Paragraph(dates, ParagraphStyle('RightDate', parent=item_header_style, alignment=2))]],
-                colWidths=[400, 140]
-            )
-            header_table.setStyle(TableStyle([
+            line1_table = Table([[company_para, loc_para]], colWidths=[380, 160])
+            line1_table.setStyle(TableStyle([
                 ('VALIGN', (0,0), (-1,-1), 'BOTTOM'),
                 ('LEFTPADDING', (0,0), (-1,-1), 0),
                 ('RIGHTPADDING', (0,0), (-1,-1), 0),
                 ('BOTTOMPADDING', (0,0), (-1,-1), 0),
                 ('TOPPADDING', (0,0), (-1,-1), 2),
             ]))
-            elements.append(header_table)
+            elements.append(line1_table)
             
-            if loc:
-                loc_para = Paragraph(loc, item_subheader_style)
-                elements.append(loc_para)
+            # Line 2: Role (Left) and Dates (Right)
+            role_para = Paragraph(f"<i>{role}</i>", item_subheader_style)
+            dates_para = Paragraph(dates, ParagraphStyle('RightDate', parent=item_subheader_style, alignment=2))
+            
+            line2_table = Table([[role_para, dates_para]], colWidths=[380, 160])
+            line2_table.setStyle(TableStyle([
+                ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                ('LEFTPADDING', (0,0), (-1,-1), 0),
+                ('RIGHTPADDING', (0,0), (-1,-1), 0),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+                ('TOPPADDING', (0,0), (-1,-1), 0),
+            ]))
+            elements.append(line2_table)
                 
             for bullet in exp.get("bullets", []):
                 elements.append(Paragraph(f"&bull;&nbsp;&nbsp;{bullet}", bullet_style))

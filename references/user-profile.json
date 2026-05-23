@@ -2,83 +2,97 @@
   "personal_info": {
     "name": "Roberto Montero",
     "email": "0.Roberto.Montero@gmail.com",
-    "phone": "813.597.5308",
-    "location": "Bronx, NY",
-    "linkedin": "linkedin.com/in/roberto-montero",
-    "website": "robertomontero.dev"
+    "phone": "(813)-597-5308",
+    "location": "",
+    "linkedin": "",
+    "website": ""
   },
-  "target_roles": [
-    "Product Manager",
-    "Technical Product Manager",
-    "Product Operations"
-  ],
+  "target_roles": [],
   "education": [
     {
-      "institution": "State University of New York",
-      "degree": "Bachelor of Science",
-      "major": "Computer Science & Business Administration",
-      "graduation_date": "May 2022",
-      "location": "New York, NY",
-      "gpa": "3.6/4.0",
-      "details": "Graduated with Honors. President of the Product Management Club."
+      "institution": "Binghamton University, State University of New York",
+      "degree": "Bachelor of Arts",
+      "major": "Sociology and English",
+      "graduation_date": "May 2020",
+      "location": "Binghamton, NY",
+      "gpa": "",
+      "details": "Harpur College of Arts and Sciences\nPublished Research: Montero, R. (2018). Love in the Flesh, Toni Morrison and Hortense Spillers 30 years after Beloved and Mama’s Baby, Papa’s Maybe. Alpenglow: Binghamton University Undergraduate Journal of Research and Creative Activity, 4(1). Retrieved from https://orb.binghamton.edu/alpenglowjournal/vol4/iss1/4\nConference Presentations: Montero, R. (2018). Plantation Ecologies: mapping world-ecological transformations in Sugar and Cotton slavery from 1700-1860. Paper presented at Sixth Biennial Sociology Graduate Student Conference in Binghamton, NY. Presented as poster at Institute for the Advanced Studies in the Humanities symposium in Binghamton, NY."
     }
   ],
   "experience": [
     {
-      "company": "TechInnovate Solutions",
-      "role": "Associate Product Manager",
+      "company": "Gerson Lehrman Group (GLG)",
+      "role": "Client Solutions Associate – Private Equity",
       "location": "New York, NY",
-      "start_date": "June 2023",
+      "start_date": "September 2025",
       "end_date": "Present",
       "bullets": [
-        "Led cross-functional team of 8 engineers and designers to launch a new analytics dashboard, increasing daily active users (DAU) by 18% within 3 months.",
-        "Conducted 30+ user interviews to identify core friction points in customer onboarding, resulting in a redesigned flow that boosted conversion rate by 12%.",
-        "Defined product requirements (PRDs), prioritized the backlog using RICE framework, and managed bi-weekly sprint planning sessions.",
-        "Analyzed product usage data using SQL and Amplitude to deliver monthly KPI reports to executive stakeholders."
+        "Surpassed 157% achievement in personal KPIs while generating in excess of $400,000 in revenue during Q1 of 2026",
+        "Acted as the primary liaison between cross-functional internal teams and external partners, navigating complex stakeholder interests and aligning project deliverables with client expectations to ensure long-term retention",
+        "Pioneered AI-Integrated workflows to maximize efficiency and mastery of proprietary CRM software, LinkedIn Recruiter and Salesforce to service client needs in cross-functional research projects",
+        "Generated over 133% revenue growth quarter-over-quarter for a middle market Private Equity client after taking over main project and relationship management responsibilities, including their highest monthly spend in over four years",
+        "Facilitated over 200 expert calls for clients through leveraging external recruiting efforts and internal resources within three months"
       ]
     },
     {
-      "company": "Startup Hub",
-      "role": "Product Analyst Intern",
-      "location": "Remote",
+      "company": "Quadrant Strategies",
+      "role": "Senior Research Coordinator",
+      "location": "Washington, DC",
       "start_date": "September 2022",
-      "end_date": "May 2023",
+      "end_date": "April 2024",
       "bullets": [
-        "Collaborated with senior product managers to conduct market research and competitive analysis for a new fintech feature.",
-        "Mapped user journeys and created low-fidelity wireframes in Figma to align engineering and business teams.",
-        "Wrote SQL queries to extract data for A/B testing of payment flow checkout steps, increasing checkout completion by 5%."
+        "Directed end-to-end research projects, ensuring the effective execution of both quantitative and qualitative studies, including coordinating timelines, budgets, and quality standards using tools such as Monday.com",
+        "Maximized tools such as LinkedIn Sales Navigator for effective lead generation, developing targeted email sequences to strategically nurture prospects, ensuring a methodical approach to engagement and conversion",
+        "Leveraged Salesforce to efficiently manage a panelist database as the Chair of the Process and Optimization Committee charged with implementing streamlined operations and enhanced organizational effectiveness"
+      ]
+    },
+    {
+      "company": "Alfred E. Smith CTE High School",
+      "role": "Substitute Teacher",
+      "location": "Bronx, NY",
+      "start_date": "October 2021",
+      "end_date": "August 2022",
+      "bullets": [
+        "Conducted and planned lessons for coverages of English and History classes when necessary",
+        "Co-taught English, History, Science and Math classes to multiple grade levels with a primary instructor"
+      ]
+    },
+    {
+      "company": "Northland Investment Corporation",
+      "role": "Leasing Consultant",
+      "location": "Austin, TX",
+      "start_date": "September 2020",
+      "end_date": "March 2021",
+      "bullets": [
+        "Coordinated with sales and maintenance teams to boost occupancy rates above market standard 95% threshold and ensure an effective move-in experience for prospective residents",
+        "Used MRI Property Management Suite for prospect screenings, tenant communications, and legal documentation"
+      ]
+    },
+    {
+      "company": "Live in Bing",
+      "role": "Leasing Manager",
+      "location": "Binghamton, NY",
+      "start_date": "September 2018",
+      "end_date": "September 2020",
+      "bullets": [
+        "Increased rental sales revenue in excess of $250,000 as the leader of sales and marketing team for a private equity real estate investment and development firm operating over $15 million in student housing and commercial assets",
+        "Used AppFolio PM software for CRM, listing management, contract drafting, and sales reports",
+        "Developed and implemented marketing initiatives through student community strategic partner management and outreach, brand ambassador management, promotional product development, and sponsored event planning"
       ]
     }
   ],
-  "projects": [
-    {
-      "name": "JobHuntTracker CLI",
-      "description": "An open-source CLI tool built in Python to help job seekers parse resumes and track their applications locally.",
-      "technologies": ["Python", "SQLite", "ReportLab"],
-      "details": "Created automated resume tailoring features that align experience bullet points with specific job descriptions using semantic similarity."
-    }
-  ],
+  "projects": [],
   "skills": {
-    "product_management": [
-      "Agile/Scrum",
-      "Roadmapping",
-      "PRD Writing",
-      "User Research",
-      "Backlog Prioritization"
-    ],
     "technical": [
-      "Python",
-      "SQL",
-      "Figma",
-      "Amplitude",
-      "Git",
-      "Jira"
+      "AI-Integrated workflows",
+      "Proprietary CRM software",
+      "LinkedIn Recruiter",
+      "Salesforce",
+      "Monday.com",
+      "LinkedIn Sales Navigator",
+      "MRI Property Management Suite",
+      "AppFolio PM software"
     ],
-    "business": [
-      "Market Analysis",
-      "A/B Testing",
-      "KPI Tracking",
-      "Cross-functional Leadership"
-    ]
+    "product_management": []
   }
 }

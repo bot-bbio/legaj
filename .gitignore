@@ -27,6 +27,10 @@ token.json
 references/job-tracker.xlsx
 outputs/
 
+# AI instruction docs (never commit)
+legac docs new.md
+new requirements.md
+
 # OS specific files
 .DS_Store
 Thumbs.db

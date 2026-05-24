@@ -27,11 +27,13 @@ func (m customTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) 
 	case theme.ColorNamePlaceHolder:
 		return color.RGBA{R: 100, G: 116, B: 139, A: 255} // #64748B
 	case theme.ColorNameMenuBackground:
-		return color.RGBA{R: 15, G: 23, B: 42, A: 255} // #0F172A
+		return color.RGBA{R: 10, G: 15, B: 29, A: 255} // #0A0F1D
 	case theme.ColorNameHeaderBackground:
-		return color.RGBA{R: 30, G: 41, B: 59, A: 255} // #1E293B
+		return color.RGBA{R: 10, G: 15, B: 29, A: 255} // #0A0F1D
 	case theme.ColorNameSeparator:
-		return color.RGBA{R: 51, G: 65, B: 85, A: 255} // #334155
+		return color.RGBA{R: 255, G: 255, B: 255, A: 60} // #FFFFFF3C
+	case theme.ColorNameShadow:
+		return color.RGBA{R: 10, G: 15, B: 29, A: 255} // #0A0F1D
 	}
 	return theme.DefaultTheme().Color(name, variant)
 }

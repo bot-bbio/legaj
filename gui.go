@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html"
 	"image/color"
 	"io"
 	"net/http"
@@ -2712,7 +2713,11 @@ func buildHelpTab() fyne.CanvasObject {
   fetch('http://127.0.0.1:8080/clip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({company:c||h,role:r||document.title,location:l,link:p,description:d})})
     .then(function(res){return res.json();})
     .then(function(){alert('\u2705 Clipped! Check the Clip Inbox in LeGaJ.');}) 
-    .catch(function(e){alert('\u274C Clip failed. Make sure LeGaJ is open.\n'+e);});
+    .catch(function(e){
+      var url='http://127.0.0.1:8080/clip?company='+encodeURIComponent(c||h)+'&role='+encodeURIComponent(r||document.title)+'&location='+encodeURIComponent(l)+'&link='+encodeURIComponent(p)+'&description='+encodeURIComponent(d);
+      var w=window.open(url,'_blank','width=500,height=400,status=no,menubar=no,toolbar=no');
+      if(!w){alert('\u274C Clip failed (Popup Blocked). Please allow popups for this site, or make sure LeGaJ is open.');}
+    });
 })();`
 
 	bookmarkletEntry := widget.NewEntry()
@@ -4175,17 +4180,12 @@ func startClipServer() {
 	clipMux.HandleFunc("/clip", func(w http.ResponseWriter, r *http.Request) {
 		// CORS + Chrome Private Network Access headers (required for HTTPS pages → localhost)
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		w.Header().Set("Access-Control-Allow-Private-Network", "true")
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		if r.Method != "POST" {
-			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
@@ -4197,9 +4197,36 @@ func startClipServer() {
 			Description string `json:"description"`
 		}
 
-		err := json.NewDecoder(r.Body).Decode(&payload)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		if r.Method == "GET" {
+			q := r.URL.Query()
+			payload.Company = q.Get("company")
+			payload.Role = q.Get("role")
+			payload.Location = q.Get("location")
+			payload.Link = q.Get("link")
+			payload.Description = q.Get("description")
+		} else if r.Method == "POST" {
+			contentType := r.Header.Get("Content-Type")
+			if strings.Contains(contentType, "application/json") {
+				err := json.NewDecoder(r.Body).Decode(&payload)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+			} else {
+				// Form URL encoded or Multipart
+				err := r.ParseForm()
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				payload.Company = r.FormValue("company")
+				payload.Role = r.FormValue("role")
+				payload.Location = r.FormValue("location")
+				payload.Link = r.FormValue("link")
+				payload.Description = r.FormValue("description")
+			}
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
@@ -4276,6 +4303,37 @@ func startClipServer() {
 			state.ClipInboxBox.Refresh()
 		})
 
+		if r.Method == "GET" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`<!DOCTYPE html>
+<html>
+<head>
+    <title>LeGaJ Clipper</title>
+    <style>
+      body { font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; }
+      .card { background: #1e293b; padding: 2.5rem; border-radius: 16px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3); text-align: center; max-width: 400px; width: 90%; }
+      h1 { color: #10b981; margin-top: 0; font-size: 1.8rem; }
+      p { color: #94a3b8; line-height: 1.5; margin-bottom: 2rem; }
+      button { background: #3b82f6; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 500; transition: background 0.2s; }
+      button:hover { background: #2563eb; }
+    </style>
+</head>
+<body>
+    <div class="card">
+      <h1>✓ Clipped Successfully!</h1>
+      <p>Job application details for <strong>` + html.EscapeString(payload.Company) + `</strong> have been sent to your LeGaJ Clip Inbox.</p>
+      <button onclick="window.close()">Close Window</button>
+    </div>
+    <script>
+      setTimeout(function() {
+        window.close();
+      }, 1500);
+    </script>
+</body>
+</html>`))
+			return
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -333,22 +334,26 @@ func startFyneGUI() {
 
 	// Initialize UI sections (build all tabs and widgets)
 	dashboardTab := buildDashboardTab()
+	jobHuntTab := buildJobHuntTab()
 	profileTab := buildProfileTab()
 	trackerTab := buildTrackerTab()
 	tailoringTab := buildTailoringTab()
 	fileManagerTab := buildFileManagerTab()
 	prepTab := buildPrepTab()
 	settingsTab := buildSettingsTab()
+	helpTab := buildHelpTab()
 
 	// Arrange layout
 	tabs := container.NewAppTabs(
 		container.NewTabItemWithIcon("Dashboard", theme.HomeIcon(), dashboardTab),
+		container.NewTabItemWithIcon("Job Hunt", theme.SearchIcon(), jobHuntTab),
 		container.NewTabItemWithIcon("Base Profile", theme.AccountIcon(), profileTab),
 		container.NewTabItemWithIcon("Job Tracker", theme.ListIcon(), trackerTab),
 		container.NewTabItemWithIcon("Tailor Assets", theme.DocumentCreateIcon(), tailoringTab),
 		container.NewTabItemWithIcon("File Manager", theme.FolderIcon(), fileManagerTab),
 		container.NewTabItemWithIcon("Interview Prep", theme.QuestionIcon(), prepTab),
 		container.NewTabItemWithIcon("Settings", theme.SettingsIcon(), settingsTab),
+		container.NewTabItemWithIcon("Help", theme.HelpIcon(), helpTab),
 	)
 	tabs.SetTabLocation(container.TabLocationTop)
 
@@ -485,9 +490,54 @@ func refreshUI() {
 		state.TrackerTable.Refresh()
 	}
 	updateDropdownSelectors()
+	updateTrackerSelectionUI()
+}
+
+func updateTrackerSelectionUI() {
+	if state.SelectedAppIdx >= 0 && state.SelectedAppIdx < len(state.Applications) {
+		app := &state.Applications[state.SelectedAppIdx]
+		state.TrackerSelected = app
+
+		// Dynamically set toolbar status dropdown without triggering double updates
+		isUpdatingTrackerDropdown = true
+		trackerStatusSelect.SetSelected(app.Status)
+		isUpdatingTrackerDropdown = false
+
+		// Enable/disable document opening buttons based on file existence
+		resPath := filepath.Join(state.SaveFolder, app.Resume)
+		if _, err := os.Stat(resPath); err == nil && app.Resume != "" {
+			trackerOpenResumeBtn.Enable()
+		} else {
+			trackerOpenResumeBtn.Disable()
+		}
+
+		clPath := filepath.Join(state.SaveFolder, app.CoverLetter)
+		if _, err := os.Stat(clPath); err == nil && app.CoverLetter != "" {
+			trackerOpenCoverLetterBtn.Enable()
+		} else {
+			trackerOpenCoverLetterBtn.Disable()
+		}
+	} else {
+		state.TrackerSelected = nil
+		isUpdatingTrackerDropdown = true
+		trackerStatusSelect.ClearSelected()
+		isUpdatingTrackerDropdown = false
+		trackerOpenResumeBtn.Disable()
+		trackerOpenCoverLetterBtn.Disable()
+	}
 }
 
 func openLink(urlString string) {
+	if strings.HasPrefix(urlString, "file://") {
+		localPath := strings.TrimPrefix(urlString, "file://")
+		if len(localPath) > 0 && localPath[0] == '/' {
+			localPath = localPath[1:]
+		}
+		localPath = filepath.Clean(localPath)
+		cmd := exec.Command("cmd", "/c", "start", "", localPath)
+		cmd.Run()
+		return
+	}
 	u, err := url.Parse(urlString)
 	if err == nil {
 		state.App.OpenURL(u)
@@ -516,10 +566,34 @@ func buildDashboardTab() fyne.CanvasObject {
 
 	state.RecentBox = container.NewVBox()
 	recentScroll := container.NewVScroll(state.RecentBox)
-	recentScroll.SetMinSize(fyne.NewSize(450, 160))
+	recentScroll.SetMinSize(fyne.NewSize(600, 240))
 
 	recentCard := widget.NewCard("Recent Applications", "", recentScroll)
 
+	dashboardSpacer := canvas.NewRectangle(color.Transparent)
+	dashboardSpacer.SetMinSize(fyne.NewSize(16, 0))
+
+	headerRow := container.NewHBox(
+		canvas.NewText("Welcome to LeGaJ", theme.PrimaryColor()),
+		layout.NewSpacer(),
+		widget.NewButtonWithIcon("Run Onboarding Wizard", theme.DocumentCreateIcon(), func() {
+			showOnboardingWizard()
+		}),
+		dashboardSpacer,
+	)
+
+	content := container.NewVBox(
+		headerRow,
+		widget.NewLabel("Let's Get a Job!"),
+		widget.NewSeparator(),
+		kpiGrid,
+		recentCard,
+	)
+
+	return container.NewScroll(content)
+}
+
+func buildJobHuntTab() fyne.CanvasObject {
 	// Job Discovery section using Gemini Search Grounding
 	searchKeyword := widget.NewEntry()
 	searchKeyword.SetPlaceHolder("e.g. Product Manager")
@@ -528,7 +602,7 @@ func buildDashboardTab() fyne.CanvasObject {
 
 	state.SearchResultsBox = container.NewVBox()
 	resultsScroll := container.NewVScroll(state.SearchResultsBox)
-	resultsScroll.SetMinSize(fyne.NewSize(450, 240))
+	resultsScroll.SetMinSize(fyne.NewSize(600, 300))
 
 	searchBtn := widget.NewButtonWithIcon("Find Jobs", theme.SearchIcon(), func() {
 		if searchKeyword.Text == "" || searchLocation.Text == "" {
@@ -677,11 +751,7 @@ Return only valid JSON, no extra text.`, searchKeyword.Text, searchLocation.Text
 	))
 
 	content := container.NewVBox(
-		canvas.NewText("Welcome to LeGaJ", theme.PrimaryColor()),
-		widget.NewLabel("Your premium native assistant to structure resumes, tailor content, and log trackers."),
-		widget.NewSeparator(),
-		kpiGrid,
-		container.NewGridWithColumns(2, recentCard, searchCard),
+		searchCard,
 	)
 
 	return container.NewScroll(content)
@@ -1133,93 +1203,368 @@ func splitDates(s string) (string, string) {
 	return s, ""
 }
 
+type clickableCell struct {
+	widget.BaseWidget
+	text   *canvas.Text
+	cellID widget.TableCellID
+}
+
+func newClickableCell() *clickableCell {
+	c := &clickableCell{
+		text: canvas.NewText("", theme.ForegroundColor()),
+	}
+	c.text.TextSize = 12
+	c.text.Alignment = fyne.TextAlignLeading
+	c.ExtendBaseWidget(c)
+	return c
+}
+
+type clickableCellRenderer struct {
+	cell *clickableCell
+}
+
+func (r *clickableCellRenderer) Destroy() {}
+func (r *clickableCellRenderer) Layout(size fyne.Size) {
+	r.cell.text.Resize(fyne.NewSize(size.Width-8, size.Height-4))
+	r.cell.text.Move(fyne.NewPos(4, 2))
+}
+func (r *clickableCellRenderer) MinSize() fyne.Size {
+	return r.cell.text.MinSize()
+}
+func (r *clickableCellRenderer) Objects() []fyne.CanvasObject {
+	return []fyne.CanvasObject{r.cell.text}
+}
+func (r *clickableCellRenderer) Refresh() {
+	r.cell.text.Color = theme.ForegroundColor()
+	canvas.Refresh(r.cell.text)
+}
+
+func (c *clickableCell) CreateRenderer() fyne.WidgetRenderer {
+	return &clickableCellRenderer{cell: c}
+}
+
+func (c *clickableCell) Tapped(ev *fyne.PointEvent) {
+	state.TrackerTable.Select(c.cellID)
+}
+
+func (c *clickableCell) DoubleTapped(ev *fyne.PointEvent) {
+	state.TrackerTable.Select(c.cellID)
+	if c.cellID.Row > 0 && c.cellID.Row-1 < len(state.Applications) {
+		app := &state.Applications[c.cellID.Row-1]
+		openAddJobModal(app)
+	}
+}
+
+type tableTheme struct {
+	fyne.Theme
+}
+
+func (t *tableTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	if name == theme.ColorNameSeparator {
+		return color.Transparent
+	}
+	return t.Theme.Color(name, variant)
+}
+
+type statusCell struct {
+	widget.BaseWidget
+	text      *canvas.Text
+	arrow     *canvas.Text
+	cellID    widget.TableCellID
+	selected  string
+	onChanged func(string)
+}
+
+func newStatusCell() *statusCell {
+	sc := &statusCell{
+		text:  canvas.NewText("", theme.ForegroundColor()),
+		arrow: canvas.NewText("▼", theme.ForegroundColor()),
+	}
+	sc.text.TextSize = 12
+	sc.text.Alignment = fyne.TextAlignLeading
+	sc.arrow.TextSize = 8
+	sc.arrow.Alignment = fyne.TextAlignCenter
+	sc.ExtendBaseWidget(sc)
+	return sc
+}
+
+type statusCellRenderer struct {
+	cell *statusCell
+}
+
+func (r *statusCellRenderer) Destroy() {}
+func (r *statusCellRenderer) Layout(size fyne.Size) {
+	r.cell.text.Resize(fyne.NewSize(size.Width-20, size.Height-4))
+	r.cell.text.Move(fyne.NewPos(4, 2))
+
+	r.cell.arrow.Resize(fyne.NewSize(12, size.Height-4))
+	r.cell.arrow.Move(fyne.NewPos(size.Width-16, 2))
+}
+func (r *statusCellRenderer) MinSize() fyne.Size {
+	ts := r.cell.text.MinSize()
+	return fyne.NewSize(ts.Width+20, ts.Height)
+}
+func (r *statusCellRenderer) Objects() []fyne.CanvasObject {
+	return []fyne.CanvasObject{r.cell.text, r.cell.arrow}
+}
+func (r *statusCellRenderer) Refresh() {
+	r.cell.text.Color = theme.ForegroundColor()
+	r.cell.arrow.Color = theme.ForegroundColor()
+	canvas.Refresh(r.cell.text)
+	canvas.Refresh(r.cell.arrow)
+}
+
+func (sc *statusCell) CreateRenderer() fyne.WidgetRenderer {
+	return &statusCellRenderer{cell: sc}
+}
+
+func (sc *statusCell) Tapped(ev *fyne.PointEvent) {
+	state.TrackerTable.Select(sc.cellID)
+
+	statuses := []string{"Wishlist", "Applied", "Interviewing", "Offer", "Rejected", "Ghosted"}
+	var items []*fyne.MenuItem
+	for _, status := range statuses {
+		s := status
+		items = append(items, fyne.NewMenuItem(s, func() {
+			oldStatus := sc.selected
+			if oldStatus == s {
+				return // No change
+			}
+
+			sc.selected = s
+			sc.text.Text = s
+			sc.Refresh()
+
+			if sc.cellID.Row > 0 && sc.cellID.Row-1 < len(state.Applications) {
+				state.Applications[sc.cellID.Row-1].Status = s
+			}
+
+			// Optimistically refresh stats, selectors and list on main thread
+			refreshUI()
+
+			if sc.onChanged != nil {
+				sc.onChanged(s)
+			}
+		}))
+	}
+
+	menu := fyne.NewMenu("", items...)
+	popUp := widget.NewPopUpMenu(menu, state.Window.Canvas())
+	popUp.ShowAtPosition(ev.AbsolutePosition)
+}
+
+func (sc *statusCell) DoubleTapped(ev *fyne.PointEvent) {
+	state.TrackerTable.Select(sc.cellID)
+	if sc.cellID.Row > 0 && sc.cellID.Row-1 < len(state.Applications) {
+		app := &state.Applications[sc.cellID.Row-1]
+		openAddJobModal(app)
+	}
+}
+
+type trackerCell struct {
+	widget.BaseWidget
+	clickable *clickableCell
+	status    *statusCell
+	cellID    widget.TableCellID
+}
+
+func newTrackerCell() *trackerCell {
+	tc := &trackerCell{
+		clickable: newClickableCell(),
+		status:    newStatusCell(),
+	}
+	tc.ExtendBaseWidget(tc)
+	return tc
+}
+
+type trackerCellRenderer struct {
+	cell *trackerCell
+}
+
+func (r *trackerCellRenderer) Destroy() {}
+func (r *trackerCellRenderer) Layout(size fyne.Size) {
+	r.cell.clickable.Resize(size)
+	r.cell.clickable.Move(fyne.NewPos(0, 0))
+
+	r.cell.status.Resize(size)
+	r.cell.status.Move(fyne.NewPos(0, 0))
+}
+func (r *trackerCellRenderer) MinSize() fyne.Size {
+	return r.cell.clickable.MinSize()
+}
+func (r *trackerCellRenderer) Objects() []fyne.CanvasObject {
+	return []fyne.CanvasObject{r.cell.clickable, r.cell.status}
+}
+func (r *trackerCellRenderer) Refresh() {
+	r.cell.clickable.Refresh()
+	r.cell.status.Refresh()
+}
+
+func (tc *trackerCell) CreateRenderer() fyne.WidgetRenderer {
+	return &trackerCellRenderer{cell: tc}
+}
+
+type customTableLayout struct{}
+
+func (l *customTableLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	return fyne.NewSize(600, 300)
+}
+
+func (l *customTableLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	// Total width of other columns: 240 + 280 + 110 + 90 + 140 = 860
+	// 20px padding left for scrollbar and card borders
+	notesWidth := size.Width - 860 - 20
+	if notesWidth < 150 {
+		notesWidth = 150
+	}
+	if state.TrackerTable != nil {
+		state.TrackerTable.SetColumnWidth(5, notesWidth)
+	}
+	for _, o := range objects {
+		o.Resize(size)
+		o.Move(fyne.NewPos(0, 0))
+	}
+}
+
+var (
+	trackerStatusSelect       *widget.Select
+	trackerOpenResumeBtn      *widget.Button
+	trackerOpenCoverLetterBtn *widget.Button
+	isUpdatingTrackerDropdown bool
+)
+
 // 3. JOB TRACKER SPREADSHEET TABLE VIEW
 func buildTrackerTab() fyne.CanvasObject {
+	// Status select dropdown on toolbar
+	trackerStatusSelect = widget.NewSelect([]string{"Wishlist", "Applied", "Interviewing", "Offer", "Rejected", "Ghosted"}, func(selected string) {
+		if isUpdatingTrackerDropdown {
+			return
+		}
+		if state.TrackerSelected != nil && selected != "" && selected != state.TrackerSelected.Status {
+			go func() {
+				_, err := RunManageApplications("update", state.TrackerSelected.Company, state.TrackerSelected.Role, selected, "")
+				fyne.Do(func() {
+					if err != nil {
+						dialog.ShowError(err, state.Window)
+					} else {
+						reloadAllViews()
+					}
+				})
+			}()
+		}
+	})
+	trackerStatusSelect.PlaceHolder = "Change Status"
+
+	// Document opening buttons on toolbar
+	trackerOpenResumeBtn = widget.NewButtonWithIcon("Open Resume", theme.DocumentIcon(), func() {
+		if state.TrackerSelected != nil && state.TrackerSelected.Resume != "" {
+			resPath := filepath.Join(state.SaveFolder, state.TrackerSelected.Resume)
+			openLink("file:///" + filepath.ToSlash(resPath))
+		}
+	})
+	trackerOpenResumeBtn.Disable()
+
+	// Document opening buttons on toolbar
+	trackerOpenCoverLetterBtn = widget.NewButtonWithIcon("Open Cover Letter", theme.DocumentIcon(), func() {
+		if state.TrackerSelected != nil && state.TrackerSelected.CoverLetter != "" {
+			clPath := filepath.Join(state.SaveFolder, state.TrackerSelected.CoverLetter)
+			openLink("file:///" + filepath.ToSlash(clPath))
+		}
+	})
+	trackerOpenCoverLetterBtn.Disable()
+
 	// Table widget setup for spreadsheet-like grid layout
 	state.TrackerTable = widget.NewTable(
 		func() (int, int) {
-			return len(state.Applications) + 1, 8 // +1 for headers, 8 columns
+			return len(state.Applications) + 1, 6 // 6 columns
 		},
 		func() fyne.CanvasObject {
-			label := widget.NewLabel("Cell content")
-			label.Wrapping = fyne.TextWrapOff
-			return label
+			return newTrackerCell()
 		},
 		func(id widget.TableCellID, cell fyne.CanvasObject) {
-			label := cell.(*widget.Label)
+			tc := cell.(*trackerCell)
+			tc.cellID = id
+			tc.clickable.cellID = id
+			tc.status.cellID = id
+
 			if id.Row == 0 {
-				headers := []string{"Company", "Role", "Location", "Date", "Status", "Notes", "Resume", "Cover Letter"}
-				label.SetText(headers[id.Col])
-				label.TextStyle = fyne.TextStyle{Bold: true}
+				tc.clickable.Show()
+				tc.status.Hide()
+
+				t := tc.clickable.text
+				headers := []string{"Company", "Role", "Location", "Date", "Status", "Notes"}
+				t.Text = headers[id.Col]
+				t.TextStyle = fyne.TextStyle{Bold: true}
+				t.TextSize = 13 // slightly larger for headers
+				tc.clickable.Refresh()
 			} else {
 				if id.Row-1 < len(state.Applications) {
 					app := state.Applications[id.Row-1]
-					label.TextStyle = fyne.TextStyle{}
-					switch id.Col {
-					case 0:
-						label.SetText(app.Company)
-					case 1:
-						label.SetText(app.Role)
-					case 2:
-						label.SetText(app.Location)
-					case 3:
-						label.SetText(app.Date)
-					case 4:
-						label.SetText(app.Status)
-					case 5:
-						label.SetText(app.Notes)
-					case 6:
-						if app.Resume != "" {
-							label.SetText("📄 Open Resume")
-							label.TextStyle = fyne.TextStyle{Italic: true}
-						} else {
-							label.SetText("-")
+
+					if id.Col == 4 {
+						tc.clickable.Hide()
+						tc.status.Show()
+
+						tc.status.selected = app.Status
+						tc.status.text.Text = app.Status
+
+						compName := app.Company
+						roleName := app.Role
+						tc.status.onChanged = func(selected string) {
+							if selected != "" && selected != app.Status {
+								go func() {
+									_, err := RunManageApplications("update", compName, roleName, selected, "")
+									fyne.Do(func() {
+										if err != nil {
+											dialog.ShowError(err, state.Window)
+										} else {
+											reloadAllViews()
+										}
+									})
+								}()
+							}
 						}
-					case 7:
-						if app.CoverLetter != "" {
-							label.SetText("📄 Open Cover Letter")
-							label.TextStyle = fyne.TextStyle{Italic: true}
-						} else {
-							label.SetText("-")
+						tc.status.Refresh()
+					} else {
+						tc.clickable.Show()
+						tc.status.Hide()
+
+						t := tc.clickable.text
+						t.TextStyle = fyne.TextStyle{}
+						t.TextSize = 12 // compact size for data cells
+
+						switch id.Col {
+						case 0:
+							t.Text = app.Company
+						case 1:
+							t.Text = app.Role
+						case 2:
+							t.Text = app.Location
+						case 3:
+							t.Text = app.Date
+						case 5:
+							t.Text = app.Notes
 						}
+						tc.clickable.Refresh()
 					}
 				}
 			}
+			tc.Refresh()
 		},
 	)
 
 	// Set column widths to look like spreadsheet grid
-	state.TrackerTable.SetColumnWidth(0, 120)
-	state.TrackerTable.SetColumnWidth(1, 160)
-	state.TrackerTable.SetColumnWidth(2, 110)
-	state.TrackerTable.SetColumnWidth(3, 90)
-	state.TrackerTable.SetColumnWidth(4, 90)
-	state.TrackerTable.SetColumnWidth(5, 300) // wide Notes column
-	state.TrackerTable.SetColumnWidth(6, 140) // Resume link column
-	state.TrackerTable.SetColumnWidth(7, 140) // Cover Letter link column
+	state.TrackerTable.SetColumnWidth(0, 240) // Company (wider)
+	state.TrackerTable.SetColumnWidth(1, 280) // Role (wider)
+	state.TrackerTable.SetColumnWidth(2, 110) // Location
+	state.TrackerTable.SetColumnWidth(3, 90)  // Date
+	state.TrackerTable.SetColumnWidth(4, 140) // Status
+	state.TrackerTable.SetColumnWidth(5, 350) // Notes (wide Notes column)
 
 	state.TrackerTable.OnSelected = func(id widget.TableCellID) {
 		if id.Row > 0 && id.Row-1 < len(state.Applications) {
-			app := state.Applications[id.Row-1]
-			state.TrackerSelected = &app
 			state.SelectedAppIdx = id.Row - 1
-
-			// Check if Resume or Cover Letter columns are clicked to open files
-			if id.Col == 6 && app.Resume != "" {
-				resPath := filepath.Join(state.SaveFolder, app.Resume)
-				if _, err := os.Stat(resPath); err == nil {
-					openLink("file:///" + filepath.ToSlash(resPath))
-				} else {
-					dialog.ShowInformation("File not found", "Could not locate the tailored resume PDF. Make sure it exists in your save folder.", state.Window)
-				}
-			} else if id.Col == 7 && app.CoverLetter != "" {
-				clPath := filepath.Join(state.SaveFolder, app.CoverLetter)
-				if _, err := os.Stat(clPath); err == nil {
-					openLink("file:///" + filepath.ToSlash(clPath))
-				} else {
-					dialog.ShowInformation("File not found", "Could not locate the Cover Letter PDF. Make sure it exists in your save folder.", state.Window)
-				}
-			}
+			updateTrackerSelectionUI()
 		}
 	}
 
@@ -1227,7 +1572,7 @@ func buildTrackerTab() fyne.CanvasObject {
 		openAddJobModal(nil)
 	})
 
-	updateBtn := widget.NewButtonWithIcon("Update Status", theme.DocumentCreateIcon(), func() {
+	updateBtn := widget.NewButtonWithIcon("Update Details", theme.DocumentCreateIcon(), func() {
 		if state.TrackerSelected == nil {
 			dialog.ShowInformation("Selection Required", "Please select a job cell in the table first.", state.Window)
 			return
@@ -1258,12 +1603,23 @@ func buildTrackerTab() fyne.CanvasObject {
 		}()
 	})
 
-	controlBar := container.NewHBox(addBtn, updateBtn, syncBtn)
+	controlBar := container.NewHBox(
+		addBtn,
+		updateBtn,
+		syncBtn,
+		widget.NewSeparator(),
+		widget.NewLabel("Status:"),
+		trackerStatusSelect,
+		layout.NewSpacer(),
+		trackerOpenResumeBtn,
+		trackerOpenCoverLetterBtn,
+	)
 
-	tableCard := widget.NewCard("Job Tracker", "Click cells in standard columns to select application; click Resume/Cover Letter cells to open files.", state.TrackerTable)
-	tableContainer := container.NewBorder(nil, nil, nil, nil, tableCard)
+	tableContainer := container.New(&customTableLayout{}, state.TrackerTable)
+	tableCard := widget.NewCard("Job Tracker", "Select any row cell to open resume, cover letter, or edit details from the toolbar.", tableContainer)
+	cardContainer := container.NewBorder(nil, nil, nil, nil, tableCard)
 
-	return container.NewBorder(controlBar, nil, nil, nil, tableContainer)
+	return container.NewBorder(controlBar, nil, nil, nil, cardContainer)
 }
 
 func updateTrackerList() {
@@ -1671,7 +2027,7 @@ func showCard(idx int) {
 	state.CardIndicator.SetText(fmt.Sprintf("%d / %d", idx+1, len(state.Flashcards)))
 }
 
-// 6. SETTINGS VIEW WITH CREDITS AND HELP
+// 6. SETTINGS VIEW
 func buildSettingsTab() fyne.CanvasObject {
 	state.SettingsApiKey = widget.NewPasswordEntry()
 	state.SettingsEmail = widget.NewEntry()
@@ -1712,29 +2068,6 @@ func buildSettingsTab() fyne.CanvasObject {
 		widget.NewLabel("IMAP Server"), state.SettingsImapServer,
 	)
 
-	// Help and Documentation
-	helpDoc := widget.NewCard("LeGaJ Help & Documentation", "", container.NewVBox(
-		widget.NewLabel("1. Overview: Matches profile details to job postings, tailors experiences, drafts cover letters, and logs tracked row states locally."),
-		widget.NewLabel("2. Save Directory: Output PDFs (Resume/Cover Letter) compile into your Custom Save Folder (defaults to Google Drive)."),
-		widget.NewLabel("3. Templates: Formatting applies Times New Roman styling and strict single-page constraints."),
-	))
-
-	bookmarkletJs := `javascript:(function(){var c=document.querySelector(".job-details-jobs-unified-top-card__company-name")?.innerText||prompt("Company:"),r=document.querySelector(".job-details-jobs-unified-top-card__job-title")?.innerText||prompt("Role:"),l=document.querySelector(".job-details-jobs-unified-top-card__bullet")?.innerText||prompt("Location:"),d=document.querySelector("#job-details")?.innerText||"";if(!c||!r)return;fetch("http://localhost:8080/clip",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({company:c.trim(),role:r.trim(),location:(l||"").trim(),link:window.location.href,description:d.substring(0,300).trim()})}).then(res=>res.json()).then(data=>alert("Clipped to LeGaJ!")).catch(err=>alert("Error: "+err));})();`
-	bookmarkletEntry := widget.NewEntry()
-	bookmarkletEntry.SetText(bookmarkletJs)
-
-	bookmarkletCard := widget.NewCard("Clip to LeGaJ Browser Bookmarklet", "Copy the javascript below and add it as a browser bookmark URL:", container.NewVBox(
-		bookmarkletEntry,
-		widget.NewLabel("Click the bookmark on LinkedIn job listing pages to clip details directly into your dashboard."),
-	))
-
-	securityCard := widget.NewCard("Security & Ethics Disclosure", "", container.NewVBox(
-		widget.NewLabel("• LeGaJ operates 100% locally. Your PII (name, email, phone) and Gemini API Keys are kept on your machine."),
-		widget.NewLabel("• The application NEVER auto-submits applications. It compiles PDFs for you to review and apply yourself."),
-		widget.NewLabel("• AI features are used solely for structuring profile fields, tailoring resume bullets, and drafting cover letters."),
-	))
-
-	// Hyperlinked Creator Credits
 	githubBtn := widget.NewButtonWithIcon("GitHub: /bot-bbio", theme.HelpIcon(), func() {
 		openLink("https://github.com/bot-bbio")
 	})
@@ -1753,9 +2086,53 @@ func buildSettingsTab() fyne.CanvasObject {
 		form,
 		container.NewHBox(saveBtn, wizardBtn),
 		widget.NewSeparator(),
+		creditsRow,
+	)
+
+	return container.NewScroll(content)
+}
+
+// 7. HELP & DOCUMENTATION VIEW
+func buildHelpTab() fyne.CanvasObject {
+	helpDoc := widget.NewCard("LeGaJ Help & Documentation", "", container.NewVBox(
+		widget.NewLabel("1. Overview: Matches profile details to job postings, tailors experiences, drafts cover letters, and logs tracked row states locally."),
+		widget.NewLabel("2. Save Directory: Output PDFs (Resume/Cover Letter) compile into your Custom Save Folder (defaults to Google Drive)."),
+		widget.NewLabel("3. Templates: Formatting applies Times New Roman styling and strict single-page constraints."),
+	))
+
+	bookmarkletJs := `javascript:(function(){var c=document.querySelector(".job-details-jobs-unified-top-card__company-name")?.innerText||prompt("Company:"),r=document.querySelector(".job-details-jobs-unified-top-card__job-title")?.innerText||prompt("Role:"),l=document.querySelector(".job-details-jobs-unified-top-card__bullet")?.innerText||prompt("Location:"),d=document.querySelector("#job-details")?.innerText||"";if(!c||!r)return;fetch("http://localhost:8080/clip",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({company:c.trim(),role:r.trim(),location:(l||"").trim(),link:window.location.href,description:d.substring(0,300).trim()})}).then(res=>res.json()).then(data=>alert("Clipped to LeGaJ!")).catch(err=>alert("Error: "+err));})();`
+	bookmarkletEntry := widget.NewEntry()
+	bookmarkletEntry.SetText(bookmarkletJs)
+
+	bookmarkletCard := widget.NewCard("Clip to LeGaJ Browser Bookmarklet", "Copy the javascript below and add it as a browser bookmark URL:", container.NewVBox(
+		bookmarkletEntry,
+		widget.NewLabel("Click the bookmark on LinkedIn job listing pages to clip details directly into your dashboard."),
+	))
+
+	securityCard := widget.NewCard("Security & Ethics Disclosure", "", container.NewVBox(
+		widget.NewLabel("AI and the Internet are inherently dangerous. Any tool that inputs unverified information from the web is vulnerable to prompt injection. Use at your own risk."),
+		widget.NewLabel("• LeGaJ operates 100% locally. Your PII (name, email, phone) and Gemini API Keys are kept on your machine."),
+		widget.NewLabel("• The application NEVER auto-submits applications. It compiles PDFs for you to review and apply yourself."),
+		widget.NewLabel("• AI features are used solely for structuring profile fields, tailoring resume bullets, and drafting cover letters."),
+	))
+
+	githubBtn := widget.NewButtonWithIcon("GitHub: /bot-bbio", theme.HelpIcon(), func() {
+		openLink("https://github.com/bot-bbio")
+	})
+	linkedinBtn := widget.NewButtonWithIcon("LinkedIn: /alvvays", theme.HelpIcon(), func() {
+		openLink("https://linkedin.com/in/alvvays")
+	})
+	creditsRow := container.NewHBox(
+		widget.NewLabel("Credits:"),
+		githubBtn,
+		linkedinBtn,
+	)
+
+	content := container.NewVBox(
+		canvas.NewText("Help & Documentation", theme.PrimaryColor()),
+		securityCard,
 		helpDoc,
 		bookmarkletCard,
-		securityCard,
 		widget.NewSeparator(),
 		creditsRow,
 	)
@@ -1884,12 +2261,16 @@ func showOnboardingWizard() {
 	emailEntry := widget.NewEntry()
 	phoneEntry := widget.NewEntry()
 	locEntry := widget.NewEntry()
+	linkedinEntry := widget.NewEntry()
+	websiteEntry := widget.NewEntry()
 
 	step3Form := container.New(layout.NewFormLayout(),
 		widget.NewLabel("Full Name"), nameEntry,
 		widget.NewLabel("Email Address"), emailEntry,
 		widget.NewLabel("Phone Number"), phoneEntry,
 		widget.NewLabel("Location"), locEntry,
+		widget.NewLabel("LinkedIn Link"), linkedinEntry,
+		widget.NewLabel("Portfolio/Website"), websiteEntry,
 	)
 
 	step3 := container.NewVBox(
@@ -1964,6 +2345,8 @@ func showOnboardingWizard() {
 		emailEntry.SetText("")
 		phoneEntry.SetText("")
 		locEntry.SetText("")
+		linkedinEntry.SetText("")
+		websiteEntry.SetText("")
 	}
 	bypassBtn.OnTapped = bypassAction
 
@@ -2066,6 +2449,8 @@ Resume Text:
 					emailEntry.SetText(state.Profile.PersonalInfo.Email)
 					phoneEntry.SetText(state.Profile.PersonalInfo.Phone)
 					locEntry.SetText(state.Profile.PersonalInfo.Location)
+					linkedinEntry.SetText(state.Profile.PersonalInfo.Linkedin)
+					websiteEntry.SetText(state.Profile.PersonalInfo.Website)
 
 					if state.Profile.PersonalInfo.Email == "" {
 						emailEntry.SetPlaceHolder("Warning: Missing email address")
@@ -2088,6 +2473,8 @@ Resume Text:
 			state.Profile.PersonalInfo.Email = emailEntry.Text
 			state.Profile.PersonalInfo.Phone = phoneEntry.Text
 			state.Profile.PersonalInfo.Location = locEntry.Text
+			state.Profile.PersonalInfo.Linkedin = linkedinEntry.Text
+			state.Profile.PersonalInfo.Website = websiteEntry.Text
 
 			if len(state.Profile.TargetRoles) == 0 {
 				state.Profile.TargetRoles = []string{roleEntry.Text}
@@ -2276,13 +2663,13 @@ Output ONLY the cover letter text, no conversational intro or outro.`, role, com
 // FILE MANAGER VIEW & NAVIGATION
 // -------------------------------------------------------------
 var (
-	fmCurrentDir    string
-	fmHistory       []string
-	fmExplorerBox   *fyne.Container
-	fmPreviewBox    *fyne.Container
-	fmPathLabel     *widget.Label
-	fmGridViewMode  = false
-	fmSelectedFile  string
+	fmCurrentDir   string
+	fmHistory      []string
+	fmExplorerBox  *fyne.Container
+	fmPreviewBox   *fyne.Container
+	fmPathLabel    *widget.Label
+	fmGridViewMode = false
+	fmSelectedFile string
 )
 
 func selectFileManagerFile(filename string) {
@@ -2393,78 +2780,46 @@ func refreshFileManager() {
 	}
 
 	fmExplorerBox.Objects = nil
-	if fmGridViewMode {
-		gridContainer := container.New(layout.NewGridWrapLayout(fyne.NewSize(130, 150)))
-		for _, entry := range allEntries {
-			e := entry
-			name := e.Name()
-			isDir := e.IsDir()
+	for _, entry := range allEntries {
+		e := entry
+		name := e.Name()
+		isDir := e.IsDir()
 
-			icon := theme.DocumentIcon()
-			if isDir {
-				icon = theme.FolderIcon()
-			}
-
-			iconWidget := widget.NewIcon(icon)
-			nameLabel := widget.NewLabel(name)
-			nameLabel.Alignment = fyne.TextAlignCenter
-			nameLabel.Wrapping = fyne.TextWrapOff
-
-			cardContent := container.NewVBox(
-				container.NewCenter(iconWidget),
-				nameLabel,
-			)
-
-			btn := widget.NewButton("", func() {
-				if isDir {
-					fmHistory = append(fmHistory, fmCurrentDir)
-					fmCurrentDir = filepath.Join(fmCurrentDir, name)
-					refreshFileManager()
-				} else {
-					selectFileManagerFile(name)
-				}
-			})
-
-			card := widget.NewCard("", "", container.NewMax(cardContent, btn))
-			gridContainer.Add(container.NewPadded(card))
+		icon := theme.DocumentIcon()
+		if isDir {
+			icon = theme.FolderIcon()
 		}
-		fmExplorerBox.Add(gridContainer)
-	} else {
-		for _, entry := range allEntries {
-			e := entry
-			name := e.Name()
-			isDir := e.IsDir()
 
-			icon := theme.DocumentIcon()
-			if isDir {
-				icon = theme.FolderIcon()
-			}
+		iconWidget := widget.NewIcon(icon)
+		nameLabel := widget.NewLabel(name)
 
-			iconWidget := widget.NewIcon(icon)
-			nameLabel := widget.NewLabel(name)
+		row := container.NewHBox(
+			iconWidget,
+			nameLabel,
+			layout.NewSpacer(),
+		)
 
-			row := container.NewHBox(
-				iconWidget,
-				nameLabel,
-				layout.NewSpacer(),
-			)
-
-			btnText := "Open"
-			if !isDir {
-				btnText = "View"
-			}
-			btn := widget.NewButtonWithIcon(btnText, icon, func() {
-				if isDir {
-					fmHistory = append(fmHistory, fmCurrentDir)
-					fmCurrentDir = filepath.Join(fmCurrentDir, name)
-					refreshFileManager()
-				} else {
-					selectFileManagerFile(name)
-				}
-			})
-			row.Add(btn)
-			fmExplorerBox.Add(row)
+		btnText := "Open"
+		if !isDir {
+			btnText = "View"
 		}
+		btn := widget.NewButtonWithIcon(btnText, icon, func() {
+			if isDir {
+				fmHistory = append(fmHistory, fmCurrentDir)
+				fmCurrentDir = filepath.Join(fmCurrentDir, name)
+				refreshFileManager()
+			} else {
+				selectFileManagerFile(name)
+			}
+		})
+		row.Add(btn)
+
+		// Add an 8px transparent spacer to prevent clipping the adjustable split bar
+		fmSpacer := canvas.NewRectangle(color.Transparent)
+		fmSpacer.SetMinSize(fyne.NewSize(8, 0))
+		row.Add(fmSpacer)
+
+		fmExplorerBox.Add(row)
 	}
 	fmExplorerBox.Refresh()
 }
@@ -2486,11 +2841,6 @@ func buildFileManagerTab() fyne.CanvasObject {
 		}
 	})
 
-	toggleBtn := widget.NewButtonWithIcon("", theme.GridIcon(), func() {
-		fmGridViewMode = !fmGridViewMode
-		refreshFileManager()
-	})
-
 	refreshBtn := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), func() {
 		refreshFileManager()
 	})
@@ -2498,7 +2848,6 @@ func buildFileManagerTab() fyne.CanvasObject {
 	toolbar := container.NewHBox(
 		backBtn,
 		refreshBtn,
-		toggleBtn,
 		fmPathLabel,
 	)
 

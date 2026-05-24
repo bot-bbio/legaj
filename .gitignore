@@ -25,6 +25,7 @@ token.json
 
 # Local job tracker data (to prevent leaking personal applications)
 references/job-tracker.xlsx
+references/job-tracker.json
 outputs/
 
 # AI instruction docs (never commit)
@@ -34,3 +35,4 @@ new requirements.md
 # OS specific files
 .DS_Store
 Thumbs.db
+scratch/

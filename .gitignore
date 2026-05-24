@@ -32,6 +32,9 @@ outputs/
 legac docs new.md
 new requirements.md
 
+# Security audit — never commit
+SECURITY_AUDIT.md
+
 # OS specific files
 .DS_Store
 Thumbs.db

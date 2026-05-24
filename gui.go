@@ -527,7 +527,7 @@ func buildDashboardTab() fyne.CanvasObject {
 
 	searchBtn := widget.NewButtonWithIcon("Find Jobs", theme.SearchIcon(), func() {
 		if searchKeyword.Text == "" || searchLocation.Text == "" {
-			dialog.ShowInformation("Required Info", "Please enter job keyword and location.", state.Window)
+			dialog.ShowInformation("Required Info", "Please enter a job keyword and location.", state.Window)
 			return
 		}
 		if state.ApiKey == "" {
@@ -535,43 +535,26 @@ func buildDashboardTab() fyne.CanvasObject {
 			return
 		}
 
-		progress := dialog.NewProgressInfinite("Searching Active Jobs", "Querying Google Search via Gemini Grounding — verifying links...", state.Window)
+		progress := dialog.NewProgressInfinite("Searching Active Jobs", "Querying Google via Gemini Search Grounding...", state.Window)
 		progress.Show()
 
 		go func() {
-			prompt := fmt.Sprintf(`You are a job search assistant with Google Search access.
+			prompt := fmt.Sprintf(`Search Google right now for active job postings matching "%s" in "%s".
 
-Search for ACTIVE job postings for "%s" in "%s" right now. Use Google Search to find real, current listings posted within the last 30 days from job boards such as LinkedIn, Indeed, Glassdoor, Greenhouse, Lever, Workday, and direct company career pages.
+Find real, current job listings from sites like LinkedIn, Indeed, Glassdoor, Greenhouse, Lever, and company career pages.
 
-Return EXACTLY 10 job postings. For each posting you MUST provide the full, direct, working URL to the job application page — not the homepage of the company, not a search results page, but the specific job listing URL.
+Return a JSON array. Each item must have:
+- "company": company name
+- "role": exact job title
+- "location": city/state or Remote
+- "link": the direct URL to the job listing (must start with https://)
+- "description": one sentence describing the key skills needed
 
-Return a JSON array with exactly this structure, no other text:
-[
-  {
-    "company": "Company Name",
-    "role": "Exact Job Title",
-    "location": "City, State or Remote",
-    "link": "https://full-direct-url-to-job-listing",
-    "description": "One sentence summarizing the key skills and responsibilities required."
-  }
-]
+Return only valid JSON, no extra text.`, searchKeyword.Text, searchLocation.Text)
 
-Rules:
-- Every link must be a real, complete URL starting with https://
-- Do not include placeholder, example, or made-up URLs
-- Prefer LinkedIn Easy Apply or Greenhouse/Lever links as they are most reliable
-- If you cannot find 10 real listings, return as many verified ones as you can find`, searchKeyword.Text, searchLocation.Text)
+			resJson, apiErr := callGeminiWithSearchGo(state.ApiKey, prompt)
 
-			resJson, err := callGeminiWithSearchGo(state.ApiKey, prompt)
-			if err != nil {
-				fyne.Do(func() {
-					progress.Hide()
-					dialog.ShowError(err, state.Window)
-				})
-				return
-			}
-
-			// Extract JSON array from response
+			// Parse JSON — extract array regardless of markdown wrapping
 			cleanJson := strings.TrimSpace(resJson)
 			if idx := strings.Index(cleanJson, "["); idx >= 0 {
 				cleanJson = cleanJson[idx:]
@@ -588,76 +571,62 @@ Rules:
 				Description string `json:"description"`
 			}
 
-			var rawResults []JobResult
-			err = json.Unmarshal([]byte(cleanJson), &rawResults)
-			if err != nil {
-				fyne.Do(func() {
-					progress.Hide()
-					dialog.ShowError(fmt.Errorf("Failed to parse search results.\n\nRaw response:\n%s\n\nError: %v", resJson, err), state.Window)
-				})
-				return
-			}
+			var results []JobResult
+			parseErr := json.Unmarshal([]byte(cleanJson), &results)
 
-			// Verify each link concurrently with a 5-second timeout
-			type verifiedResult struct {
+			// If we have results, verify links in the background before touching UI
+			type taggedResult struct {
 				job   JobResult
 				alive bool
 			}
+			var tagged []taggedResult
 
-			httpClient := &http.Client{
-				Timeout: 5 * time.Second,
-				CheckRedirect: func(req *http.Request, via []*http.Request) error {
-					if len(via) >= 5 {
-						return fmt.Errorf("too many redirects")
-					}
-					return nil
-				},
-			}
-
-			verifyCh := make(chan verifiedResult, len(rawResults))
-			for _, job := range rawResults {
-				j := job
-				go func() {
-					alive := false
-					if j.Link != "" && strings.HasPrefix(j.Link, "http") {
-						// Try HEAD first, fall back to GET if server rejects HEAD
-						resp, err := httpClient.Head(j.Link)
-						if err != nil || resp.StatusCode >= 400 {
-							resp2, err2 := httpClient.Get(j.Link)
-							if err2 == nil && resp2.StatusCode < 400 {
-								resp2.Body.Close()
+			if apiErr == nil && parseErr == nil && len(results) > 0 {
+				verifyCh := make(chan taggedResult, len(results))
+				httpClient := &http.Client{Timeout: 5 * time.Second}
+				for _, job := range results {
+					j := job
+					go func() {
+						alive := false
+						if strings.HasPrefix(j.Link, "http") {
+							resp, err := httpClient.Head(j.Link)
+							if err == nil && resp.StatusCode < 400 {
+								resp.Body.Close()
 								alive = true
+							} else {
+								resp2, err2 := httpClient.Get(j.Link)
+								if err2 == nil {
+									resp2.Body.Close()
+									alive = resp2.StatusCode < 400
+								}
 							}
-						} else {
-							resp.Body.Close()
-							alive = true
 						}
-					}
-					verifyCh <- verifiedResult{job: j, alive: alive}
-				}()
-			}
-
-			var verified []JobResult
-			for range rawResults {
-				v := <-verifyCh
-				if v.alive {
-					verified = append(verified, v.job)
+						verifyCh <- taggedResult{job: j, alive: alive}
+					}()
+				}
+				for range results {
+					tagged = append(tagged, <-verifyCh)
 				}
 			}
 
+			// All heavy work done — now update UI on main thread
 			fyne.Do(func() {
 				progress.Hide()
-
 				state.SearchResultsBox.Objects = nil
 
-				if len(verified) == 0 {
-					state.SearchResultsBox.Add(widget.NewLabel("No verified live job postings found. Try adjusting your keywords or location."))
+				if apiErr != nil {
+					state.SearchResultsBox.Add(widget.NewLabel(fmt.Sprintf("Search error: %v", apiErr)))
+					state.SearchResultsBox.Refresh()
+					return
+				}
+				if parseErr != nil || len(results) == 0 {
+					state.SearchResultsBox.Add(widget.NewLabel("No results returned. Try different keywords or location."))
 					state.SearchResultsBox.Refresh()
 					return
 				}
 
-				for _, res := range verified {
-					r := res
+				for _, t := range tagged {
+					r := t.job
 					compLabel := widget.NewLabelWithStyle(r.Company, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 					roleLabel := widget.NewLabel(fmt.Sprintf("%s  ·  %s", r.Role, r.Location))
 					descLabel := widget.NewLabel(r.Description)
@@ -666,16 +635,19 @@ Rules:
 					openBtn := widget.NewButtonWithIcon("View Posting", theme.HelpIcon(), func() {
 						openLink(r.Link)
 					})
-
 					trackTailorBtn := widget.NewButtonWithIcon("Track & Tailor", theme.DocumentCreateIcon(), func() {
 						runTrackAndTailorAutomation(r.Company, r.Role, r.Location, r.Link, r.Description)
 					})
 					trackTailorBtn.Importance = widget.HighImportance
 
-					verifiedBadge := widget.NewLabelWithStyle("✓ Verified", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+					header := container.NewHBox(compLabel)
+					if t.alive {
+						badge := widget.NewLabelWithStyle("✓ Verified", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+						header = container.NewHBox(compLabel, layout.NewSpacer(), badge)
+					}
 
 					cardContent := container.NewVBox(
-						container.NewHBox(compLabel, layout.NewSpacer(), verifiedBadge),
+						header,
 						roleLabel,
 						descLabel,
 						container.NewHBox(openBtn, trackTailorBtn),

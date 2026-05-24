@@ -111,12 +111,12 @@ func handleParseResumeCmd() {
 
 		profile := map[string]interface{}{
 			"personal_info": map[string]string{
-				"name":     "Roberto Montero",
-				"email":    "0.Roberto.Montero@gmail.com",
-				"phone":    "813.597.5308",
-				"location": "Bronx, NY",
-				"linkedin": "linkedin.com/in/roberto-montero",
-				"website":  "robertomontero.dev",
+				"name":     "[Full Name]",
+				"email":    "[Email Address]",
+				"phone":    "[Phone Number]",
+				"location": "[City, State]",
+				"linkedin": "[LinkedIn URL]",
+				"website":  "[Website/Portfolio URL]",
 			},
 			"target_roles": []string{"Product Manager"},
 			"education": []map[string]string{

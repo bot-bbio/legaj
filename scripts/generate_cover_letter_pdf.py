@@ -24,10 +24,8 @@ def create_cover_letter_pdf(profile_path, draft_text_path, output_path):
         print(f"Error loading draft text: {str(e)}")
         sys.exit(1)
         
-    doc = SimpleDocTemplate(output_path, pagesize=letter,
-                            rightMargin=72, leftMargin=72,  # 1 inch margins
-                            topMargin=72, bottomMargin=72)
-    
+
+def generate_cl_elements(profile, draft_text, name, contact_str, pr):
     styles = getSampleStyleSheet()
     
     # Header Styles
@@ -35,7 +33,7 @@ def create_cover_letter_pdf(profile_path, draft_text_path, output_path):
         'HeaderName',
         parent=styles['Normal'],
         fontName='Times-Bold',
-        fontSize=12,
+        fontSize=pr["name_size"],
         alignment=1, # Center
         spaceAfter=2
     )
@@ -44,44 +42,35 @@ def create_cover_letter_pdf(profile_path, draft_text_path, output_path):
         'HeaderInfo',
         parent=styles['Normal'],
         fontName='Times-Roman',
-        fontSize=11,
+        fontSize=pr["info_size"],
         alignment=1, # Center
         spaceAfter=12
     )
     
-    # Body Style (Times-Roman, 11pt, Double-spaced 22pt leading)
+    # Body Style
     body_style = ParagraphStyle(
         'BodyStyle',
         parent=styles['Normal'],
         fontName='Times-Roman',
-        fontSize=11,
-        leading=22, # exactly 22pt leading
+        fontSize=pr["base_size"],
+        leading=pr["leading"],
         alignment=0, # Left
-        spaceAfter=12
+        spaceAfter=pr["space_after"]
     )
     
     recipient_style = ParagraphStyle(
         'RecipientStyle',
         parent=styles['Normal'],
         fontName='Times-Roman',
-        fontSize=11,
-        leading=14,
+        fontSize=pr["base_size"],
+        leading=pr["base_size"] * 1.2,
         alignment=0,
         spaceAfter=2
     )
     
     elements = []
     
-    # Parse User Info for Header
-    info = profile.get("personal_info", {})
-    name = info.get("name", "Roberto Montero")
-    
-    contact_parts = []
-    if info.get("email"): contact_parts.append(info["email"])
-    if info.get("phone"): contact_parts.append(info["phone"])
-    if info.get("location"): contact_parts.append(info["location"])
-    
-    contact_str = " | ".join(contact_parts)
+
     
     # Add Header
     elements.append(Paragraph(name, header_name_style))
@@ -101,7 +90,7 @@ def create_cover_letter_pdf(profile_path, draft_text_path, output_path):
                 para_text = " ".join(current_para_lines)
                 if in_body:
                     # Check if this is the signature/name
-                    if para_text == name or para_text == "Roberto Montero":
+                    if para_text == name or para_text == "Roberto Montero" or para_text == "[Full Name]":
                         elements.append(Spacer(1, 22)) # two blank lines before name
                         elements.append(Paragraph(para_text, body_style))
                     else:
@@ -132,8 +121,8 @@ def create_cover_letter_pdf(profile_path, draft_text_path, output_path):
     if current_para_lines:
         para_text = " ".join(current_para_lines)
         if in_body:
-            if para_text == name or para_text == "Roberto Montero":
-                elements.append(Spacer(1, 22))
+            if para_text == name or para_text == "Roberto Montero" or para_text == "[Full Name]":
+                elements.append(Spacer(1, pr["leading"]))
                 elements.append(Paragraph(para_text, body_style))
             else:
                 elements.append(Paragraph(para_text, body_style))
@@ -141,9 +130,56 @@ def create_cover_letter_pdf(profile_path, draft_text_path, output_path):
             for l in current_para_lines:
                 elements.append(Paragraph(l, recipient_style))
                 
-    doc.build(elements)
-    print(f"Successfully generated Cover Letter PDF: {output_path}")
+    return elements
+
+def create_cover_letter_pdf(profile_path, draft_text_path, output_path):
+    try:
+        with open(profile_path, 'r', encoding='utf-8') as f:
+            profile = json.load(f)
+    except Exception as e:
+        print(f"Error loading profile: {str(e)}")
+        sys.exit(1)
+        
+    try:
+        with open(draft_text_path, 'r', encoding='utf-8') as f:
+            draft_text = f.read()
+    except Exception as e:
+        print(f"Error loading draft text: {str(e)}")
+        sys.exit(1)
+
+    info = profile.get("personal_info", {})
+    name = info.get("name", "[Full Name]")
     
+    contact_parts = []
+    if info.get("email"): contact_parts.append(info["email"])
+    if info.get("phone"): contact_parts.append(info["phone"])
+    if info.get("location"): contact_parts.append(info["location"])
+    contact_str = " | ".join(contact_parts)
+
+    presets = [
+        {"base_size": 11, "leading": 14.5, "name_size": 13, "info_size": 10, "margin": 72, "space_after": 12},  # Standard
+        {"base_size": 10.5, "leading": 14, "name_size": 12.5, "info_size": 9.5, "margin": 60, "space_after": 10},  # Compact
+        {"base_size": 10, "leading": 13.5, "name_size": 12, "info_size": 9, "margin": 50, "space_after": 8},  # Compressed
+        {"base_size": 9.5, "leading": 12.5, "name_size": 11.5, "info_size": 8.5, "margin": 40, "space_after": 6},  # Max Compressed
+    ]
+
+    success = False
+    for idx, pr in enumerate(presets):
+        doc = SimpleDocTemplate(output_path, pagesize=letter,
+                                rightMargin=pr["margin"], leftMargin=pr["margin"],
+                                topMargin=pr["margin"], bottomMargin=pr["margin"])
+        
+        elements = generate_cl_elements(profile, draft_text, name, contact_str, pr)
+        doc.build(elements)
+        
+        if doc.page == 1:
+            print(f"Successfully generated 1-page Cover Letter PDF at: {output_path} (preset {idx+1})")
+            success = True
+            break
+
+    if not success:
+        print(f"Warning: Cover Letter exceeded 1 page ({doc.page} pages) even with maximum visual lock compression.")
+        
     # Save a copy to G Drive if available
     gdrive_dir = r"G:\My Drive\Personal Labour Mobile\Cover Letter PDFs\AI Cover Letters"
     if os.path.exists(gdrive_dir):

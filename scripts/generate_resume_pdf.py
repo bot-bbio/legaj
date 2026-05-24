@@ -6,13 +6,13 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
-def generate_elements(profile, base_font_size, leading, spacer_height):
+def generate_elements(profile, base_font_size, leading, spacer_height, printable_width):
     styles = getSampleStyleSheet()
     
     # Proportional font sizes based on base_font_size
     name_size = base_font_size + 8.5
     contact_size = base_font_size
-    section_size = base_font_size + 2.0
+    section_size = base_font_size + 1.5
     item_header_size = base_font_size + 0.5
     body_size = base_font_size
     
@@ -44,8 +44,9 @@ def generate_elements(profile, base_font_size, leading, spacer_height):
         fontSize=section_size,
         leading=section_size * 1.2,
         spaceBefore=6,
-        spaceAfter=1,
-        textColor=colors.HexColor("#1A365D") # Dark Blue
+        spaceAfter=2,
+        alignment=1, # Center
+        textColor=colors.HexColor("#000000") # Black
     )
     
     item_header_style = ParagraphStyle(
@@ -88,27 +89,25 @@ def generate_elements(profile, base_font_size, leading, spacer_height):
 
     elements = []
     
-    # 1. Header
+    # 1. Header (Centered, bold name, followed by phone | email | socials - no location)
     info = profile.get("personal_info", {})
     elements.append(Paragraph(info.get("name", ""), name_style))
     
     contact_parts = []
-    if info.get("location"): contact_parts.append(info["location"])
-    if info.get("email"): contact_parts.append(info["email"])
     if info.get("phone"): contact_parts.append(info["phone"])
+    if info.get("email"): contact_parts.append(info["email"])
     if info.get("linkedin"): contact_parts.append(info["linkedin"])
     if info.get("website"): contact_parts.append(info["website"])
     
-    contact_str = "  |  ".join(contact_parts)
+    contact_str = " | ".join(contact_parts)
     elements.append(Paragraph(contact_str, contact_style))
     
-    # Helper for horizontal lines
     def draw_section_line(title):
         elements.append(Paragraph(title.upper(), section_title_style))
-        # Use a table to draw a solid thin border line
-        line_table = Table([[""]], colWidths=[540], rowHeights=[1])
+        # Use a table to draw a solid thin black border line matching printable width
+        line_table = Table([[""]], colWidths=[printable_width], rowHeights=[1])
         line_table.setStyle(TableStyle([
-            ('LINEBELOW', (0,0), (-1,-1), 0.75, colors.HexColor("#A0AEC0")),
+            ('LINEBELOW', (0,0), (-1,-1), 1.0, colors.HexColor("#000000")),
             ('BOTTOMPADDING', (0,0), (-1,-1), 0),
             ('TOPPADDING', (0,0), (-1,-1), 0),
         ]))
@@ -125,11 +124,11 @@ def generate_elements(profile, base_font_size, leading, spacer_height):
             role = exp.get("role", "")
             loc = exp.get("location", "")
 
-            # Line 1: Company (Left) and Location (Right)
+            # Line 1: Company (Left) and Location (Right) - Both Bold
             company_para = Paragraph(f"<b>{company}</b>", item_header_style)
-            loc_para = Paragraph(loc, ParagraphStyle('RightLoc', parent=body_style, alignment=2))
+            loc_para = Paragraph(f"<b>{loc}</b>", ParagraphStyle('RightLoc', parent=item_header_style, alignment=2))
             
-            line1_table = Table([[company_para, loc_para]], colWidths=[380, 160])
+            line1_table = Table([[company_para, loc_para]], colWidths=[printable_width * 0.72, printable_width * 0.28])
             line1_table.setStyle(TableStyle([
                 ('VALIGN', (0,0), (-1,-1), 'BOTTOM'),
                 ('LEFTPADDING', (0,0), (-1,-1), 0),
@@ -143,7 +142,7 @@ def generate_elements(profile, base_font_size, leading, spacer_height):
             role_para = Paragraph(f"<i>{role}</i>", item_subheader_style)
             dates_para = Paragraph(dates, ParagraphStyle('RightDate', parent=item_subheader_style, alignment=2))
             
-            line2_table = Table([[role_para, dates_para]], colWidths=[380, 160])
+            line2_table = Table([[role_para, dates_para]], colWidths=[printable_width * 0.72, printable_width * 0.28])
             line2_table.setStyle(TableStyle([
                 ('VALIGN', (0,0), (-1,-1), 'TOP'),
                 ('LEFTPADDING', (0,0), (-1,-1), 0),
@@ -157,28 +156,26 @@ def generate_elements(profile, base_font_size, leading, spacer_height):
                 elements.append(Paragraph(f"&bull;&nbsp;&nbsp;{bullet}", bullet_style))
             elements.append(Spacer(1, spacer_height))
             
-    # 3. Projects Section
-    projects = profile.get("projects", [])
-    if projects:
-        draw_section_line("Projects")
-        for proj in projects:
-            name = proj.get("name", "")
-            tech = f"({', '.join(proj.get('technologies', []))})" if proj.get('technologies') else ""
-            desc = proj.get("description", "")
-            details = proj.get("details", "")
-            
-            proj_title = f"<b>{name}</b> {tech}" if tech else f"<b>{name}</b>"
-            elements.append(Paragraph(proj_title, item_header_style))
-            if desc:
-                elements.append(Paragraph(desc, body_style))
-            if details:
-                elements.append(Paragraph(f"&bull;&nbsp;&nbsp;{details}", bullet_style))
-            elements.append(Spacer(1, spacer_height))
-
-    # 4. Education Section
+    # 3. Education and Research Section (Unified Section)
     education = profile.get("education", [])
-    if education:
-        draw_section_line("Education")
+    projects = profile.get("projects", [])
+    
+    # Filter projects to check if they look like research/publications
+    research_projects = []
+    other_projects = []
+    for p in projects:
+        p_name = p.get("name", "").lower()
+        if "research" in p_name or "presentation" in p_name or "publication" in p_name or p.get("details"):
+            research_projects.append(p)
+        else:
+            other_projects.append(p)
+
+    if education or research_projects:
+        if research_projects:
+            draw_section_line("Education and Research")
+        else:
+            draw_section_line("Education")
+            
         for edu in education:
             inst = edu.get("institution", "")
             deg = f"{edu.get('degree', '')} in {edu.get('major', '')}"
@@ -187,13 +184,11 @@ def generate_elements(profile, base_font_size, leading, spacer_height):
             gpa = f"GPA: {edu.get('gpa')}" if edu.get('gpa') else ""
             
             edu_header_text = f"<b>{inst}</b>"
-            if loc:
-                edu_header_text += f" - {loc}"
+            edu_loc_para = Paragraph(f"<b>{loc}</b>", ParagraphStyle('RightEduLoc', parent=item_header_style, alignment=2)) if loc else Paragraph("", item_header_style)
                 
             edu_table = Table(
-                [[Paragraph(edu_header_text, item_header_style), 
-                  Paragraph(dates, ParagraphStyle('RightEduDate', parent=item_header_style, alignment=2))]],
-                colWidths=[400, 140]
+                [[Paragraph(edu_header_text, item_header_style), edu_loc_para]],
+                colWidths=[printable_width * 0.72, printable_width * 0.28]
             )
             edu_table.setStyle(TableStyle([
                 ('VALIGN', (0,0), (-1,-1), 'BOTTOM'),
@@ -207,13 +202,51 @@ def generate_elements(profile, base_font_size, leading, spacer_height):
             deg_text = deg
             if gpa:
                 deg_text += f" ({gpa})"
-            elements.append(Paragraph(deg_text, item_subheader_style))
-            
             if edu.get("details"):
-                elements.append(Paragraph(edu.get("details"), body_style))
+                deg_text += f", {edu.get('details')}"
+            
+            line2_table = Table(
+                [[Paragraph(f"<i>{deg_text}</i>", item_subheader_style), 
+                  Paragraph(f"<i>{dates}</i>", ParagraphStyle('RightEduDate', parent=item_subheader_style, alignment=2))]],
+                colWidths=[printable_width * 0.72, printable_width * 0.28]
+            )
+            line2_table.setStyle(TableStyle([
+                ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                ('LEFTPADDING', (0,0), (-1,-1), 0),
+                ('RIGHTPADDING', (0,0), (-1,-1), 0),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+                ('TOPPADDING', (0,0), (-1,-1), 0),
+            ]))
+            elements.append(line2_table)
             elements.append(Spacer(1, spacer_height))
             
-    # 5. Skills Section
+        # Draw research/publications under Education
+        for proj in research_projects:
+            name = proj.get("name", "")
+            details = proj.get("details", "")
+            
+            elements.append(Paragraph(f"<b>{name}</b>", item_header_style))
+            elements.append(Paragraph(details, body_style))
+            elements.append(Spacer(1, spacer_height))
+
+    # 4. Other Projects Section (if any non-academic projects exist)
+    if other_projects:
+        draw_section_line("Projects")
+        for proj in other_projects:
+            name = proj.get("name", "")
+            tech = f"({', '.join(proj.get('technologies', []))})" if proj.get('technologies') else ""
+            desc = proj.get("description", "")
+            details = proj.get("details", "")
+            
+            proj_title = f"<b>{name}</b> {tech}" if tech else f"<b>{name}</b>"
+            elements.append(Paragraph(proj_title, item_header_style))
+            if desc:
+                elements.append(Paragraph(desc, body_style))
+            if details:
+                elements.append(Paragraph(f"&bull;&nbsp;&nbsp;{details}", bullet_style))
+            elements.append(Spacer(1, spacer_height))
+
+    # 5. Skills Section (Rendered beautifully at the bottom)
     skills = profile.get("skills", {})
     if skills:
         draw_section_line("Skills")
@@ -235,9 +268,9 @@ def build_resume_pdf(profile_path, output_path):
         print(f"Error loading profile: {str(e)}")
         sys.exit(1)
         
-    # Visual locking system: Try multiple presets to keep content on exactly 1 page
+    # Visual locking presets to ensure single-page limit
     presets = [
-        {"base_font_size": 9.5, "leading": 12.5, "margin": 36, "spacer": 2.0},  # Standard layout
+        {"base_font_size": 9.5, "leading": 12.0, "margin": 36, "spacer": 2.0},  # Standard layout
         {"base_font_size": 9.0, "leading": 11.5, "margin": 32, "spacer": 1.5},  # Compact
         {"base_font_size": 8.5, "leading": 10.5, "margin": 28, "spacer": 1.0},  # Highly compressed
     ]
@@ -253,7 +286,8 @@ def build_resume_pdf(profile_path, output_path):
             bottomMargin=pr["margin"]
         )
         
-        elements = generate_elements(profile, pr["base_font_size"], pr["leading"], pr["spacer"])
+        printable_width = 612 - (2 * pr["margin"])
+        elements = generate_elements(profile, pr["base_font_size"], pr["leading"], pr["spacer"], printable_width)
         doc.build(elements)
         
         if doc.page == 1:

@@ -2913,15 +2913,17 @@ func showCustomFilePicker(parentWindow fyne.Window, title string, allowedExts []
 	}
 	currentDir = filepath.Clean(currentDir)
 
-	pathLabel := widget.NewLabel(currentDir)
-	pathLabel.Wrapping = fyne.TextWrapOff
+	pathEntry := widget.NewEntry()
+	pathEntry.SetText(currentDir)
 
 	explorerBox := container.NewVBox()
 
 	var refreshPicker func()
 	refreshPicker = func() {
 		if currentDir == "Drives" {
-			pathLabel.SetText("My Computer (Drives)")
+			if pathEntry != nil {
+				pathEntry.SetText("My Computer (Drives)")
+			}
 			explorerBox.Objects = nil
 			drives := getWindowsDrives()
 			for _, dr := range drives {
@@ -2941,7 +2943,9 @@ func showCustomFilePicker(parentWindow fyne.Window, title string, allowedExts []
 		}
 
 		currentDir = filepath.Clean(currentDir)
-		pathLabel.SetText(currentDir)
+		if pathEntry != nil {
+			pathEntry.SetText(currentDir)
+		}
 
 		entries, err := os.ReadDir(currentDir)
 		if err != nil {
@@ -3024,13 +3028,32 @@ func showCustomFilePicker(parentWindow fyne.Window, title string, allowedExts []
 		explorerBox.Refresh()
 	}
 
+	pathEntry.OnSubmitted = func(text string) {
+		text = strings.TrimSpace(text)
+		if text == "My Computer (Drives)" || strings.ToLower(text) == "drives" {
+			currentDir = "Drives"
+			refreshPicker()
+			return
+		}
+		cleanPath := filepath.Clean(text)
+		if info, err := os.Stat(cleanPath); err == nil && info.IsDir() {
+			currentDir = cleanPath
+			refreshPicker()
+		} else {
+			dialog.ShowError(fmt.Errorf("Invalid directory path: %s", text), pickerWin)
+			pathEntry.SetText(currentDir)
+		}
+	}
+
 	backBtn := widget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() {
 		if currentDir == "Drives" {
 			return
 		}
 		parent := filepath.Dir(currentDir)
 		if parent == currentDir {
-			currentDir = "Drives"
+			if len(getWindowsDrives()) > 0 {
+				currentDir = "Drives"
+			}
 			refreshPicker()
 		} else {
 			currentDir = parent
@@ -3042,10 +3065,12 @@ func showCustomFilePicker(parentWindow fyne.Window, title string, allowedExts []
 		refreshPicker()
 	})
 
-	toolbar := container.NewHBox(
-		backBtn,
-		refreshBtn,
-		pathLabel,
+	toolbar := container.NewBorder(
+		nil,
+		nil,
+		container.NewHBox(backBtn, refreshBtn),
+		nil,
+		pathEntry,
 	)
 
 	scroll := container.NewVScroll(explorerBox)
@@ -3876,7 +3901,7 @@ var (
 	fmHistory      []string
 	fmExplorerBox  *fyne.Container
 	fmPreviewBox   *fyne.Container
-	fmPathLabel    *widget.Label
+	fmPathEntry    *widget.Entry
 	fmGridViewMode = false
 	fmSelectedFile string
 )
@@ -3957,8 +3982,32 @@ func refreshFileManager() {
 			fmCurrentDir = "."
 		}
 	}
+	if fmCurrentDir == "Drives" {
+		if fmPathEntry != nil {
+			fmPathEntry.SetText("My Computer (Drives)")
+		}
+		fmExplorerBox.Objects = nil
+		drives := getWindowsDrives()
+		for _, dr := range drives {
+			drName := dr
+			iconWidget := widget.NewIcon(theme.FolderIcon())
+			nameLabel := widget.NewLabel(drName)
+			row := container.NewHBox(iconWidget, nameLabel, layout.NewSpacer())
+			btn := widget.NewButtonWithIcon("Open", theme.FolderIcon(), func() {
+				fmCurrentDir = drName
+				refreshFileManager()
+			})
+			row.Add(btn)
+			fmExplorerBox.Add(row)
+		}
+		fmExplorerBox.Refresh()
+		return
+	}
+
 	fmCurrentDir = filepath.Clean(fmCurrentDir)
-	fmPathLabel.SetText(fmCurrentDir)
+	if fmPathEntry != nil {
+		fmPathEntry.SetText(fmCurrentDir)
+	}
 
 	entries, err := os.ReadDir(fmCurrentDir)
 	if err != nil {
@@ -4039,13 +4088,37 @@ func buildFileManagerTab() fyne.CanvasObject {
 		fmCurrentDir = "."
 	}
 
-	fmPathLabel = widget.NewLabel(fmCurrentDir)
-	fmPathLabel.Wrapping = fyne.TextWrapOff
+	fmPathEntry = widget.NewEntry()
+	fmPathEntry.SetText(fmCurrentDir)
+	fmPathEntry.OnSubmitted = func(text string) {
+		text = strings.TrimSpace(text)
+		if text == "My Computer (Drives)" || strings.ToLower(text) == "drives" {
+			fmCurrentDir = "Drives"
+			refreshFileManager()
+			return
+		}
+		cleanPath := filepath.Clean(text)
+		if info, err := os.Stat(cleanPath); err == nil && info.IsDir() {
+			fmCurrentDir = cleanPath
+			refreshFileManager()
+		} else {
+			dialog.ShowError(fmt.Errorf("Invalid directory path: %s", text), state.Window)
+			fmPathEntry.SetText(fmCurrentDir)
+		}
+	}
 
 	backBtn := widget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() {
-		if len(fmHistory) > 0 {
-			fmCurrentDir = fmHistory[len(fmHistory)-1]
-			fmHistory = fmHistory[:len(fmHistory)-1]
+		if fmCurrentDir == "Drives" {
+			return
+		}
+		parent := filepath.Dir(fmCurrentDir)
+		if parent == fmCurrentDir {
+			if len(getWindowsDrives()) > 0 {
+				fmCurrentDir = "Drives"
+			}
+			refreshFileManager()
+		} else {
+			fmCurrentDir = parent
 			refreshFileManager()
 		}
 	})
@@ -4054,10 +4127,12 @@ func buildFileManagerTab() fyne.CanvasObject {
 		refreshFileManager()
 	})
 
-	toolbar := container.NewHBox(
-		backBtn,
-		refreshBtn,
-		fmPathLabel,
+	toolbar := container.NewBorder(
+		nil,
+		nil,
+		container.NewHBox(backBtn, refreshBtn),
+		nil,
+		fmPathEntry,
 	)
 
 	fmExplorerBox = container.NewVBox()

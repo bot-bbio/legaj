@@ -485,7 +485,6 @@ func refreshUI() {
 		state.TrackerTable.Refresh()
 	}
 	updateDropdownSelectors()
-	refreshTrackerDetail()
 }
 
 func openLink(urlString string) {
@@ -1134,75 +1133,12 @@ func splitDates(s string) (string, string) {
 	return s, ""
 }
 
-var (
-	trackerDetailTitle  *widget.Label
-	trackerDetailSub    *widget.Label
-	trackerDetailStatus *widget.Label
-	trackerDetailNotes  *widget.Label
-	trackerResumeLink   *widget.Button
-	trackerCoverLink    *widget.Button
-)
-
-func refreshTrackerDetail() {
-	if trackerDetailTitle == nil {
-		return
-	}
-	if state.TrackerSelected == nil {
-		trackerDetailTitle.SetText("No Application Selected")
-		trackerDetailSub.SetText("")
-		trackerDetailStatus.SetText("")
-		trackerDetailNotes.SetText("Select an application from the table to view details and generated files.")
-		trackerResumeLink.Hide()
-		trackerCoverLink.Hide()
-		return
-	}
-	app := *state.TrackerSelected
-	trackerDetailTitle.SetText(fmt.Sprintf("%s at %s", app.Role, app.Company))
-	trackerDetailSub.SetText(fmt.Sprintf("Applied: %s  ·  Location: %s", app.Date, app.Location))
-	trackerDetailStatus.SetText(fmt.Sprintf("Status: %s", app.Status))
-	trackerDetailNotes.SetText(fmt.Sprintf("Notes:\n%s", app.Notes))
-
-	resPath := filepath.Join(state.SaveFolder, app.Resume)
-	if _, err := os.Stat(resPath); err == nil && app.Resume != "" {
-		trackerResumeLink.SetText("Open Tailored Resume")
-		trackerResumeLink.OnTapped = func() {
-			openLink("file:///" + filepath.ToSlash(resPath))
-		}
-		trackerResumeLink.Show()
-	} else {
-		trackerResumeLink.Hide()
-	}
-
-	clPath := filepath.Join(state.SaveFolder, app.CoverLetter)
-	if _, err := os.Stat(clPath); err == nil && app.CoverLetter != "" {
-		trackerCoverLink.SetText("Open Cover Letter")
-		trackerCoverLink.OnTapped = func() {
-			openLink("file:///" + filepath.ToSlash(clPath))
-		}
-		trackerCoverLink.Show()
-	} else {
-		trackerCoverLink.Hide()
-	}
-}
-
 // 3. JOB TRACKER SPREADSHEET TABLE VIEW
 func buildTrackerTab() fyne.CanvasObject {
-	// Initialize package labels/buttons for detail view
-	trackerDetailTitle = widget.NewLabelWithStyle("No Application Selected", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
-	trackerDetailSub = widget.NewLabel("")
-	trackerDetailStatus = widget.NewLabel("")
-	trackerDetailNotes = widget.NewLabel("Select an application from the table to view details and generated files.")
-	trackerDetailNotes.Wrapping = fyne.TextWrapWord
-
-	trackerResumeLink = widget.NewButtonWithIcon("Open Tailored Resume", theme.DocumentIcon(), nil)
-	trackerCoverLink = widget.NewButtonWithIcon("Open Cover Letter", theme.DocumentIcon(), nil)
-	trackerResumeLink.Hide()
-	trackerCoverLink.Hide()
-
 	// Table widget setup for spreadsheet-like grid layout
 	state.TrackerTable = widget.NewTable(
 		func() (int, int) {
-			return len(state.Applications) + 1, 5 // +1 for headers
+			return len(state.Applications) + 1, 8 // +1 for headers, 8 columns
 		},
 		func() fyne.CanvasObject {
 			label := widget.NewLabel("Cell content")
@@ -1212,12 +1148,13 @@ func buildTrackerTab() fyne.CanvasObject {
 		func(id widget.TableCellID, cell fyne.CanvasObject) {
 			label := cell.(*widget.Label)
 			if id.Row == 0 {
-				headers := []string{"Company", "Role", "Location", "Date", "Status"}
+				headers := []string{"Company", "Role", "Location", "Date", "Status", "Notes", "Resume", "Cover Letter"}
 				label.SetText(headers[id.Col])
 				label.TextStyle = fyne.TextStyle{Bold: true}
 			} else {
 				if id.Row-1 < len(state.Applications) {
 					app := state.Applications[id.Row-1]
+					label.TextStyle = fyne.TextStyle{}
 					switch id.Col {
 					case 0:
 						label.SetText(app.Company)
@@ -1229,26 +1166,60 @@ func buildTrackerTab() fyne.CanvasObject {
 						label.SetText(app.Date)
 					case 4:
 						label.SetText(app.Status)
+					case 5:
+						label.SetText(app.Notes)
+					case 6:
+						if app.Resume != "" {
+							label.SetText("📄 Open Resume")
+							label.TextStyle = fyne.TextStyle{Italic: true}
+						} else {
+							label.SetText("-")
+						}
+					case 7:
+						if app.CoverLetter != "" {
+							label.SetText("📄 Open Cover Letter")
+							label.TextStyle = fyne.TextStyle{Italic: true}
+						} else {
+							label.SetText("-")
+						}
 					}
-					label.TextStyle = fyne.TextStyle{}
 				}
 			}
 		},
 	)
 
 	// Set column widths to look like spreadsheet grid
-	state.TrackerTable.SetColumnWidth(0, 150)
-	state.TrackerTable.SetColumnWidth(1, 180)
+	state.TrackerTable.SetColumnWidth(0, 120)
+	state.TrackerTable.SetColumnWidth(1, 160)
 	state.TrackerTable.SetColumnWidth(2, 110)
 	state.TrackerTable.SetColumnWidth(3, 90)
 	state.TrackerTable.SetColumnWidth(4, 90)
+	state.TrackerTable.SetColumnWidth(5, 300) // wide Notes column
+	state.TrackerTable.SetColumnWidth(6, 140) // Resume link column
+	state.TrackerTable.SetColumnWidth(7, 140) // Cover Letter link column
 
 	state.TrackerTable.OnSelected = func(id widget.TableCellID) {
 		if id.Row > 0 && id.Row-1 < len(state.Applications) {
 			app := state.Applications[id.Row-1]
 			state.TrackerSelected = &app
 			state.SelectedAppIdx = id.Row - 1
-			refreshTrackerDetail()
+
+			// Check if Resume or Cover Letter columns are clicked to open files
+			if id.Col == 6 && app.Resume != "" {
+				resPath := filepath.Join(state.SaveFolder, app.Resume)
+				if _, err := os.Stat(resPath); err == nil {
+					openLink("file:///" + filepath.ToSlash(resPath))
+				} else {
+					dialog.ShowInformation("File not found", "Could not locate the tailored resume PDF. Make sure it exists in your save folder.", state.Window)
+				}
+			} else if id.Col == 7 && app.CoverLetter != "" {
+				clPath := filepath.Join(state.SaveFolder, app.CoverLetter)
+				if _, err := os.Stat(clPath); err == nil {
+					openLink("file:///" + filepath.ToSlash(clPath))
+				} else {
+					dialog.ShowInformation("File not found", "Could not locate the Cover Letter PDF. Make sure it exists in your save folder.", state.Window)
+				}
+			}
 		}
 	}
 
@@ -1289,31 +1260,16 @@ func buildTrackerTab() fyne.CanvasObject {
 
 	controlBar := container.NewHBox(addBtn, updateBtn, syncBtn)
 
-	tableCard := widget.NewCard("Job Tracker", "Click any row cell to select an application", state.TrackerTable)
+	tableCard := widget.NewCard("Job Tracker", "Click cells in standard columns to select application; click Resume/Cover Letter cells to open files.", state.TrackerTable)
 	tableContainer := container.NewBorder(nil, nil, nil, nil, tableCard)
 
-	detailCard := widget.NewCard("Application Details", "", container.NewVBox(
-		trackerDetailTitle,
-		trackerDetailSub,
-		trackerDetailStatus,
-		widget.NewSeparator(),
-		container.NewVScroll(trackerDetailNotes),
-		widget.NewSeparator(),
-		trackerResumeLink,
-		trackerCoverLink,
-	))
-
-	split := container.NewHSplit(tableContainer, detailCard)
-	split.SetOffset(0.6) // 60% table, 40% detail view
-
-	return container.NewBorder(controlBar, nil, nil, nil, split)
+	return container.NewBorder(controlBar, nil, nil, nil, tableContainer)
 }
 
 func updateTrackerList() {
 	if state.TrackerTable != nil {
 		state.TrackerTable.Refresh()
 	}
-	refreshTrackerDetail()
 }
 
 func openAddJobModal(job *JobApplication) {

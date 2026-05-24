@@ -138,8 +138,23 @@ func callGeminiGo(apiKey, promptText string, isJson bool) (string, error) {
 	return text, nil
 }
 
-func callGeminiWithSearchGo(apiKey, promptText string) (string, error) {
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=%s", apiKey)
+// GroundingSource is a real URL retrieved by Gemini during its web search.
+type GroundingSource struct {
+	URI   string
+	Title string
+}
+
+// GroundedResponse contains both the model's text output and the actual
+// sources Gemini fetched during search grounding — the sources are real URLs.
+type GroundedResponse struct {
+	Text    string
+	Sources []GroundingSource
+}
+
+// callGeminiWithGrounding calls the Gemini API with google_search grounding enabled
+// and returns both the text response AND the grounding chunk URLs (real verified sources).
+func callGeminiWithGrounding(apiKey, promptText string) (GroundedResponse, error) {
+	apiURL := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=%s", apiKey)
 
 	requestBody := map[string]interface{}{
 		"contents": []interface{}{
@@ -160,24 +175,25 @@ func callGeminiWithSearchGo(apiKey, promptText string) (string, error) {
 
 	jsonBytes, err := json.Marshal(requestBody)
 	if err != nil {
-		return "", err
+		return GroundedResponse{}, err
 	}
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonBytes))
+	resp, err := http.Post(apiURL, "application/json", bytes.NewBuffer(jsonBytes))
 	if err != nil {
-		return "", err
+		return GroundedResponse{}, err
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return GroundedResponse{}, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+		return GroundedResponse{}, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
+	// Full response struct capturing grounding metadata (S1)
 	var apiResp struct {
 		Candidates []struct {
 			Content struct {
@@ -185,23 +201,239 @@ func callGeminiWithSearchGo(apiKey, promptText string) (string, error) {
 					Text string `json:"text"`
 				} `json:"parts"`
 			} `json:"content"`
+			GroundingMetadata struct {
+				GroundingChunks []struct {
+					Web struct {
+						URI   string `json:"uri"`
+						Title string `json:"title"`
+					} `json:"web"`
+				} `json:"groundingChunks"`
+			} `json:"groundingMetadata"`
 		} `json:"candidates"`
 	}
 
 	err = json.Unmarshal(bodyBytes, &apiResp)
 	if err != nil {
-		return "", err
+		return GroundedResponse{}, err
 	}
 
 	if len(apiResp.Candidates) == 0 || len(apiResp.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("empty response from Gemini API")
+		return GroundedResponse{}, fmt.Errorf("empty response from Gemini API")
 	}
 
-	text := apiResp.Candidates[0].Content.Parts[0].Text
+	candidate := apiResp.Candidates[0]
+	text := candidate.Content.Parts[0].Text
 	text = strings.TrimPrefix(text, "```json")
 	text = strings.TrimSuffix(text, "```")
 	text = strings.TrimSpace(text)
-	return text, nil
+
+	var sources []GroundingSource
+	for _, chunk := range candidate.GroundingMetadata.GroundingChunks {
+		if chunk.Web.URI != "" {
+			sources = append(sources, GroundingSource{URI: chunk.Web.URI, Title: chunk.Web.Title})
+		}
+	}
+
+	return GroundedResponse{Text: text, Sources: sources}, nil
+}
+
+// jobDomainTier returns 1 (direct ATS/career page), 2 (quality aggregator),
+// or 3 (search page / low quality). Lower is better. (S3)
+func jobDomainTier(rawURL string) int {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return 3
+	}
+	host := strings.ToLower(u.Host)
+	path := strings.ToLower(u.Path)
+
+	// Tier 1: direct ATS / company career pages with a specific job path
+	tier1Hosts := []string{
+		"greenhouse.io", "lever.co", "myworkdayjobs.com", "workday.com",
+		"brassring.com", "taleo.net", "ashbyhq.com", "icims.com",
+		"smartrecruiters.com", "jobvite.com", "recruitee.com",
+	}
+	for _, h := range tier1Hosts {
+		if strings.Contains(host, h) {
+			// Must have a path suggesting a specific posting, not just the root
+			if len(path) > 5 {
+				return 1
+			}
+		}
+	}
+	// Company career subdomains (e.g. careers.google.com, jobs.apple.com)
+	if strings.HasPrefix(host, "careers.") || strings.HasPrefix(host, "jobs.") {
+		if len(path) > 5 {
+			return 1
+		}
+	}
+
+	// Tier 2: quality aggregators with a direct listing path
+	if strings.Contains(host, "linkedin.com") && strings.Contains(path, "/view/") {
+		return 2
+	}
+	if strings.Contains(host, "indeed.com") && strings.Contains(path, "/viewjob") {
+		return 2
+	}
+	if strings.Contains(host, "glassdoor.com") && strings.Contains(path, "/job-listing") {
+		return 2
+	}
+	if strings.Contains(host, "dice.com") && strings.Contains(path, "/job-detail") {
+		return 2
+	}
+	if strings.Contains(host, "monster.com") && strings.Contains(path, "/job-openings") {
+		return 2
+	}
+
+	// Tier 3: search pages and low-quality sources
+	tier3Patterns := []string{
+		"google.com/search",
+		"linkedin.com/jobs/search",
+		"indeed.com/jobs",
+		"ziprecruiter.com/jobs-search",
+		"glassdoor.com/Job/jobs",
+	}
+	for _, p := range tier3Patterns {
+		if strings.Contains(rawURL, p) {
+			return 3
+		}
+	}
+
+	// Default: unknown domain — treat as Tier 2 if path is specific
+	if len(path) > 10 {
+		return 2
+	}
+	return 3
+}
+
+// sourceBadge returns a short human-readable source label for a URL. (S6)
+func sourceBadge(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "Web"
+	}
+	host := strings.ToLower(u.Host)
+	switch {
+	case strings.Contains(host, "linkedin.com"):
+		return "LinkedIn"
+	case strings.Contains(host, "indeed.com"):
+		return "Indeed"
+	case strings.Contains(host, "greenhouse.io"):
+		return "Greenhouse"
+	case strings.Contains(host, "lever.co"):
+		return "Lever"
+	case strings.Contains(host, "glassdoor.com"):
+		return "Glassdoor"
+	case strings.Contains(host, "workday.com"), strings.Contains(host, "myworkdayjobs.com"):
+		return "Workday"
+	case strings.Contains(host, "ashbyhq.com"):
+		return "Ashby"
+	case strings.Contains(host, "dice.com"):
+		return "Dice"
+	case strings.Contains(host, "monster.com"):
+		return "Monster"
+	case strings.Contains(host, "ziprecruiter.com"):
+		return "ZipRecruiter"
+	case strings.Contains(host, "icims.com"):
+		return "iCIMS"
+	case strings.HasPrefix(host, "careers."), strings.HasPrefix(host, "jobs."):
+		return "Company Site"
+	default:
+		parts := strings.Split(host, ".")
+		if len(parts) >= 2 {
+			return strings.Title(parts[len(parts)-2])
+		}
+		return "Web"
+	}
+}
+
+// closedJobSignals are phrases indicating a job is no longer available. (S2)
+var closedJobSignals = []string{
+	"job has been filled",
+	"position has been filled",
+	"no longer accepting",
+	"position has been closed",
+	"job is no longer available",
+	"listing has expired",
+	"this job has expired",
+	"posting has been removed",
+	"application period has closed",
+	"this position is no longer",
+	"job no longer available",
+	"posting is no longer active",
+	"we are no longer accepting applications",
+	"this listing is closed",
+	"unfortunately, this job",
+}
+
+// verifyJobLink checks if a URL is reachable AND the page content doesn't
+// indicate the position is closed. Returns (alive, sourceVerified). (S2)
+func verifyJobLink(rawURL string, groundingSources []GroundingSource) (alive bool, groundingVerified bool) {
+	if !strings.HasPrefix(rawURL, "http") {
+		return false, false
+	}
+
+	// Check if this link came directly from Gemini's grounding sources (S1)
+	for _, src := range groundingSources {
+		if strings.EqualFold(src.URI, rawURL) {
+			groundingVerified = true
+			break
+		}
+		// Also match if the base URLs are the same (ignore query params)
+		srcBase := strings.Split(src.URI, "?")[0]
+		linkBase := strings.Split(rawURL, "?")[0]
+		if strings.EqualFold(srcBase, linkBase) {
+			groundingVerified = true
+			break
+		}
+	}
+
+	httpClient := &http.Client{
+		Timeout: 8 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) > 5 {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
+	}
+
+	resp, err := httpClient.Get(rawURL)
+	if err != nil || resp.StatusCode >= 400 {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return false, groundingVerified
+	}
+	defer resp.Body.Close()
+
+	// Check if final URL redirected to a domain root (sign of a deleted listing) (S2)
+	finalURL := resp.Request.URL.String()
+	finalPath := resp.Request.URL.Path
+	if len(finalPath) <= 1 || finalPath == "/" {
+		return false, groundingVerified
+	}
+	_ = finalURL
+
+	// Read first 12KB and scan for closed-job signals (S2)
+	limitedBody := io.LimitReader(resp.Body, 12*1024)
+	bodyBytes, readErr := io.ReadAll(limitedBody)
+	if readErr == nil {
+		bodyLower := strings.ToLower(string(bodyBytes))
+		for _, signal := range closedJobSignals {
+			if strings.Contains(bodyLower, signal) {
+				return false, groundingVerified // Page exists but job is closed
+			}
+		}
+	}
+
+	return true, groundingVerified
+}
+
+// Kept for backward compatibility with other callers in the codebase.
+func callGeminiWithSearchGo(apiKey, promptText string) (string, error) {
+	gr, err := callGeminiWithGrounding(apiKey, promptText)
+	return gr.Text, err
 }
 
 // AppState holds the application's global GUI state
@@ -614,27 +846,43 @@ func buildJobHuntTab() fyne.CanvasObject {
 			return
 		}
 
+		kw := searchKeyword.Text
+		loc := searchLocation.Text
+
 		progress := dialog.NewProgressInfinite("Searching Active Jobs", "Querying Google via Gemini Search Grounding...", state.Window)
 		progress.Show()
 
 		go func() {
-			prompt := fmt.Sprintf(`Search Google right now for active job postings matching "%s" in "%s".
+			// ── Strategy 4: Stronger prompt — direct posting URLs, recency, no fabrication ──
+			prompt := fmt.Sprintf(`You are a job search assistant. Use your google_search tool RIGHT NOW to find real, currently active job postings.
 
-Find real, current job listings from sites like LinkedIn, Indeed, Glassdoor, Greenhouse, Lever, and company career pages.
+Search for: "%s" jobs in "%s"
 
-Return a JSON array. Each item must have:
-- "company": company name
-- "role": exact job title
-- "location": city/state or Remote
-- "link": the direct URL to the job listing (must start with https://)
-- "description": one sentence describing the key skills needed
+IMPORTANT RULES:
+- Only return URLs you actually retrieved during this search. Do NOT invent or guess URLs.
+- Each URL must be a direct link to a SPECIFIC job posting page, not a search results page.
+- Prefer results posted within the last 30 days.
+- Good URL patterns: /jobs/12345, /careers/view/, /job-application/, /postings/, /positions/
+- BAD URLs (do not include): google.com/search, linkedin.com/jobs/search, indeed.com/jobs?q=, ziprecruiter.com/jobs-search
+- Preferred sources: Greenhouse, Lever, Workday, Ashby, iCIMS, LinkedIn (direct view links), Indeed (direct viewjob links), company career pages.
 
-Return only valid JSON, no extra text.`, searchKeyword.Text, searchLocation.Text)
+Return a JSON array with exactly this structure, no other text:
+[
+  {
+    "company": "Company Name",
+    "role": "Exact Job Title",
+    "location": "City, State or Remote",
+    "link": "https://direct-posting-url.com/jobs/12345",
+    "description": "One sentence on key skills required."
+  }
+]
 
-			resJson, apiErr := callGeminiWithSearchGo(state.ApiKey, prompt)
+Return ONLY valid JSON. No markdown, no explanation.`, kw, loc)
+
+			groundedResp, apiErr := callGeminiWithGrounding(state.ApiKey, prompt)
 
 			// Parse JSON — extract array regardless of markdown wrapping
-			cleanJson := strings.TrimSpace(resJson)
+			cleanJson := strings.TrimSpace(groundedResp.Text)
 			if idx := strings.Index(cleanJson, "["); idx >= 0 {
 				cleanJson = cleanJson[idx:]
 			}
@@ -653,42 +901,71 @@ Return only valid JSON, no extra text.`, searchKeyword.Text, searchLocation.Text
 			var results []JobResult
 			parseErr := json.Unmarshal([]byte(cleanJson), &results)
 
-			// If we have results, verify links in the background before touching UI
+			// ── Strategy 1: Also inject any grounding sources as candidate jobs ──
+			// If Gemini returned grounding chunks that look like direct job listings,
+			// add them as candidates (they're real URLs Gemini actually fetched).
+			if parseErr == nil {
+				groundingURLSet := make(map[string]bool)
+				for _, r := range results {
+					groundingURLSet[strings.ToLower(r.Link)] = true
+				}
+				for _, src := range groundedResp.Sources {
+					if strings.ToLower(src.URI) == "" || groundingURLSet[strings.ToLower(src.URI)] {
+						continue
+					}
+					// Only add if it looks like a direct job posting (Tier 1 or 2)
+					if jobDomainTier(src.URI) <= 2 {
+						results = append(results, JobResult{
+							Company:     sourceBadge(src.URI),
+							Role:        src.Title,
+							Location:    loc,
+							Link:        src.URI,
+							Description: "Found via search grounding — click to view full posting.",
+						})
+						groundingURLSet[strings.ToLower(src.URI)] = true
+					}
+				}
+			}
+
+			// ── Strategy 3: Domain tier scoring — filter Tier 3 / search-page links ──
 			type taggedResult struct {
-				job   JobResult
-				alive bool
+				job              JobResult
+				alive            bool
+				groundingVerified bool
+				tier             int
+				badge            string
 			}
 			var tagged []taggedResult
+			var searchPageLinks []JobResult // Tier 3 — relegated to fallback section
 
 			if apiErr == nil && parseErr == nil && len(results) > 0 {
 				verifyCh := make(chan taggedResult, len(results))
-				httpClient := &http.Client{Timeout: 5 * time.Second}
 				for _, job := range results {
 					j := job
 					go func() {
-						alive := false
-						if strings.HasPrefix(j.Link, "http") {
-							resp, err := httpClient.Head(j.Link)
-							if err == nil && resp.StatusCode < 400 {
-								resp.Body.Close()
-								alive = true
-							} else {
-								resp2, err2 := httpClient.Get(j.Link)
-								if err2 == nil {
-									resp2.Body.Close()
-									alive = resp2.StatusCode < 400
-								}
-							}
+						tier := jobDomainTier(j.Link)
+						badge := sourceBadge(j.Link)
+						if tier == 3 {
+							// Demote to search-links section; skip deep verification
+							verifyCh <- taggedResult{job: j, alive: false, tier: tier, badge: badge}
+							return
 						}
-						verifyCh <- taggedResult{job: j, alive: alive}
+						// ── Strategy 2: Deep verification with body scan ──
+						alive, groundingVerified := verifyJobLink(j.Link, groundedResp.Sources)
+						verifyCh <- taggedResult{job: j, alive: alive, groundingVerified: groundingVerified, tier: tier, badge: badge}
 					}()
 				}
 				for range results {
-					tagged = append(tagged, <-verifyCh)
+					t := <-verifyCh
+					if t.tier == 3 {
+						searchPageLinks = append(searchPageLinks, t.job)
+					} else {
+						tagged = append(tagged, t)
+					}
 				}
 			}
 
-			// All heavy work done — now update UI on main thread
+			// All heavy work done — update UI on main thread
 			fyne.Do(func() {
 				progress.Hide()
 				state.SearchResultsBox.Objects = nil
@@ -698,12 +975,21 @@ Return only valid JSON, no extra text.`, searchKeyword.Text, searchLocation.Text
 					state.SearchResultsBox.Refresh()
 					return
 				}
-				if parseErr != nil || len(results) == 0 {
-					state.SearchResultsBox.Add(widget.NewLabel("No results returned. Try different keywords or location."))
-					state.SearchResultsBox.Refresh()
-					return
+
+				verifiedCount := 0
+				for _, t := range tagged {
+					if t.alive {
+						verifiedCount++
+					}
 				}
 
+				if len(tagged) > 0 {
+					summaryText := fmt.Sprintf("%d listing(s) found · %d verified active", len(tagged), verifiedCount)
+					state.SearchResultsBox.Add(widget.NewLabelWithStyle(summaryText, fyne.TextAlignLeading, fyne.TextStyle{Italic: true}))
+					state.SearchResultsBox.Add(widget.NewSeparator())
+				}
+
+				// ── Strategy 6: Render job cards with source badge + verification status ──
 				for _, t := range tagged {
 					r := t.job
 					compLabel := widget.NewLabelWithStyle(r.Company, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
@@ -719,10 +1005,20 @@ Return only valid JSON, no extra text.`, searchKeyword.Text, searchLocation.Text
 					})
 					trackTailorBtn.Importance = widget.HighImportance
 
-					header := container.NewHBox(compLabel)
-					if t.alive {
-						badge := widget.NewLabelWithStyle("✓ Verified", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
-						header = container.NewHBox(compLabel, layout.NewSpacer(), badge)
+					// Source badge (S6)
+					badgeLabel := widget.NewLabelWithStyle("[" + t.badge + "]", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+
+					header := container.NewHBox(compLabel, badgeLabel)
+					if t.groundingVerified {
+						// Blue star — this URL was directly retrieved by Gemini's search
+						srcVerified := widget.NewLabelWithStyle("★ Source-Verified", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+						header = container.NewHBox(compLabel, badgeLabel, layout.NewSpacer(), srcVerified)
+					} else if t.alive {
+						checkLabel := widget.NewLabelWithStyle("✓ Live", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+						header = container.NewHBox(compLabel, badgeLabel, layout.NewSpacer(), checkLabel)
+					} else {
+						deadLabel := widget.NewLabelWithStyle("✗ Unavailable", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+						header = container.NewHBox(compLabel, badgeLabel, layout.NewSpacer(), deadLabel)
 					}
 
 					cardContent := container.NewVBox(
@@ -733,6 +1029,35 @@ Return only valid JSON, no extra text.`, searchKeyword.Text, searchLocation.Text
 					)
 					state.SearchResultsBox.Add(widget.NewCard("", "", cardContent))
 				}
+
+				// ── Strategy 5: Fallback search links when no verified results ──
+				if verifiedCount == 0 {
+					state.SearchResultsBox.Add(widget.NewSeparator())
+					state.SearchResultsBox.Add(widget.NewLabelWithStyle(
+						"No verified postings found. Use these search links to continue manually:",
+						fyne.TextAlignLeading, fyne.TextStyle{Italic: true},
+					))
+					fallbackLinks := []struct{ name, link string }{
+						{"LinkedIn Jobs", fmt.Sprintf("https://www.linkedin.com/jobs/search/?keywords=%s&location=%s", url.QueryEscape(kw), url.QueryEscape(loc))},
+						{"Indeed", fmt.Sprintf("https://www.indeed.com/jobs?q=%s&l=%s", url.QueryEscape(kw), url.QueryEscape(loc))},
+						{"Google Jobs", fmt.Sprintf("https://www.google.com/search?q=%s&ibp=htl;jobs", url.QueryEscape(kw+" jobs in "+loc))},
+						{"Glassdoor", fmt.Sprintf("https://www.glassdoor.com/Job/jobs.htm?sc.keyword=%s&locT=C&locId=0", url.QueryEscape(kw))},
+					}
+					for _, fl := range fallbackLinks {
+						flLink := fl.link
+						flName := fl.name
+						btn := widget.NewButtonWithIcon(flName, theme.SearchIcon(), func() {
+							openLink(flLink)
+						})
+						state.SearchResultsBox.Add(btn)
+						_ = flName
+					}
+				}
+
+				if len(tagged) == 0 && len(searchPageLinks) == 0 && parseErr != nil {
+					state.SearchResultsBox.Add(widget.NewLabel("Could not parse search results. Please try again."))
+				}
+
 				state.SearchResultsBox.Refresh()
 			})
 		}()

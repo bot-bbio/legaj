@@ -1076,66 +1076,88 @@ Return ONLY valid JSON. No markdown, no explanation.`, kw, loc)
 		resultsScroll,
 	))
 
-	// ── Manual Entry Card ──
-	manualCompany := widget.NewEntry()
-	manualCompany.SetPlaceHolder("e.g. Acme Corp")
-	manualRole := widget.NewEntry()
-	manualRole.SetPlaceHolder("e.g. Product Manager")
-	manualLocation := widget.NewEntry()
-	manualLocation.SetPlaceHolder("e.g. New York, NY or Remote")
-	manualLink := widget.NewEntry()
-	manualLink.SetPlaceHolder("https://careers.acme.com/jobs/12345")
-	manualDesc := widget.NewMultiLineEntry()
-	manualDesc.SetPlaceHolder("Paste the job description or key requirements here (optional)...")
-	manualDesc.SetMinRowsVisible(3)
-	manualDesc.Wrapping = fyne.TextWrapWord
-
-	manualTrackBtn := widget.NewButtonWithIcon("Track & Tailor", theme.DocumentCreateIcon(), func() {
-		if manualCompany.Text == "" || manualRole.Text == "" {
-			dialog.ShowInformation("Required", "Company and Role are required.", state.Window)
-			return
-		}
-		runTrackAndTailorAutomation(manualCompany.Text, manualRole.Text, manualLocation.Text, manualLink.Text, manualDesc.Text)
-		// Clear form after submitting
-		manualCompany.SetText("")
-		manualRole.SetText("")
-		manualLocation.SetText("")
-		manualLink.SetText("")
-		manualDesc.SetText("")
+	// ── Bulk Import Card ──
+	bulkImportBtn := widget.NewButtonWithIcon("Import Jobs from CSV / Spreadsheet", theme.FolderOpenIcon(), func() {
+		fd := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+			if err != nil || reader == nil {
+				return
+			}
+			defer reader.Close()
+			path := reader.URI().Path()
+			go func() {
+				data, readErr := os.ReadFile(path)
+				if readErr != nil {
+					fyne.Do(func() { dialog.ShowError(readErr, state.Window) })
+					return
+				}
+				lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+				added := 0
+				skipped := 0
+				for i, line := range lines {
+					line = strings.TrimSpace(line)
+					if line == "" {
+						continue
+					}
+					// Skip header row if it doesn't look like a URL
+					if i == 0 && !strings.HasPrefix(strings.ToLower(line), "http") {
+						continue
+					}
+					// Parse CSV fields: URL, Company, Role, Location (all optional after URL)
+					fields := strings.SplitN(line, ",", 5)
+					jobURL := strings.Trim(strings.TrimSpace(fields[0]), "\"")
+					if !strings.HasPrefix(strings.ToLower(jobURL), "http") {
+						skipped++
+						continue
+					}
+					company := ""
+					if len(fields) > 1 {
+						company = strings.Trim(strings.TrimSpace(fields[1]), "\"")
+					}
+					role := ""
+					if len(fields) > 2 {
+						role = strings.Trim(strings.TrimSpace(fields[2]), "\"")
+					}
+					location := ""
+					if len(fields) > 3 {
+						location = strings.Trim(strings.TrimSpace(fields[3]), "\"")
+					}
+					// Derive company from domain if not provided
+					if company == "" {
+						company = sourceBadge(jobURL)
+					}
+					if role == "" {
+						role = "(Imported — update role)"
+					}
+					resumeName := fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(company, " ", "_"))
+					coverName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(company, " ", "_"))
+					_, addErr := RunManageApplications("add", company, role, location, jobURL, resumeName, coverName, "Bulk imported from CSV.")
+					if addErr == nil {
+						added++
+					} else {
+						skipped++
+					}
+				}
+				fyne.Do(func() {
+					reloadAllViews()
+					dialog.ShowInformation("Import Complete",
+						fmt.Sprintf("%d job(s) imported, %d skipped.\n\nOpen the Tracker tab to update roles and details.", added, skipped),
+						state.Window)
+				})
+			}()
+		}, state.Window)
+		fd.SetFilter(storage.NewExtensionFileFilter([]string{".csv", ".txt"}))
+		fd.Show()
 	})
-	manualTrackBtn.Importance = widget.HighImportance
+	bulkImportBtn.Importance = widget.MediumImportance
 
-	manualAddToTrackerBtn := widget.NewButtonWithIcon("Add to Tracker Only", theme.ContentAddIcon(), func() {
-		if manualCompany.Text == "" || manualRole.Text == "" {
-			dialog.ShowInformation("Required", "Company and Role are required.", state.Window)
-			return
-		}
-		resumeName := fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(manualCompany.Text, " ", "_"))
-		coverName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(manualCompany.Text, " ", "_"))
-		_, err := RunManageApplications("add", manualCompany.Text, manualRole.Text, manualLocation.Text, manualLink.Text, resumeName, coverName, manualDesc.Text)
-		if err != nil {
-			dialog.ShowError(err, state.Window)
-			return
-		}
-		reloadAllViews()
-		manualCompany.SetText("")
-		manualRole.SetText("")
-		manualLocation.SetText("")
-		manualLink.SetText("")
-		manualDesc.SetText("")
-		dialog.ShowInformation("Added", "Job added to tracker.", state.Window)
-	})
+	bulkFormatNote := widget.NewLabelWithStyle(
+		"CSV format — one row per job.  Columns: URL, Company (opt), Role (opt), Location (opt)",
+		fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+	bulkFormatNote.Wrapping = fyne.TextWrapWord
 
-	manualForm := container.New(layout.NewFormLayout(),
-		widget.NewLabel("Company"), manualCompany,
-		widget.NewLabel("Role"), manualRole,
-		widget.NewLabel("Location"), manualLocation,
-		widget.NewLabel("Job URL"), manualLink,
-		widget.NewLabel("Description"), manualDesc,
-	)
-	manualCard := widget.NewCard("Manual Entry", "Add a job you found anywhere on the web", container.NewVBox(
-		manualForm,
-		container.NewHBox(manualTrackBtn, manualAddToTrackerBtn),
+	bulkCard := widget.NewCard("Bulk Import to Tracker", "Import a list of job URLs from a CSV or plain-text file", container.NewVBox(
+		bulkImportBtn,
+		bulkFormatNote,
 	))
 
 	// ── Clip Inbox Card (populated by the browser bookmarklet) ──
@@ -1158,7 +1180,7 @@ Return ONLY valid JSON. No markdown, no explanation.`, kw, loc)
 
 	content := container.NewVBox(
 		searchCard,
-		manualCard,
+		bulkCard,
 		clipCard,
 	)
 
@@ -2508,55 +2530,71 @@ func buildHelpTab() fyne.CanvasObject {
 		widget.NewLabel("3. Templates: Formatting applies Times New Roman styling and strict single-page constraints."),
 	))
 
-	// Extended multi-site bookmarklet — detects LinkedIn, Indeed, Greenhouse, Lever,
-	// Workday, Ashby, iCIMS, and generic career pages with graceful fallback prompts.
+	// Multi-site bookmarklet — no prompt() fallbacks.
+	// Uses 127.0.0.1 (not localhost) to reliably reach the local server from HTTPS job board pages.
+	// Falls back to document.title parsing when site-specific selectors don't match.
 	bookmarkletJs := `javascript:(function(){
   var h=window.location.hostname,p=window.location.href,c='',r='',l='',d='';
-  if(h.includes('linkedin.com')){
-    c=(document.querySelector('.job-details-jobs-unified-top-card__company-name a')||document.querySelector('.topcard__org-name-link')||{innerText:''}).innerText;
-    r=(document.querySelector('.job-details-jobs-unified-top-card__job-title h1')||document.querySelector('.topcard__title')||{innerText:''}).innerText;
-    l=(document.querySelector('.job-details-jobs-unified-top-card__bullet')||document.querySelector('.topcard__flavor--bullet')||{innerText:''}).innerText;
-    d=(document.querySelector('#job-details')||document.querySelector('.description__text')||{innerText:''}).innerText;
-  } else if(h.includes('indeed.com')){
-    c=(document.querySelector('[data-company-name]')||document.querySelector('.jobsearch-CompanyInfoWithoutHeaderImage a')||{innerText:''}).innerText;
-    r=(document.querySelector('h1.jobsearch-JobInfoHeader-title')||document.querySelector('[data-testid="jobsearch-JobInfoHeader-title"]')||{innerText:''}).innerText;
-    l=(document.querySelector('[data-testid="inlineHeader-companyLocation"]')||{innerText:''}).innerText;
-    d=(document.querySelector('#jobDescriptionText')||{innerText:''}).innerText;
-  } else if(h.includes('greenhouse.io')||h.includes('grnh.se')){
-    c=(document.querySelector('.company-name')||document.querySelector('h3.company-name')||{innerText:document.title.split(' - ').pop()||''}).innerText;
-    r=(document.querySelector('h1.app-title')||document.querySelector('.app__title h1')||{innerText:document.title.split(' - ')[0]||''}).innerText;
-    l=(document.querySelector('.location')||{innerText:''}).innerText;
-    d=(document.querySelector('#content')||{innerText:''}).innerText;
-  } else if(h.includes('lever.co')){
-    c=(document.querySelector('.main-header-logo img')||{alt:document.title.split('|').pop().trim()||''}).alt;
-    r=(document.querySelector('h2')||{innerText:document.title.split('|')[0]||''}).innerText;
-    l=(document.querySelector('.sort-by-time.posting-category')||{innerText:''}).innerText;
-    d=(document.querySelector('.section-wrapper')||{innerText:''}).innerText;
-  } else if(h.includes('myworkdayjobs.com')||h.includes('workday.com')){
-    c=document.title.split('|').pop().trim()||document.title;
-    r=(document.querySelector('[data-automation-id="jobPostingHeader"]')||{innerText:document.title.split('|')[0]||''}).innerText;
-    l=(document.querySelector('[data-automation-id="locations"]')||{innerText:''}).innerText;
-    d=(document.querySelector('[data-automation-id="jobPostingDescription"]')||{innerText:''}).innerText;
-  } else if(h.includes('ashbyhq.com')){
-    r=(document.querySelector('h1')||{innerText:''}).innerText;
-    c=document.title.split('at ').pop()||document.title;
-    l=(document.querySelector('.ashby-job-posting-brief-location')||{innerText:''}).innerText;
-    d=(document.querySelector('.ashby-job-posting-description')||{innerText:''}).innerText;
-  } else {
-    r=(document.querySelector('h1')||{innerText:''}).innerText;
-    c=document.title;
-    l='';
-    d=(document.querySelector('main')||document.querySelector('article')||{innerText:''}).innerText.substring(0,600);
-  }
-  c=c.trim()||prompt('Company name:','');
-  r=r.trim()||prompt('Job title:','');
-  l=l.trim()||prompt('Location (or Remote):','');
-  if(!c||!r){alert('Could not detect job info. Fill in the prompts.');return;}
-  d=d.substring(0,600).trim();
-  fetch('http://localhost:8080/clip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({company:c,role:r,location:l,link:p,description:d})})
+  try{
+    if(h.includes('linkedin.com')){
+      var t=document.title.replace(' | LinkedIn','').split(' at ');
+      c=(document.querySelector('[data-tracking-control-name="public_jobs_topcard-org-name"]')||document.querySelector('.topcard__org-name-link')||document.querySelector('.job-details-jobs-unified-top-card__company-name a')||{innerText:t[1]||''}).innerText;
+      r=(document.querySelector('h1.t-24')||document.querySelector('.topcard__title')||document.querySelector('.job-details-jobs-unified-top-card__job-title h1')||{innerText:t[0]||''}).innerText;
+      l=(document.querySelector('.topcard__flavor--bullet')||document.querySelector('.job-details-jobs-unified-top-card__bullet')||{innerText:''}).innerText;
+      d=(document.querySelector('.description__text')||document.querySelector('#job-details')||{innerText:''}).innerText;
+    } else if(h.includes('indeed.com')){
+      var t2=document.title.replace(' - Indeed','').split(' at ');
+      r=(document.querySelector('[data-testid="jobsearch-JobInfoHeader-title"]')||document.querySelector('h1.jobsearch-JobInfoHeader-title')||{innerText:t2[0]||''}).innerText;
+      c=(document.querySelector('[data-company-name]')||document.querySelector('[data-testid="inlineHeader-companyName"]')||{innerText:t2[1]||''}).innerText;
+      l=(document.querySelector('[data-testid="inlineHeader-companyLocation"]')||{innerText:''}).innerText;
+      d=(document.querySelector('#jobDescriptionText')||{innerText:''}).innerText;
+    } else if(h.includes('greenhouse.io')||h.includes('grnh.se')){
+      var t3=document.title.split(' - ');
+      r=(document.querySelector('h1.app-title')||document.querySelector('.app__title h1')||{innerText:t3[0]||''}).innerText;
+      c=(document.querySelector('.company-name')||{innerText:t3[t3.length-1]||''}).innerText;
+      l=(document.querySelector('.location')||{innerText:''}).innerText;
+      d=(document.querySelector('#content')||{innerText:''}).innerText;
+    } else if(h.includes('lever.co')){
+      var t4=document.title.split('|');
+      r=(document.querySelector('h2')||{innerText:t4[0]||''}).innerText;
+      c=t4.length>1?t4[t4.length-1].trim():h.split('.')[0];
+      l=(document.querySelector('.sort-by-time.posting-category')||{innerText:''}).innerText;
+      d=(document.querySelector('.section-wrapper')||{innerText:''}).innerText;
+    } else if(h.includes('myworkdayjobs.com')||h.includes('workday.com')){
+      var t5=document.title.split('|');
+      r=(document.querySelector('[data-automation-id="jobPostingHeader"]')||{innerText:t5[0]||''}).innerText;
+      c=t5.length>1?t5[t5.length-1].trim():h.split('.')[0];
+      l=(document.querySelector('[data-automation-id="locations"]')||{innerText:''}).innerText;
+      d=(document.querySelector('[data-automation-id="jobPostingDescription"]')||{innerText:''}).innerText;
+    } else if(h.includes('ashbyhq.com')){
+      var t6=document.title.split(' at ');
+      r=(document.querySelector('h1')||{innerText:t6[0]||''}).innerText;
+      c=t6.length>1?t6[t6.length-1].trim():h.split('.')[0];
+      l=(document.querySelector('.ashby-job-posting-brief-location')||{innerText:''}).innerText;
+      d=(document.querySelector('.ashby-job-posting-description')||{innerText:''}).innerText;
+    } else if(h.includes('icims.com')){
+      var t7=document.title.split('-');
+      r=(document.querySelector('h1')||{innerText:t7[0]||''}).innerText;
+      c=t7.length>1?t7[t7.length-1].trim():h.split('.')[0];
+      l=(document.querySelector('.iCIMS_InfoMsg')||{innerText:''}).innerText;
+      d=(document.querySelector('#jobDetails')||{innerText:''}).innerText;
+    } else {
+      r=(document.querySelector('h1')||{innerText:''}).innerText||document.title;
+      var ht=document.title;
+      c=ht.includes(' at ')?ht.split(' at ').pop().split('|')[0].split('-')[0].trim():h.replace('www.','').split('.')[0];
+      l='';
+      d=(document.querySelector('main')||document.querySelector('article')||document.querySelector('[class*="description"]')||{innerText:''}).innerText;
+    }
+  } catch(e){}
+  c=(c||'').trim().substring(0,100);
+  r=(r||'').trim().substring(0,150);
+  l=(l||'').trim().substring(0,100);
+  d=(d||'').trim().substring(0,600);
+  if(!c&&!r){return;}
+  fetch('http://127.0.0.1:8080/clip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({company:c||h,role:r||document.title,location:l,link:p,description:d})})
     .then(function(res){return res.json();})
-    .then(function(){alert('\u2705 Clipped to LeGaJ! Check the Clip Inbox in the Job Hunt tab.');}) 
-    .catch(function(e){alert('\u274C Error: '+e+'. Is LeGaJ running?');});
+    .then(function(){alert('\u2705 Clipped! Check the Clip Inbox in LeGaJ.');}) 
+    .catch(function(e){alert('\u274C Clip failed. Make sure LeGaJ is open.\n'+e);});
 })();`
 
 	bookmarkletEntry := widget.NewEntry()
@@ -3351,11 +3389,23 @@ func buildFileManagerTab() fyne.CanvasObject {
 	return content
 }
 
+// clipMux is a dedicated ServeMux for the clip server, preventing double-registration
+// panics if startClipServer were ever called more than once.
+var clipMux = http.NewServeMux()
+var clipServerStarted bool
+
 func startClipServer() {
-	http.HandleFunc("/clip", func(w http.ResponseWriter, r *http.Request) {
+	if clipServerStarted {
+		return
+	}
+	clipServerStarted = true
+
+	clipMux.HandleFunc("/clip", func(w http.ResponseWriter, r *http.Request) {
+		// CORS + Chrome Private Network Access headers (required for HTTPS pages → localhost)
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Private-Network", "true")
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
@@ -3381,17 +3431,21 @@ func startClipServer() {
 			return
 		}
 
-		if payload.Company == "" || payload.Role == "" {
-			http.Error(w, "Company and Role are required", http.StatusBadRequest)
-			return
+		// Accept partial clips — bookmarklet may not always get all fields.
+		// Use the link domain as company fallback, and the full URL as role fallback.
+		if payload.Company == "" {
+			payload.Company = sourceBadge(payload.Link)
+		}
+		if payload.Role == "" {
+			payload.Role = "(Role not detected — update in tracker)"
 		}
 
-		// Route to Clip Inbox in Job Hunt tab for user review, not silently to tracker
+		// Route to Clip Inbox in Job Hunt tab for user review
 		fyne.Do(func() {
 			if state.ClipInboxBox == nil {
 				return
 			}
-			// Remove the placeholder label on first clip
+			// Remove placeholder label on first real clip
 			if len(state.ClipInboxBox.Objects) == 1 {
 				if _, ok := state.ClipInboxBox.Objects[0].(*widget.Label); ok {
 					state.ClipInboxBox.Objects = nil
@@ -3444,6 +3498,6 @@ func startClipServer() {
 	})
 
 	go func() {
-		_ = http.ListenAndServe(":8080", nil)
+		_ = http.ListenAndServe("127.0.0.1:8080", clipMux)
 	}()
 }

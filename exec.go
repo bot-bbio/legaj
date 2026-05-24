@@ -57,6 +57,6 @@ func RunSearchJobs(keywords, location string) (string, error) {
 
 // RunManageApplications executes manage_applications.py
 func RunManageApplications(action string, args ...string) (string, error) {
-	fullArgs := append([]string{"references/job-tracker.xlsx", action}, args...)
+	fullArgs := append([]string{"references/job-tracker.json", action}, args...)
 	return runPythonScript("scripts/manage_applications.py", fullArgs...)
 }

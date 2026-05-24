@@ -70,7 +70,7 @@ type Profile struct {
 
 func callGeminiGo(apiKey, promptText string, isJson bool) (string, error) {
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=%s", apiKey)
-	
+
 	requestBody := map[string]interface{}{
 		"contents": []interface{}{
 			map[string]interface{}{
@@ -139,7 +139,7 @@ func callGeminiGo(apiKey, promptText string, isJson bool) (string, error) {
 
 func callGeminiWithSearchGo(apiKey, promptText string) (string, error) {
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=%s", apiKey)
-	
+
 	requestBody := map[string]interface{}{
 		"contents": []interface{}{
 			map[string]interface{}{
@@ -205,25 +205,25 @@ func callGeminiWithSearchGo(apiKey, promptText string) (string, error) {
 
 // AppState holds the application's global GUI state
 type AppState struct {
-	App             fyne.App
-	Window          fyne.Window
-	Profile         *Profile
-	Applications    []JobApplication
-	SelectedAppIdx  int
-	ApiKey          string
-	Email           string
-	Password        string
-	ImapServer      string
-	SaveFolder      string
-	
+	App            fyne.App
+	Window         fyne.Window
+	Profile        *Profile
+	Applications   []JobApplication
+	SelectedAppIdx int
+	ApiKey         string
+	Email          string
+	Password       string
+	ImapServer     string
+	SaveFolder     string
+
 	// Dashboard widgets
-	WishlistLabel     *widget.Label
-	AppliedLabel      *widget.Label
-	InterviewLabel    *widget.Label
-	OfferLabel        *widget.Label
-	RejectedLabel     *widget.Label
-	RecentBox         *fyne.Container
-	SearchResultsBox  *fyne.Container
+	WishlistLabel    *widget.Label
+	AppliedLabel     *widget.Label
+	InterviewLabel   *widget.Label
+	OfferLabel       *widget.Label
+	RejectedLabel    *widget.Label
+	RecentBox        *fyne.Container
+	SearchResultsBox *fyne.Container
 
 	// Profile widgets
 	NameEntry       *widget.Entry
@@ -251,14 +251,14 @@ type AppState struct {
 	TailorCompare   *fyne.Container
 
 	// Prep widgets
-	PrepJobSelect   *widget.Select
-	PrepStatus      *widget.Label
-	FlashcardBox    *fyne.Container
-	CardQuestion    *widget.Label
-	CardAnswer      *widget.Label
-	CardIndicator   *widget.Label
-	Flashcards      []Flashcard
-	CurrentCardIdx  int
+	PrepJobSelect  *widget.Select
+	PrepStatus     *widget.Label
+	FlashcardBox   *fyne.Container
+	CardQuestion   *widget.Label
+	CardAnswer     *widget.Label
+	CardIndicator  *widget.Label
+	Flashcards     []Flashcard
+	CurrentCardIdx int
 
 	// Settings widgets
 	SettingsApiKey     *widget.Entry
@@ -336,6 +336,7 @@ func startFyneGUI() {
 	profileTab := buildProfileTab()
 	trackerTab := buildTrackerTab()
 	tailoringTab := buildTailoringTab()
+	fileManagerTab := buildFileManagerTab()
 	prepTab := buildPrepTab()
 	settingsTab := buildSettingsTab()
 
@@ -345,12 +346,16 @@ func startFyneGUI() {
 		container.NewTabItemWithIcon("Base Profile", theme.AccountIcon(), profileTab),
 		container.NewTabItemWithIcon("Job Tracker", theme.ListIcon(), trackerTab),
 		container.NewTabItemWithIcon("Tailor Assets", theme.DocumentCreateIcon(), tailoringTab),
+		container.NewTabItemWithIcon("File Manager", theme.FolderIcon(), fileManagerTab),
 		container.NewTabItemWithIcon("Interview Prep", theme.QuestionIcon(), prepTab),
 		container.NewTabItemWithIcon("Settings", theme.SettingsIcon(), settingsTab),
 	)
 	tabs.SetTabLocation(container.TabLocationTop)
 
 	state.Window.SetContent(tabs)
+
+	// Start the local Clip to LeGaJ bookmarklet listener
+	startClipServer()
 
 	// Load stored profile and Excel rows asynchronously
 	go func() {
@@ -480,6 +485,7 @@ func refreshUI() {
 		state.TrackerTable.Refresh()
 	}
 	updateDropdownSelectors()
+	refreshTrackerDetail()
 }
 
 func openLink(urlString string) {
@@ -686,15 +692,15 @@ func createKPICard(title string, valueLabel *widget.Label, borderClr color.Color
 	titleLabel := widget.NewLabelWithStyle(title, fyne.TextAlignCenter, fyne.TextStyle{})
 	rect := canvas.NewRectangle(borderClr)
 	rect.SetMinSize(fyne.NewSize(150, 4))
-	
+
 	cardContent := container.NewVBox(
 		titleLabel,
 		valueLabel,
 		rect,
 	)
-	
+
 	background := canvas.NewRectangle(color.RGBA{R: 30, G: 41, B: 59, A: 120})
-	
+
 	return container.NewMax(
 		background,
 		container.NewBorder(nil, nil, nil, nil, cardContent),
@@ -715,7 +721,7 @@ func updateDashboardStats() {
 			i++
 		case "Offer":
 			o++
-		case "Rejected":
+		case "Rejected", "Ghosted":
 			r++
 		}
 
@@ -932,7 +938,7 @@ func renderExperienceForm() {
 		roleEnt.SetText(exp.Role)
 		locEnt := widget.NewEntry()
 		locEnt.SetText(exp.Location)
-		
+
 		datesEnt := widget.NewEntry()
 		dateVal := exp.StartDate
 		if exp.EndDate != "" {
@@ -957,7 +963,7 @@ func renderExperienceForm() {
 			widget.NewLabel("Dates"), datesEnt,
 			widget.NewLabel("Bullets"), bulletsEnt,
 		)
-		
+
 		card := widget.NewCard(fmt.Sprintf("Experience #%d", idx+1), "", container.NewVBox(expForm, delBtn))
 		state.ExpContainer.Add(card)
 	}
@@ -991,7 +997,7 @@ func renderEducationForm() {
 			widget.NewLabel("Graduation Date"), dateEnt,
 			widget.NewLabel("GPA"), gpaEnt,
 		)
-		
+
 		card := widget.NewCard(fmt.Sprintf("Education #%d", idx+1), "", container.NewVBox(eduForm, delBtn))
 		state.EduContainer.Add(card)
 	}
@@ -1022,7 +1028,7 @@ func renderProjectForm() {
 			widget.NewLabel("Description"), descEnt,
 			widget.NewLabel("Achievements"), detailsEnt,
 		)
-		
+
 		card := widget.NewCard(fmt.Sprintf("Project #%d", idx+1), "", container.NewVBox(projForm, delBtn))
 		state.ProjContainer.Add(card)
 	}
@@ -1049,7 +1055,7 @@ func gatherProfileFromForm() {
 		card := child.(*widget.Card)
 		cardContent := card.Content.(*fyne.Container)
 		formLayout := cardContent.Objects[0].(*fyne.Container)
-		
+
 		comp := formLayout.Objects[1].(*widget.Entry).Text
 		role := formLayout.Objects[3].(*widget.Entry).Text
 		loc := formLayout.Objects[5].(*widget.Entry).Text
@@ -1128,8 +1134,71 @@ func splitDates(s string) (string, string) {
 	return s, ""
 }
 
+var (
+	trackerDetailTitle  *widget.Label
+	trackerDetailSub    *widget.Label
+	trackerDetailStatus *widget.Label
+	trackerDetailNotes  *widget.Label
+	trackerResumeLink   *widget.Button
+	trackerCoverLink    *widget.Button
+)
+
+func refreshTrackerDetail() {
+	if trackerDetailTitle == nil {
+		return
+	}
+	if state.TrackerSelected == nil {
+		trackerDetailTitle.SetText("No Application Selected")
+		trackerDetailSub.SetText("")
+		trackerDetailStatus.SetText("")
+		trackerDetailNotes.SetText("Select an application from the table to view details and generated files.")
+		trackerResumeLink.Hide()
+		trackerCoverLink.Hide()
+		return
+	}
+	app := *state.TrackerSelected
+	trackerDetailTitle.SetText(fmt.Sprintf("%s at %s", app.Role, app.Company))
+	trackerDetailSub.SetText(fmt.Sprintf("Applied: %s  ·  Location: %s", app.Date, app.Location))
+	trackerDetailStatus.SetText(fmt.Sprintf("Status: %s", app.Status))
+	trackerDetailNotes.SetText(fmt.Sprintf("Notes:\n%s", app.Notes))
+
+	resPath := filepath.Join(state.SaveFolder, app.Resume)
+	if _, err := os.Stat(resPath); err == nil && app.Resume != "" {
+		trackerResumeLink.SetText("Open Tailored Resume")
+		trackerResumeLink.OnTapped = func() {
+			openLink("file:///" + filepath.ToSlash(resPath))
+		}
+		trackerResumeLink.Show()
+	} else {
+		trackerResumeLink.Hide()
+	}
+
+	clPath := filepath.Join(state.SaveFolder, app.CoverLetter)
+	if _, err := os.Stat(clPath); err == nil && app.CoverLetter != "" {
+		trackerCoverLink.SetText("Open Cover Letter")
+		trackerCoverLink.OnTapped = func() {
+			openLink("file:///" + filepath.ToSlash(clPath))
+		}
+		trackerCoverLink.Show()
+	} else {
+		trackerCoverLink.Hide()
+	}
+}
+
 // 3. JOB TRACKER SPREADSHEET TABLE VIEW
 func buildTrackerTab() fyne.CanvasObject {
+	// Initialize package labels/buttons for detail view
+	trackerDetailTitle = widget.NewLabelWithStyle("No Application Selected", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+	trackerDetailSub = widget.NewLabel("")
+	trackerDetailStatus = widget.NewLabel("")
+	trackerDetailNotes = widget.NewLabel("Select an application from the table to view details and generated files.")
+	trackerDetailNotes.Wrapping = fyne.TextWrapWord
+
+	trackerResumeLink = widget.NewButtonWithIcon("Open Tailored Resume", theme.DocumentIcon(), nil)
+	trackerCoverLink = widget.NewButtonWithIcon("Open Cover Letter", theme.DocumentIcon(), nil)
+	trackerResumeLink.Hide()
+	trackerCoverLink.Hide()
+
 	// Table widget setup for spreadsheet-like grid layout
 	state.TrackerTable = widget.NewTable(
 		func() (int, int) {
@@ -1169,16 +1238,17 @@ func buildTrackerTab() fyne.CanvasObject {
 
 	// Set column widths to look like spreadsheet grid
 	state.TrackerTable.SetColumnWidth(0, 150)
-	state.TrackerTable.SetColumnWidth(1, 200)
-	state.TrackerTable.SetColumnWidth(2, 120)
-	state.TrackerTable.SetColumnWidth(3, 100)
-	state.TrackerTable.SetColumnWidth(4, 100)
+	state.TrackerTable.SetColumnWidth(1, 180)
+	state.TrackerTable.SetColumnWidth(2, 110)
+	state.TrackerTable.SetColumnWidth(3, 90)
+	state.TrackerTable.SetColumnWidth(4, 90)
 
 	state.TrackerTable.OnSelected = func(id widget.TableCellID) {
 		if id.Row > 0 && id.Row-1 < len(state.Applications) {
 			app := state.Applications[id.Row-1]
 			state.TrackerSelected = &app
 			state.SelectedAppIdx = id.Row - 1
+			refreshTrackerDetail()
 		}
 	}
 
@@ -1218,17 +1288,32 @@ func buildTrackerTab() fyne.CanvasObject {
 	})
 
 	controlBar := container.NewHBox(addBtn, updateBtn, syncBtn)
-	
-	tableCard := widget.NewCard("Job Tracker Spreadsheet", "Click any row cell to select an application card", state.TrackerTable)
+
+	tableCard := widget.NewCard("Job Tracker", "Click any row cell to select an application", state.TrackerTable)
 	tableContainer := container.NewBorder(nil, nil, nil, nil, tableCard)
 
-	return container.NewBorder(controlBar, nil, nil, nil, tableContainer)
+	detailCard := widget.NewCard("Application Details", "", container.NewVBox(
+		trackerDetailTitle,
+		trackerDetailSub,
+		trackerDetailStatus,
+		widget.NewSeparator(),
+		container.NewVScroll(trackerDetailNotes),
+		widget.NewSeparator(),
+		trackerResumeLink,
+		trackerCoverLink,
+	))
+
+	split := container.NewHSplit(tableContainer, detailCard)
+	split.SetOffset(0.6) // 60% table, 40% detail view
+
+	return container.NewBorder(controlBar, nil, nil, nil, split)
 }
 
 func updateTrackerList() {
 	if state.TrackerTable != nil {
 		state.TrackerTable.Refresh()
 	}
+	refreshTrackerDetail()
 }
 
 func openAddJobModal(job *JobApplication) {
@@ -1238,8 +1323,8 @@ func openAddJobModal(job *JobApplication) {
 	dateEnt := widget.NewEntry()
 	linkEnt := widget.NewEntry()
 	notesEnt := widget.NewEntry()
-	
-	statusSelect := widget.NewSelect([]string{"Wishlist", "Applied", "Interviewing", "Offer", "Rejected"}, nil)
+
+	statusSelect := widget.NewSelect([]string{"Wishlist", "Applied", "Interviewing", "Offer", "Rejected", "Ghosted"}, nil)
 	statusSelect.SetSelected("Applied")
 
 	dateEnt.SetText(time.Now().Format("2006-01-02"))
@@ -1286,7 +1371,7 @@ func openAddJobModal(job *JobApplication) {
 				clPdfName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(compEnt.Text, " ", "_"))
 				_, err = RunManageApplications("add", compEnt.Text, roleEnt.Text, locEnt.Text, linkEnt.Text, resPdfName, clPdfName, notesEnt.Text)
 			}
-			
+
 			fyne.Do(func() {
 				progress.Hide()
 				if err != nil {
@@ -1385,7 +1470,7 @@ func buildTailoringTab() fyne.CanvasObject {
 
 		go func() {
 			outputPath := filepath.Join(state.SaveFolder, fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(comp, " ", "_")))
-			
+
 			// Draft prompt aligning with style guide
 			profileBytes, _ := os.ReadFile("references/user-profile.json")
 			draftPrompt := fmt.Sprintf(`Write a professional 4-paragraph cover letter for Roberto Montero for the role of "%s" at "%s".
@@ -1673,9 +1758,24 @@ func buildSettingsTab() fyne.CanvasObject {
 
 	// Help and Documentation
 	helpDoc := widget.NewCard("LeGaJ Help & Documentation", "", container.NewVBox(
-		widget.NewLabel("1. Overview: Matches profile details to job postings, tailors experiences, drafts cover letters, and logs tracked row states in Excel."),
+		widget.NewLabel("1. Overview: Matches profile details to job postings, tailors experiences, drafts cover letters, and logs tracked row states locally."),
 		widget.NewLabel("2. Save Directory: Output PDFs (Resume/Cover Letter) compile into your Custom Save Folder (defaults to Google Drive)."),
 		widget.NewLabel("3. Templates: Formatting applies Times New Roman styling and strict single-page constraints."),
+	))
+
+	bookmarkletJs := `javascript:(function(){var c=document.querySelector(".job-details-jobs-unified-top-card__company-name")?.innerText||prompt("Company:"),r=document.querySelector(".job-details-jobs-unified-top-card__job-title")?.innerText||prompt("Role:"),l=document.querySelector(".job-details-jobs-unified-top-card__bullet")?.innerText||prompt("Location:"),d=document.querySelector("#job-details")?.innerText||"";if(!c||!r)return;fetch("http://localhost:8080/clip",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({company:c.trim(),role:r.trim(),location:(l||"").trim(),link:window.location.href,description:d.substring(0,300).trim()})}).then(res=>res.json()).then(data=>alert("Clipped to LeGaJ!")).catch(err=>alert("Error: "+err));})();`
+	bookmarkletEntry := widget.NewEntry()
+	bookmarkletEntry.SetText(bookmarkletJs)
+
+	bookmarkletCard := widget.NewCard("Clip to LeGaJ Browser Bookmarklet", "Copy the javascript below and add it as a browser bookmark URL:", container.NewVBox(
+		bookmarkletEntry,
+		widget.NewLabel("Click the bookmark on LinkedIn job listing pages to clip details directly into your dashboard."),
+	))
+
+	securityCard := widget.NewCard("Security & Ethics Disclosure", "", container.NewVBox(
+		widget.NewLabel("• LeGaJ operates 100% locally. Your PII (name, email, phone) and Gemini API Keys are kept on your machine."),
+		widget.NewLabel("• The application NEVER auto-submits applications. It compiles PDFs for you to review and apply yourself."),
+		widget.NewLabel("• AI features are used solely for structuring profile fields, tailoring resume bullets, and drafting cover letters."),
 	))
 
 	// Hyperlinked Creator Credits
@@ -1698,6 +1798,8 @@ func buildSettingsTab() fyne.CanvasObject {
 		container.NewHBox(saveBtn, wizardBtn),
 		widget.NewSeparator(),
 		helpDoc,
+		bookmarkletCard,
+		securityCard,
 		widget.NewSeparator(),
 		creditsRow,
 	)
@@ -1711,9 +1813,15 @@ func buildSettingsTab() fyne.CanvasObject {
 
 func showOnboardingWizard() {
 	wizardWindow := state.App.NewWindow("LeGaJ - Setup Wizard")
-	wizardWindow.Resize(fyne.NewSize(650, 500))
+	wizardWindow.Resize(fyne.NewSize(650, 520))
 
-	// Step 1: Welcome & Paths
+	// Navigation buttons
+	nextBtn := widget.NewButton("Next", nil)
+	backBtn := widget.NewButton("Back", nil)
+	backBtn.Disable()
+	nextBtn.Disable() // Disabled by default in step 1 until connections verified
+
+	// Step 1: Welcome & Paths & Connections Test
 	apiKeyEntry := widget.NewPasswordEntry()
 	apiKeyEntry.SetText(state.ApiKey)
 
@@ -1743,34 +1851,75 @@ func showOnboardingWizard() {
 		od.Show()
 	})
 
+	progressLabelConn := widget.NewLabel("Connections not verified yet.")
+	testConnBtn := widget.NewButton("Test Connection & Directory", func() {
+		progressLabelConn.SetText("Verifying Gemini API key & folder write permissions...")
+		go func() {
+			_, err := callGeminiGo(apiKeyEntry.Text, "Say Hi", false)
+			apiOk := err == nil
+
+			dirOk := false
+			dummyFile := filepath.Join(saveFolderLabel.Text, ".legaj_test_write")
+			err = os.WriteFile(dummyFile, []byte("test"), 0644)
+			if err == nil {
+				os.Remove(dummyFile)
+				dirOk = true
+			}
+
+			fyne.Do(func() {
+				if apiOk && dirOk {
+					progressLabelConn.SetText("✓ API Connection and Folder permissions verified!")
+					nextBtn.Enable()
+				} else {
+					errMsg := ""
+					if !apiOk {
+						errMsg += "Gemini API test failed. Check API key. "
+					}
+					if !dirOk {
+						errMsg += "Folder is not writable. Check folder permissions."
+					}
+					progressLabelConn.SetText("✗ Verification failed: " + errMsg)
+					nextBtn.Disable()
+				}
+			})
+		}()
+	})
+
 	step1 := container.NewVBox(
 		widget.NewLabelWithStyle("Welcome to LeGaJ!", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-		widget.NewLabel("Let's configure your API key, resume, and output folder to get you started."),
+		widget.NewLabel("Step 1: Configure your API keys, resume, and output folder permissions."),
 		widget.NewSeparator(),
 		container.New(layout.NewFormLayout(),
 			widget.NewLabel("Gemini API Key"), apiKeyEntry,
 			widget.NewLabel("Base Resume"), container.NewHBox(selectResumeBtn, resumePathLabel),
 			widget.NewLabel("Save Folder"), container.NewHBox(selectFolderBtn, saveFolderLabel),
 		),
+		testConnBtn,
+		progressLabelConn,
 	)
 
 	// Step 2: Preference & Parse
 	roleEntry := widget.NewEntry()
 	roleEntry.SetText("Product Manager")
-	progressLabel := widget.NewLabel("")
-	
-	// Step 3 Bypass Option: allow manual bypass if parsing fails
+	locPrefEntry := widget.NewEntry()
+	locPrefEntry.SetText("New York, NY")
+	salaryPrefEntry := widget.NewEntry()
+	salaryPrefEntry.SetText("$100k-$120k")
+
+	progressLabel2 := widget.NewLabel("")
 	bypassBtn := widget.NewButton("Manually Enter Details (Bypass)", nil)
 	bypassBtn.Hide()
 
 	step2 := container.NewVBox(
-		widget.NewLabelWithStyle("Preferences & Profile Parsing", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-		widget.NewLabel("Define your target job role. Gemini will parse and structure your resume details."),
+		widget.NewLabelWithStyle("Step 2: Job Preferences & Resume Parsing", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("Specify job search preferences. Gemini will parse and structure your resume details."),
 		widget.NewSeparator(),
 		container.New(layout.NewFormLayout(),
 			widget.NewLabel("Target Job Role"), roleEntry,
+			widget.NewLabel("Location Prefs"), locPrefEntry,
+			widget.NewLabel("Target Salary"), salaryPrefEntry,
 		),
-		progressLabel,
+		progressLabel2,
 		bypassBtn,
 	)
 
@@ -1788,30 +1937,64 @@ func showOnboardingWizard() {
 	)
 
 	step3 := container.NewVBox(
-		widget.NewLabelWithStyle("Verify Your Profile Details", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-		widget.NewLabel("Confirm or edit your personal info before finalizing:"),
+		widget.NewLabelWithStyle("Step 3: Verify Parsed Details", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("Confirm or edit your personal info before verifying the search grounding:"),
 		widget.NewSeparator(),
 		step3Form,
 	)
 
-	stepContainer := container.NewMax(step1)
-	
-	nextBtn := widget.NewButton("Next", nil)
-	backBtn := widget.NewButton("Back", nil)
-	backBtn.Disable()
+	// Step 4: Verification (Test Search)
+	testSearchLabel := widget.NewLabel("Verification not run yet.")
+	testSearchLabel.Wrapping = fyne.TextWrapWord
+	testSearchScroll := container.NewVScroll(testSearchLabel)
+	testSearchScroll.SetMinSize(fyne.NewSize(500, 150))
 
+	runTestSearchBtn := widget.NewButton("Run Grounding test search", func() {
+		testSearchLabel.SetText("Running grounding search test query via Google Grounding...")
+		go func() {
+			testQuery := fmt.Sprintf(`Search Google briefly for 1 job listing matching "%s" in "%s". Return only a JSON array with company, role, location, link, description.`, roleEntry.Text, locEntry.Text)
+			res, err := callGeminiWithSearchGo(apiKeyEntry.Text, testQuery)
+			fyne.Do(func() {
+				if err != nil {
+					testSearchLabel.SetText(fmt.Sprintf("✗ Search Grounding test failed: %v", err))
+					nextBtn.Disable()
+				} else {
+					testSearchLabel.SetText(fmt.Sprintf("✓ Grounding verification successful!\nRaw output:\n%s", res))
+					nextBtn.Enable()
+				}
+			})
+		}()
+	})
+
+	step4 := container.NewVBox(
+		widget.NewLabelWithStyle("Step 4: Search Grounding Verification", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("Verify that Google Search Grounding is fully active and returns listings:"),
+		widget.NewSeparator(),
+		runTestSearchBtn,
+		testSearchScroll,
+	)
+
+	stepContainer := container.NewMax(step1)
 	currentStep := 1
 
 	updateButtons := func() {
 		if currentStep == 1 {
 			backBtn.Disable()
 			nextBtn.SetText("Next")
+			// API & path must be validated first
+			nextBtn.Disable()
 		} else if currentStep == 2 {
 			backBtn.Enable()
+			nextBtn.Enable()
 			nextBtn.SetText("Parse Resume & Continue")
 		} else if currentStep == 3 {
 			backBtn.Enable()
+			nextBtn.Enable()
+			nextBtn.SetText("Next")
+		} else if currentStep == 4 {
+			backBtn.Enable()
 			nextBtn.SetText("Finish Setup")
+			nextBtn.Disable() // Disabled until grounding test runs successfully
 		}
 	}
 
@@ -1820,8 +2003,7 @@ func showOnboardingWizard() {
 		stepContainer.Objects = []fyne.CanvasObject{step3}
 		stepContainer.Refresh()
 		updateButtons()
-		
-		// Prefill form with empty or whatever we have
+
 		nameEntry.SetText("")
 		emailEntry.SetText("")
 		phoneEntry.SetText("")
@@ -1831,16 +2013,9 @@ func showOnboardingWizard() {
 
 	nextBtn.OnTapped = func() {
 		if currentStep == 1 {
-			if apiKeyEntry.Text == "" {
-				dialog.ShowInformation("Required Info", "Please enter your Gemini API Key.", wizardWindow)
-				return
-			}
-			if resumePathLabel.Text == "No resume file selected" {
-				dialog.ShowInformation("Required Info", "Please select your base resume file.", wizardWindow)
-				return
-			}
 			state.ApiKey = apiKeyEntry.Text
 			state.SaveFolder = saveFolderLabel.Text
+			saveConfigurations()
 
 			currentStep = 2
 			stepContainer.Objects = []fyne.CanvasObject{step2}
@@ -1852,7 +2027,7 @@ func showOnboardingWizard() {
 				return
 			}
 
-			progressLabel.SetText("Reading resume and parsing structure via Gemini...")
+			progressLabel2.SetText("Reading resume and parsing structure via Gemini...")
 			nextBtn.Disable()
 			backBtn.Disable()
 			bypassBtn.Show()
@@ -1862,7 +2037,7 @@ func showOnboardingWizard() {
 				if err != nil {
 					fyne.Do(func() {
 						dialog.ShowError(err, wizardWindow)
-						progressLabel.SetText("Failed parsing file. You can bypass using the button below.")
+						progressLabel2.SetText("Failed parsing file. You can bypass using the button below.")
 						nextBtn.Enable()
 						backBtn.Enable()
 					})
@@ -1920,7 +2095,7 @@ Resume Text:
 				if err != nil {
 					fyne.Do(func() {
 						dialog.ShowError(err, wizardWindow)
-						progressLabel.SetText("Failed calling Gemini API. You can bypass using the button below.")
+						progressLabel2.SetText("Failed calling Gemini API. You can bypass using the button below.")
 						nextBtn.Enable()
 						backBtn.Enable()
 					})
@@ -1936,7 +2111,6 @@ Resume Text:
 					phoneEntry.SetText(state.Profile.PersonalInfo.Phone)
 					locEntry.SetText(state.Profile.PersonalInfo.Location)
 
-					// Show warning formatting highlights if email/phone missing
 					if state.Profile.PersonalInfo.Email == "" {
 						emailEntry.SetPlaceHolder("Warning: Missing email address")
 					}
@@ -1954,12 +2128,11 @@ Resume Text:
 				})
 			}()
 		} else if currentStep == 3 {
-			// Save changes and configure app
 			state.Profile.PersonalInfo.Name = nameEntry.Text
 			state.Profile.PersonalInfo.Email = emailEntry.Text
 			state.Profile.PersonalInfo.Phone = phoneEntry.Text
 			state.Profile.PersonalInfo.Location = locEntry.Text
-			
+
 			if len(state.Profile.TargetRoles) == 0 {
 				state.Profile.TargetRoles = []string{roleEntry.Text}
 			} else {
@@ -1967,10 +2140,13 @@ Resume Text:
 			}
 
 			saveProfileData()
-			saveConfigurations()
 
-			dialog.ShowInformation("Setup Finished", "Profile saved successfully!", wizardWindow)
-			
+			currentStep = 4
+			stepContainer.Objects = []fyne.CanvasObject{step4}
+			stepContainer.Refresh()
+			updateButtons()
+		} else if currentStep == 4 {
+			dialog.ShowInformation("Setup Finished", "Profile and connectivity verification complete!", wizardWindow)
 			reloadAllViews()
 			wizardWindow.Close()
 		}
@@ -1986,6 +2162,11 @@ Resume Text:
 		} else if currentStep == 3 {
 			currentStep = 2
 			stepContainer.Objects = []fyne.CanvasObject{step2}
+			stepContainer.Refresh()
+			updateButtons()
+		} else if currentStep == 4 {
+			currentStep = 3
+			stepContainer.Objects = []fyne.CanvasObject{step3}
 			stepContainer.Refresh()
 			updateButtons()
 		}
@@ -2013,7 +2194,7 @@ func runTrackAndTailorAutomation(company, role, location, link, desc string) {
 		// 1. Add to excel tracker
 		resumePdfName := fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(company, " ", "_"))
 		coverLetterPdfName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(company, " ", "_"))
-		
+
 		_, err := RunManageApplications("add", company, role, location, link, resumePdfName, coverLetterPdfName, "Auto-tailored and tracked.")
 		if err != nil {
 			fyne.Do(func() {
@@ -2132,5 +2313,309 @@ Output ONLY the cover letter text, no conversational intro or outro.`, role, com
 			dialog.ShowInformation("Pipeline Complete", fmt.Sprintf("Successfully tracked job, tailored resume, and compiled PDFs!\n\nSaved Resume: %s\nSaved Cover Letter: %s", resumeOutputPath, coverOutputPath), state.Window)
 			reloadAllViews()
 		})
+	}()
+}
+
+// -------------------------------------------------------------
+// FILE MANAGER VIEW & NAVIGATION
+// -------------------------------------------------------------
+var (
+	fmCurrentDir    string
+	fmHistory       []string
+	fmExplorerBox   *fyne.Container
+	fmPreviewBox    *fyne.Container
+	fmPathLabel     *widget.Label
+	fmGridViewMode  = false
+	fmSelectedFile  string
+)
+
+func selectFileManagerFile(filename string) {
+	fmSelectedFile = filepath.Join(fmCurrentDir, filename)
+	info, err := os.Stat(fmSelectedFile)
+	if err != nil {
+		fmPreviewBox.Objects = []fyne.CanvasObject{widget.NewLabel(fmt.Sprintf("Error reading file: %v", err))}
+		fmPreviewBox.Refresh()
+		return
+	}
+
+	sizeStr := fmt.Sprintf("%.2f KB", float64(info.Size())/1024.0)
+	modTimeStr := info.ModTime().Format("2006-01-02 15:04:05")
+
+	titleLabel := widget.NewLabelWithStyle(filename, fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+	sizeLabel := widget.NewLabel(fmt.Sprintf("Size: %s", sizeStr))
+	dateLabel := widget.NewLabel(fmt.Sprintf("Modified: %s", modTimeStr))
+
+	openBtn := widget.NewButtonWithIcon("Open Document", theme.HelpIcon(), func() {
+		openLink("file:///" + filepath.ToSlash(fmSelectedFile))
+	})
+
+	renameBtn := widget.NewButtonWithIcon("Rename", theme.DocumentCreateIcon(), func() {
+		renameEntry := widget.NewEntry()
+		renameEntry.SetText(filename)
+		dialog.ShowCustomConfirm("Rename File", "Save", "Cancel", renameEntry, func(confirmed bool) {
+			if confirmed && renameEntry.Text != "" {
+				newPath := filepath.Join(fmCurrentDir, renameEntry.Text)
+				err := os.Rename(fmSelectedFile, newPath)
+				if err != nil {
+					dialog.ShowError(err, state.Window)
+				} else {
+					selectFileManagerFile(renameEntry.Text)
+					refreshFileManager()
+				}
+			}
+		}, state.Window)
+	})
+
+	deleteBtn := widget.NewButtonWithIcon("Delete", theme.DeleteIcon(), func() {
+		dialog.ShowConfirm("Confirm Delete", fmt.Sprintf("Are you sure you want to permanently delete %s?", filename), func(confirmed bool) {
+			if confirmed {
+				err := os.Remove(fmSelectedFile)
+				if err != nil {
+					dialog.ShowError(err, state.Window)
+				} else {
+					fmSelectedFile = ""
+					fmPreviewBox.Objects = []fyne.CanvasObject{widget.NewLabel("No file selected")}
+					fmPreviewBox.Refresh()
+					refreshFileManager()
+				}
+			}
+		}, state.Window)
+	})
+	deleteBtn.Importance = widget.DangerImportance
+
+	actionButtons := container.NewVBox(openBtn, renameBtn, deleteBtn)
+
+	fmPreviewBox.Objects = []fyne.CanvasObject{
+		container.NewVBox(
+			titleLabel,
+			widget.NewSeparator(),
+			sizeLabel,
+			dateLabel,
+			widget.NewSeparator(),
+			actionButtons,
+		),
+	}
+	fmPreviewBox.Refresh()
+}
+
+func refreshFileManager() {
+	if fmCurrentDir == "" {
+		fmCurrentDir = state.SaveFolder
+		if fmCurrentDir == "" {
+			fmCurrentDir = "."
+		}
+	}
+	fmCurrentDir = filepath.Clean(fmCurrentDir)
+	fmPathLabel.SetText(fmCurrentDir)
+
+	entries, err := os.ReadDir(fmCurrentDir)
+	if err != nil {
+		fmExplorerBox.Objects = []fyne.CanvasObject{widget.NewLabel(fmt.Sprintf("Error reading dir: %v", err))}
+		fmExplorerBox.Refresh()
+		return
+	}
+
+	var folders []os.DirEntry
+	var files []os.DirEntry
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		if entry.IsDir() {
+			folders = append(folders, entry)
+		} else {
+			files = append(files, entry)
+		}
+	}
+
+	allEntries := append(folders, files...)
+
+	if len(allEntries) == 0 {
+		fmExplorerBox.Objects = []fyne.CanvasObject{widget.NewLabel("Directory is empty")}
+		fmExplorerBox.Refresh()
+		return
+	}
+
+	fmExplorerBox.Objects = nil
+	if fmGridViewMode {
+		gridContainer := container.New(layout.NewGridWrapLayout(fyne.NewSize(130, 150)))
+		for _, entry := range allEntries {
+			e := entry
+			name := e.Name()
+			isDir := e.IsDir()
+
+			icon := theme.DocumentIcon()
+			if isDir {
+				icon = theme.FolderIcon()
+			}
+
+			iconWidget := widget.NewIcon(icon)
+			nameLabel := widget.NewLabel(name)
+			nameLabel.Alignment = fyne.TextAlignCenter
+			nameLabel.Wrapping = fyne.TextWrapOff
+
+			cardContent := container.NewVBox(
+				container.NewCenter(iconWidget),
+				nameLabel,
+			)
+
+			btn := widget.NewButton("", func() {
+				if isDir {
+					fmHistory = append(fmHistory, fmCurrentDir)
+					fmCurrentDir = filepath.Join(fmCurrentDir, name)
+					refreshFileManager()
+				} else {
+					selectFileManagerFile(name)
+				}
+			})
+
+			card := widget.NewCard("", "", container.NewMax(cardContent, btn))
+			gridContainer.Add(container.NewPadded(card))
+		}
+		fmExplorerBox.Add(gridContainer)
+	} else {
+		for _, entry := range allEntries {
+			e := entry
+			name := e.Name()
+			isDir := e.IsDir()
+
+			icon := theme.DocumentIcon()
+			if isDir {
+				icon = theme.FolderIcon()
+			}
+
+			iconWidget := widget.NewIcon(icon)
+			nameLabel := widget.NewLabel(name)
+
+			row := container.NewHBox(
+				iconWidget,
+				nameLabel,
+				layout.NewSpacer(),
+			)
+
+			btnText := "Open"
+			if !isDir {
+				btnText = "View"
+			}
+			btn := widget.NewButtonWithIcon(btnText, icon, func() {
+				if isDir {
+					fmHistory = append(fmHistory, fmCurrentDir)
+					fmCurrentDir = filepath.Join(fmCurrentDir, name)
+					refreshFileManager()
+				} else {
+					selectFileManagerFile(name)
+				}
+			})
+			row.Add(btn)
+			fmExplorerBox.Add(row)
+		}
+	}
+	fmExplorerBox.Refresh()
+}
+
+func buildFileManagerTab() fyne.CanvasObject {
+	fmCurrentDir = state.SaveFolder
+	if fmCurrentDir == "" {
+		fmCurrentDir = "."
+	}
+
+	fmPathLabel = widget.NewLabel(fmCurrentDir)
+	fmPathLabel.Wrapping = fyne.TextWrapOff
+
+	backBtn := widget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() {
+		if len(fmHistory) > 0 {
+			fmCurrentDir = fmHistory[len(fmHistory)-1]
+			fmHistory = fmHistory[:len(fmHistory)-1]
+			refreshFileManager()
+		}
+	})
+
+	toggleBtn := widget.NewButtonWithIcon("", theme.GridIcon(), func() {
+		fmGridViewMode = !fmGridViewMode
+		refreshFileManager()
+	})
+
+	refreshBtn := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), func() {
+		refreshFileManager()
+	})
+
+	toolbar := container.NewHBox(
+		backBtn,
+		refreshBtn,
+		toggleBtn,
+		fmPathLabel,
+	)
+
+	fmExplorerBox = container.NewVBox()
+	explorerScroll := container.NewVScroll(fmExplorerBox)
+	explorerScroll.SetMinSize(fyne.NewSize(300, 400))
+
+	fmPreviewBox = container.NewVBox(widget.NewLabel("Select a file to preview"))
+	previewScroll := container.NewVScroll(fmPreviewBox)
+	previewScroll.SetMinSize(fyne.NewSize(200, 400))
+
+	split := container.NewHSplit(explorerScroll, previewScroll)
+	split.SetOffset(0.55)
+
+	content := container.NewBorder(toolbar, nil, nil, nil, split)
+
+	refreshFileManager()
+
+	return content
+}
+
+func startClipServer() {
+	http.HandleFunc("/clip", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		if r.Method != "POST" {
+			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var payload struct {
+			Company     string `json:"company"`
+			Role        string `json:"role"`
+			Location    string `json:"location"`
+			Link        string `json:"link"`
+			Description string `json:"description"`
+		}
+
+		err := json.NewDecoder(r.Body).Decode(&payload)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if payload.Company == "" || payload.Role == "" {
+			http.Error(w, "Company and Role are required", http.StatusBadRequest)
+			return
+		}
+
+		resumePdfName := fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(payload.Company, " ", "_"))
+		coverLetterPdfName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(payload.Company, " ", "_"))
+
+		_, err = RunManageApplications("add", payload.Company, payload.Role, payload.Location, payload.Link, resumePdfName, coverLetterPdfName, "Clipped from browser. "+payload.Description)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		reloadAllViews()
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+	})
+
+	go func() {
+		_ = http.ListenAndServe(":8080", nil)
 	}()
 }

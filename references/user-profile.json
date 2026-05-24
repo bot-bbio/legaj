@@ -3,11 +3,13 @@
     "name": "Roberto Montero",
     "email": "0.Roberto.Montero@gmail.com",
     "phone": "(813)-597-5308",
-    "location": "",
+    "location": "New York, NY",
     "linkedin": "",
     "website": ""
   },
-  "target_roles": [],
+  "target_roles": [
+    "Product Manager"
+  ],
   "education": [
     {
       "institution": "Binghamton University, State University of New York",
@@ -16,7 +18,7 @@
       "graduation_date": "May 2020",
       "location": "Binghamton, NY",
       "gpa": "",
-      "details": "Harpur College of Arts and Sciences\nPublished Research: Montero, R. (2018). Love in the Flesh, Toni Morrison and Hortense Spillers 30 years after Beloved and Mama’s Baby, Papa’s Maybe. Alpenglow: Binghamton University Undergraduate Journal of Research and Creative Activity, 4(1). Retrieved from https://orb.binghamton.edu/alpenglowjournal/vol4/iss1/4\nConference Presentations: Montero, R. (2018). Plantation Ecologies: mapping world-ecological transformations in Sugar and Cotton slavery from 1700-1860. Paper presented at Sixth Biennial Sociology Graduate Student Conference in Binghamton, NY. Presented as poster at Institute for the Advanced Studies in the Humanities symposium in Binghamton, NY."
+      "details": "Harpur College of Arts and Sciences. Published Research: Montero, R. (2018). Love in the Flesh, Toni Morrison and Hortense Spillers 30 years after Beloved and Mama’s Baby, Papa’s Maybe. Alpenglow: Binghamton University Undergraduate Journal of Research and Creative Activity, 4(1). Retrieved from https://orb.binghamton.edu/alpenglowjournal/vol4/iss1/4. Conference Presentations: Montero, R. (2018). Plantation Ecologies: mapping world-ecological transformations in Sugar and Cotton slavery from 1700-1860. Paper presented at Sixth Biennial Sociology Graduate Student Conference in Binghamton, NY. Presented as poster at Institute for the Advanced Studies in the Humanities symposium in Binghamton, NY."
     }
   ],
   "experience": [
@@ -27,7 +29,7 @@
       "start_date": "September 2025",
       "end_date": "Present",
       "bullets": [
-        "Surpassed 157% achievement in personal KPIs while generating in excess of $400,000 in revenue during Q1 of 2026",
+        "Surpassed 157% achievement in personal KPIs while generating in excess of $400,000 in revenue during Q1of 2026",
         "Acted as the primary liaison between cross-functional internal teams and external partners, navigating complex stakeholder interests and aligning project deliverables with client expectations to ensure long-term retention",
         "Pioneered AI-Integrated workflows to maximize efficiency and mastery of proprietary CRM software, LinkedIn Recruiter and Salesforce to service client needs in cross-functional research projects",
         "Generated over 133% revenue growth quarter-over-quarter for a middle market Private Equity client after taking over main project and relationship management responsibilities, including their highest monthly spend in over four years",
@@ -83,16 +85,16 @@
   ],
   "projects": [],
   "skills": {
+    "product_management": [],
     "technical": [
       "AI-Integrated workflows",
-      "Proprietary CRM software",
+      "CRM software",
       "LinkedIn Recruiter",
       "Salesforce",
       "Monday.com",
       "LinkedIn Sales Navigator",
       "MRI Property Management Suite",
       "AppFolio PM software"
-    ],
-    "product_management": []
+    ]
   }
 }

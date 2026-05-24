@@ -457,6 +457,7 @@ type AppState struct {
 	RejectedLabel    *widget.Label
 	RecentBox        *fyne.Container
 	SearchResultsBox *fyne.Container
+	ClipInboxBox     *fyne.Container
 
 	// Profile widgets
 	NameEntry       *widget.Entry
@@ -1075,8 +1076,90 @@ Return ONLY valid JSON. No markdown, no explanation.`, kw, loc)
 		resultsScroll,
 	))
 
+	// ── Manual Entry Card ──
+	manualCompany := widget.NewEntry()
+	manualCompany.SetPlaceHolder("e.g. Acme Corp")
+	manualRole := widget.NewEntry()
+	manualRole.SetPlaceHolder("e.g. Product Manager")
+	manualLocation := widget.NewEntry()
+	manualLocation.SetPlaceHolder("e.g. New York, NY or Remote")
+	manualLink := widget.NewEntry()
+	manualLink.SetPlaceHolder("https://careers.acme.com/jobs/12345")
+	manualDesc := widget.NewMultiLineEntry()
+	manualDesc.SetPlaceHolder("Paste the job description or key requirements here (optional)...")
+	manualDesc.SetMinRowsVisible(3)
+	manualDesc.Wrapping = fyne.TextWrapWord
+
+	manualTrackBtn := widget.NewButtonWithIcon("Track & Tailor", theme.DocumentCreateIcon(), func() {
+		if manualCompany.Text == "" || manualRole.Text == "" {
+			dialog.ShowInformation("Required", "Company and Role are required.", state.Window)
+			return
+		}
+		runTrackAndTailorAutomation(manualCompany.Text, manualRole.Text, manualLocation.Text, manualLink.Text, manualDesc.Text)
+		// Clear form after submitting
+		manualCompany.SetText("")
+		manualRole.SetText("")
+		manualLocation.SetText("")
+		manualLink.SetText("")
+		manualDesc.SetText("")
+	})
+	manualTrackBtn.Importance = widget.HighImportance
+
+	manualAddToTrackerBtn := widget.NewButtonWithIcon("Add to Tracker Only", theme.ContentAddIcon(), func() {
+		if manualCompany.Text == "" || manualRole.Text == "" {
+			dialog.ShowInformation("Required", "Company and Role are required.", state.Window)
+			return
+		}
+		resumeName := fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(manualCompany.Text, " ", "_"))
+		coverName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(manualCompany.Text, " ", "_"))
+		_, err := RunManageApplications("add", manualCompany.Text, manualRole.Text, manualLocation.Text, manualLink.Text, resumeName, coverName, manualDesc.Text)
+		if err != nil {
+			dialog.ShowError(err, state.Window)
+			return
+		}
+		reloadAllViews()
+		manualCompany.SetText("")
+		manualRole.SetText("")
+		manualLocation.SetText("")
+		manualLink.SetText("")
+		manualDesc.SetText("")
+		dialog.ShowInformation("Added", "Job added to tracker.", state.Window)
+	})
+
+	manualForm := container.New(layout.NewFormLayout(),
+		widget.NewLabel("Company"), manualCompany,
+		widget.NewLabel("Role"), manualRole,
+		widget.NewLabel("Location"), manualLocation,
+		widget.NewLabel("Job URL"), manualLink,
+		widget.NewLabel("Description"), manualDesc,
+	)
+	manualCard := widget.NewCard("Manual Entry", "Add a job you found anywhere on the web", container.NewVBox(
+		manualForm,
+		container.NewHBox(manualTrackBtn, manualAddToTrackerBtn),
+	))
+
+	// ── Clip Inbox Card (populated by the browser bookmarklet) ──
+	state.ClipInboxBox = container.NewVBox(
+		widget.NewLabelWithStyle("No clipped jobs yet. Use the bookmarklet on any job board to clip listings here.",
+			fyne.TextAlignLeading, fyne.TextStyle{Italic: true}),
+	)
+	clipScroll := container.NewVScroll(state.ClipInboxBox)
+	clipScroll.SetMinSize(fyne.NewSize(600, 220))
+	clearClipBtn := widget.NewButtonWithIcon("Clear Inbox", theme.DeleteIcon(), func() {
+		state.ClipInboxBox.Objects = []fyne.CanvasObject{
+			widget.NewLabelWithStyle("Inbox cleared.", fyne.TextAlignLeading, fyne.TextStyle{Italic: true}),
+		}
+		state.ClipInboxBox.Refresh()
+	})
+	clipCard := widget.NewCard("Clip Inbox", "Jobs clipped from your browser via the bookmarklet appear here for review", container.NewVBox(
+		container.NewHBox(layout.NewSpacer(), clearClipBtn),
+		clipScroll,
+	))
+
 	content := container.NewVBox(
 		searchCard,
+		manualCard,
+		clipCard,
 	)
 
 	return container.NewScroll(content)
@@ -2425,13 +2508,87 @@ func buildHelpTab() fyne.CanvasObject {
 		widget.NewLabel("3. Templates: Formatting applies Times New Roman styling and strict single-page constraints."),
 	))
 
-	bookmarkletJs := `javascript:(function(){var c=document.querySelector(".job-details-jobs-unified-top-card__company-name")?.innerText||prompt("Company:"),r=document.querySelector(".job-details-jobs-unified-top-card__job-title")?.innerText||prompt("Role:"),l=document.querySelector(".job-details-jobs-unified-top-card__bullet")?.innerText||prompt("Location:"),d=document.querySelector("#job-details")?.innerText||"";if(!c||!r)return;fetch("http://localhost:8080/clip",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({company:c.trim(),role:r.trim(),location:(l||"").trim(),link:window.location.href,description:d.substring(0,300).trim()})}).then(res=>res.json()).then(data=>alert("Clipped to LeGaJ!")).catch(err=>alert("Error: "+err));})();`
+	// Extended multi-site bookmarklet — detects LinkedIn, Indeed, Greenhouse, Lever,
+	// Workday, Ashby, iCIMS, and generic career pages with graceful fallback prompts.
+	bookmarkletJs := `javascript:(function(){
+  var h=window.location.hostname,p=window.location.href,c='',r='',l='',d='';
+  if(h.includes('linkedin.com')){
+    c=(document.querySelector('.job-details-jobs-unified-top-card__company-name a')||document.querySelector('.topcard__org-name-link')||{innerText:''}).innerText;
+    r=(document.querySelector('.job-details-jobs-unified-top-card__job-title h1')||document.querySelector('.topcard__title')||{innerText:''}).innerText;
+    l=(document.querySelector('.job-details-jobs-unified-top-card__bullet')||document.querySelector('.topcard__flavor--bullet')||{innerText:''}).innerText;
+    d=(document.querySelector('#job-details')||document.querySelector('.description__text')||{innerText:''}).innerText;
+  } else if(h.includes('indeed.com')){
+    c=(document.querySelector('[data-company-name]')||document.querySelector('.jobsearch-CompanyInfoWithoutHeaderImage a')||{innerText:''}).innerText;
+    r=(document.querySelector('h1.jobsearch-JobInfoHeader-title')||document.querySelector('[data-testid="jobsearch-JobInfoHeader-title"]')||{innerText:''}).innerText;
+    l=(document.querySelector('[data-testid="inlineHeader-companyLocation"]')||{innerText:''}).innerText;
+    d=(document.querySelector('#jobDescriptionText')||{innerText:''}).innerText;
+  } else if(h.includes('greenhouse.io')||h.includes('grnh.se')){
+    c=(document.querySelector('.company-name')||document.querySelector('h3.company-name')||{innerText:document.title.split(' - ').pop()||''}).innerText;
+    r=(document.querySelector('h1.app-title')||document.querySelector('.app__title h1')||{innerText:document.title.split(' - ')[0]||''}).innerText;
+    l=(document.querySelector('.location')||{innerText:''}).innerText;
+    d=(document.querySelector('#content')||{innerText:''}).innerText;
+  } else if(h.includes('lever.co')){
+    c=(document.querySelector('.main-header-logo img')||{alt:document.title.split('|').pop().trim()||''}).alt;
+    r=(document.querySelector('h2')||{innerText:document.title.split('|')[0]||''}).innerText;
+    l=(document.querySelector('.sort-by-time.posting-category')||{innerText:''}).innerText;
+    d=(document.querySelector('.section-wrapper')||{innerText:''}).innerText;
+  } else if(h.includes('myworkdayjobs.com')||h.includes('workday.com')){
+    c=document.title.split('|').pop().trim()||document.title;
+    r=(document.querySelector('[data-automation-id="jobPostingHeader"]')||{innerText:document.title.split('|')[0]||''}).innerText;
+    l=(document.querySelector('[data-automation-id="locations"]')||{innerText:''}).innerText;
+    d=(document.querySelector('[data-automation-id="jobPostingDescription"]')||{innerText:''}).innerText;
+  } else if(h.includes('ashbyhq.com')){
+    r=(document.querySelector('h1')||{innerText:''}).innerText;
+    c=document.title.split('at ').pop()||document.title;
+    l=(document.querySelector('.ashby-job-posting-brief-location')||{innerText:''}).innerText;
+    d=(document.querySelector('.ashby-job-posting-description')||{innerText:''}).innerText;
+  } else {
+    r=(document.querySelector('h1')||{innerText:''}).innerText;
+    c=document.title;
+    l='';
+    d=(document.querySelector('main')||document.querySelector('article')||{innerText:''}).innerText.substring(0,600);
+  }
+  c=c.trim()||prompt('Company name:','');
+  r=r.trim()||prompt('Job title:','');
+  l=l.trim()||prompt('Location (or Remote):','');
+  if(!c||!r){alert('Could not detect job info. Fill in the prompts.');return;}
+  d=d.substring(0,600).trim();
+  fetch('http://localhost:8080/clip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({company:c,role:r,location:l,link:p,description:d})})
+    .then(function(res){return res.json();})
+    .then(function(){alert('\u2705 Clipped to LeGaJ! Check the Clip Inbox in the Job Hunt tab.');}) 
+    .catch(function(e){alert('\u274C Error: '+e+'. Is LeGaJ running?');});
+})();`
+
 	bookmarkletEntry := widget.NewEntry()
 	bookmarkletEntry.SetText(bookmarkletJs)
+	bookmarkletEntry.MultiLine = false
 
-	bookmarkletCard := widget.NewCard("Clip to LeGaJ Browser Bookmarklet", "Copy the javascript below and add it as a browser bookmark URL:", container.NewVBox(
+	copyBtn := widget.NewButtonWithIcon("Copy Bookmarklet Code", theme.ContentCopyIcon(), func() {
+		state.Window.Clipboard().SetContent(bookmarkletJs)
+		dialog.ShowInformation("Copied!", "Bookmarklet code copied to clipboard.", state.Window)
+	})
+	copyBtn.Importance = widget.HighImportance
+
+	installSteps := widget.NewCard("How to Install the Bookmarklet", "", container.NewVBox(
+		widget.NewLabel("1. Click \"Copy Bookmarklet Code\" above."),
+		widget.NewLabel("2. Open your browser (Chrome / Firefox / Edge)."),
+		widget.NewLabel("3. Show the bookmarks bar: Ctrl+Shift+B (Windows) or ⌘+Shift+B (Mac)."),
+		widget.NewLabel("4. Right-click the bookmarks bar → \"Add page\" or \"Add bookmark\"."),
+		widget.NewLabel("5. Set any name (e.g. \"📎 Clip to LeGaJ\")."),
+		widget.NewLabel("6. Paste the copied code as the URL / Address."),
+		widget.NewLabel("7. Save. You're done!"),
+		widget.NewSeparator(),
+		widget.NewLabel("Works on: LinkedIn · Indeed · Greenhouse · Lever · Workday · Ashby · most career pages."),
+		widget.NewLabel("When on a job posting page, click the bookmark → details clip into your Clip Inbox instantly."),
+	))
+
+	bookmarkletCard := widget.NewCard("Clip to LeGaJ Browser Bookmarklet", "One-click job clipping from any job board directly into LeGaJ", container.NewVBox(
+		copyBtn,
+		widget.NewSeparator(),
+		installSteps,
+		widget.NewSeparator(),
+		widget.NewLabel("Advanced: bookmark URL source code (for manual paste):"),
 		bookmarkletEntry,
-		widget.NewLabel("Click the bookmark on LinkedIn job listing pages to clip details directly into your dashboard."),
 	))
 
 	securityCard := widget.NewCard("Security & Ethics Disclosure", "", container.NewVBox(
@@ -3229,16 +3386,57 @@ func startClipServer() {
 			return
 		}
 
-		resumePdfName := fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(payload.Company, " ", "_"))
-		coverLetterPdfName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(payload.Company, " ", "_"))
+		// Route to Clip Inbox in Job Hunt tab for user review, not silently to tracker
+		fyne.Do(func() {
+			if state.ClipInboxBox == nil {
+				return
+			}
+			// Remove the placeholder label on first clip
+			if len(state.ClipInboxBox.Objects) == 1 {
+				if _, ok := state.ClipInboxBox.Objects[0].(*widget.Label); ok {
+					state.ClipInboxBox.Objects = nil
+				}
+			}
 
-		_, err = RunManageApplications("add", payload.Company, payload.Role, payload.Location, payload.Link, resumePdfName, coverLetterPdfName, "Clipped from browser. "+payload.Description)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+			c := payload.Company
+			ro := payload.Role
+			lo := payload.Location
+			li := payload.Link
+			de := payload.Description
+			bd := sourceBadge(li)
 
-		reloadAllViews()
+			compLabel := widget.NewLabelWithStyle(c, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+			roleLabel := widget.NewLabel(fmt.Sprintf("%s  ·  %s", ro, lo))
+			badgeLabel := widget.NewLabelWithStyle("["+bd+"]", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+			clipLabel := widget.NewLabelWithStyle("📎 Clipped from browser", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+			header := container.NewHBox(compLabel, badgeLabel, layout.NewSpacer(), clipLabel)
+
+			descLabel := widget.NewLabel(de)
+			descLabel.Wrapping = fyne.TextWrapWord
+
+			openBtn := widget.NewButtonWithIcon("View Posting", theme.HelpIcon(), func() {
+				openLink(li)
+			})
+			trackBtn := widget.NewButtonWithIcon("Track & Tailor", theme.DocumentCreateIcon(), func() {
+				runTrackAndTailorAutomation(c, ro, lo, li, de)
+			})
+			trackBtn.Importance = widget.HighImportance
+			addOnlyBtn := widget.NewButtonWithIcon("Add to Tracker Only", theme.ContentAddIcon(), func() {
+				resumeName := fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(c, " ", "_"))
+				coverName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(c, " ", "_"))
+				_, _ = RunManageApplications("add", c, ro, lo, li, resumeName, coverName, "Clipped from browser. "+de)
+				reloadAllViews()
+			})
+
+			cardContent := container.NewVBox(
+				header,
+				roleLabel,
+				descLabel,
+				container.NewHBox(openBtn, trackBtn, addOnlyBtn),
+			)
+			state.ClipInboxBox.Add(widget.NewCard("", "", cardContent))
+			state.ClipInboxBox.Refresh()
+		})
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)

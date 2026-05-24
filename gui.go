@@ -3000,7 +3000,11 @@ func showCustomFilePicker(parentWindow fyne.Window, title string, allowedExts []
 			}
 
 			iconWidget := widget.NewIcon(icon)
-			nameLabel := widget.NewLabel(name)
+			displayName := name
+			if len(displayName) > 40 {
+				displayName = displayName[:37] + "..."
+			}
+			nameLabel := widget.NewLabel(displayName)
 
 			row := container.NewHBox(
 				iconWidget,
@@ -4049,7 +4053,11 @@ func refreshFileManager() {
 		}
 
 		iconWidget := widget.NewIcon(icon)
-		nameLabel := widget.NewLabel(name)
+		displayName := name
+		if len(displayName) > 40 {
+			displayName = displayName[:37] + "..."
+		}
+		nameLabel := widget.NewLabel(displayName)
 
 		row := container.NewHBox(
 			iconWidget,

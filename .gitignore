@@ -23,19 +23,27 @@ pip-delete-this-directory.txt
 credentials.json
 token.json
 
-# Local job tracker data (to prevent leaking personal applications)
+# Local job tracker data & PII (to prevent leaking personal applications)
 references/job-tracker.xlsx
 references/job-tracker.json
+references/user-profile.json
+references/user-profile-tailored.json
 references/.clip_port
 references/clipped-jobs.json
 outputs/
+
+# Browser extension files — auto-generated at startup, contain the session token
+extension/content.js
+extension/background.js
+extension/manifest.json
 
 # AI instruction docs (never commit)
 legac docs new.md
 new requirements.md
 
-# Security audit — never commit
+# Security audit & plan — never commit
 SECURITY_AUDIT.md
+SECURITY_IMPLEMENTATION_PLAN.md
 
 # OS specific files
 .DS_Store

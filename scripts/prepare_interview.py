@@ -1,7 +1,8 @@
 import json
 import sys
 import os
-import random
+import html
+import secrets
 
 def generate_anki_deck(cards_data, output_path, deck_name):
     try:
@@ -10,9 +11,10 @@ def generate_anki_deck(cards_data, output_path, deck_name):
         print("Error: genanki is not installed.")
         sys.exit(1)
         
-    # Generate unique IDs for model and deck
-    model_id = random.randrange(1 << 30, 1 << 31)
-    deck_id = random.randrange(1 << 30, 1 << 31)
+    # Generate unique IDs for model and deck using a CSPRNG (SEC-024).
+    # Range [2^30, 2^31) matches Anki's expected ID space.
+    model_id = secrets.randbelow((1 << 31) - (1 << 30)) + (1 << 30)
+    deck_id = secrets.randbelow((1 << 31) - (1 << 30)) + (1 << 30)
     
     # Define simple Q&A model
     anki_model = genanki.Model(
@@ -37,12 +39,14 @@ def generate_anki_deck(cards_data, output_path, deck_name):
         question = item.get("question", "")
         answer = item.get("answer", "")
         
-        # Replace newlines with <br> for HTML rendering in Anki
-        answer_html = answer.replace("\n", "<br>")
-        
+        # Escape AI-provided text before inserting into the Anki HTML context
+        # (SEC-030), then convert newlines to <br> for rendering.
+        question_safe = html.escape(question)
+        answer_html = html.escape(answer).replace("\n", "<br>")
+
         note = genanki.Note(
             model=anki_model,
-            fields=[question, answer_html]
+            fields=[question_safe, answer_html]
         )
         deck.add_note(note)
         

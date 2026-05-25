@@ -8,11 +8,9 @@ import (
 	"path/filepath"
 )
 
-// getPythonPath dynamically resolves the path to the Python executable.
+// getPythonPath resolves the Python executable, preferring the canonical
+// Python 3.12 installation where project dependencies are installed.
 func getPythonPath() string {
-	if path, err := exec.LookPath("python"); err == nil {
-		return path
-	}
 	localAppData := os.Getenv("LOCALAPPDATA")
 	if localAppData != "" {
 		for _, ver := range []string{"Python312", "Python311", "Python310"} {
@@ -21,6 +19,9 @@ func getPythonPath() string {
 				return p
 			}
 		}
+	}
+	if path, err := exec.LookPath("python"); err == nil {
+		return path
 	}
 	return "python"
 }

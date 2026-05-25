@@ -1618,7 +1618,7 @@ Return ONLY valid JSON. No markdown, no explanation.`, kw, loc)
 	clipCardContent := container.NewBorder(
 		container.NewHBox(widget.NewLabel("Jobs clipped from your browser via the bookmarklet appear here for review"), layout.NewSpacer(), clearClipBtn),
 		nil, nil, nil,
-		clipContainer,
+		container.NewHScroll(clipContainer),
 	)
 	clipTab := widget.NewCard("Clip Inbox", "", clipCardContent)
 
@@ -1840,7 +1840,8 @@ Resume Text:
 		state.ProjContainer,
 	)
 
-	return container.NewScroll(profileContent)
+	scroll := container.NewVScroll(profileContent)
+	return container.NewStack(scroll, newScrollInterceptor(scroll))
 }
 
 func fillProfileForm() {
@@ -2184,8 +2185,6 @@ func (sc *statusCell) CreateRenderer() fyne.WidgetRenderer {
 }
 
 func (sc *statusCell) Tapped(ev *fyne.PointEvent) {
-	state.TrackerTable.Select(sc.cellID)
-
 	statuses := []string{"Wishlist", "Applied", "Interviewing", "Offer", "Rejected", "Ghosted"}
 	var items []*fyne.MenuItem
 	for _, status := range statuses {
@@ -2216,6 +2215,15 @@ func (sc *statusCell) Tapped(ev *fyne.PointEvent) {
 	menu := fyne.NewMenu("", items...)
 	popUp := widget.NewPopUpMenu(menu, state.Window.Canvas())
 	popUp.ShowAtPosition(ev.AbsolutePosition)
+
+	// Defer row selection to after the popup renders. Doing it before causes
+	// trackerStatusSelect.SetSelected + table refresh to block popup display.
+	cellID := sc.cellID
+	go func() {
+		fyne.Do(func() {
+			state.TrackerTable.Select(cellID)
+		})
+	}()
 }
 
 func (sc *statusCell) DoubleTapped(ev *fyne.PointEvent) {
@@ -2274,6 +2282,42 @@ func (r *trackerCellRenderer) Refresh() {
 func (tc *trackerCell) CreateRenderer() fyne.WidgetRenderer {
 	return &trackerCellRenderer{cell: tc}
 }
+
+// scrollInterceptor is a transparent, non-interactive widget placed on top of a
+// scroll container via container.NewStack. It captures scroll events (and only
+// scroll events — it implements no tap/drag interfaces so those fall through to
+// content behind it) and multiplies the delta before forwarding, making long
+// pages like the profile tab scroll at a comfortable speed.
+type scrollInterceptor struct {
+	widget.BaseWidget
+	target *container.Scroll
+}
+
+func newScrollInterceptor(target *container.Scroll) *scrollInterceptor {
+	si := &scrollInterceptor{target: target}
+	si.ExtendBaseWidget(si)
+	return si
+}
+
+type emptyRenderer struct{}
+
+func (e *emptyRenderer) Destroy()                        {}
+func (e *emptyRenderer) Layout(_ fyne.Size)              {}
+func (e *emptyRenderer) MinSize() fyne.Size              { return fyne.NewSize(0, 0) }
+func (e *emptyRenderer) Objects() []fyne.CanvasObject    { return nil }
+func (e *emptyRenderer) Refresh()                        {}
+
+func (si *scrollInterceptor) CreateRenderer() fyne.WidgetRenderer {
+	return &emptyRenderer{}
+}
+
+func (si *scrollInterceptor) Scrolled(ev *fyne.ScrollEvent) {
+	boosted := *ev
+	boosted.Scrolled.DY *= 3
+	si.target.Scrolled(&boosted)
+}
+
+func (si *scrollInterceptor) MinSize() fyne.Size { return fyne.NewSize(0, 0) }
 
 type clipperRowLayout struct{}
 
@@ -2334,11 +2378,11 @@ func (l *customTableLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
 }
 
 func (l *customTableLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
-	// Total width of other columns: 60 (Select) + 240 + 280 + 110 + 90 + 140 = 920
-	// 20px padding left for scrollbar and card borders
-	notesWidth := size.Width - 920 - 20
-	if notesWidth < 150 {
-		notesWidth = 150
+	// Columns 0-5 total 920px. Give Notes all remaining space so total column
+	// widths never exceed the widget width — this keeps horizontal scroll off.
+	notesWidth := size.Width - 920
+	if notesWidth < 1 {
+		notesWidth = 1
 	}
 	if state.TrackerTable != nil {
 		state.TrackerTable.SetColumnWidth(6, notesWidth)
@@ -2514,12 +2558,12 @@ func buildTrackerTab() fyne.CanvasObject {
 
 	// Set column widths to look like spreadsheet grid
 	state.TrackerTable.SetColumnWidth(0, 60)  // Select
-	state.TrackerTable.SetColumnWidth(1, 240) // Company (wider)
-	state.TrackerTable.SetColumnWidth(2, 280) // Role (wider)
+	state.TrackerTable.SetColumnWidth(1, 240) // Company
+	state.TrackerTable.SetColumnWidth(2, 280) // Role
 	state.TrackerTable.SetColumnWidth(3, 110) // Location
 	state.TrackerTable.SetColumnWidth(4, 90)  // Date
 	state.TrackerTable.SetColumnWidth(5, 140) // Status
-	state.TrackerTable.SetColumnWidth(6, 350) // Notes (wide Notes column)
+	// Notes (col 6) width is managed entirely by customTableLayout.Layout
 
 	state.TrackerTable.OnSelected = func(id widget.TableCellID) {
 		if id.Row > 0 && id.Row-1 < len(state.Applications) {

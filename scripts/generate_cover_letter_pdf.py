@@ -70,8 +70,6 @@ def generate_cl_elements(profile, draft_text, name, contact_str, pr):
     
     elements = []
     
-
-    
     # Add Header
     elements.append(Paragraph(name, header_name_style))
     elements.append(Paragraph(contact_str, header_info_style))
@@ -82,6 +80,7 @@ def generate_cl_elements(profile, draft_text, name, contact_str, pr):
     lines = [line.strip() for line in raw_lines]
     
     in_body = False
+    seen_sincerely = False
     current_para_lines = []
     
     for line in lines:
@@ -89,15 +88,19 @@ def generate_cl_elements(profile, draft_text, name, contact_str, pr):
             if current_para_lines:
                 para_text = " ".join(current_para_lines)
                 if in_body:
-                    # Check if this is the signature/name
-                    if para_text == name or para_text == "Roberto Montero" or para_text == "[Full Name]":
-                        elements.append(Spacer(1, 22)) # two blank lines before name
+                    if seen_sincerely:
+                        current_para_lines = []
+                        continue
+                    
+                    lower_para = para_text.lower()
+                    if "sincerely" in lower_para or "best regards" in lower_para or "warm regards" in lower_para or "respectfully" in lower_para:
                         elements.append(Paragraph(para_text, body_style))
+                        elements.append(Spacer(1, 22))
+                        elements.append(Paragraph(name, body_style))
+                        seen_sincerely = True
                     else:
                         elements.append(Paragraph(para_text, body_style))
                 else:
-                    # If we haven't hit the salutation yet, each line in this paragraph is rendered separately
-                    # to keep formatting of address block
                     for l in current_para_lines:
                         elements.append(Paragraph(l, recipient_style))
                     elements.append(Spacer(1, 6))
@@ -118,12 +121,14 @@ def generate_cl_elements(profile, draft_text, name, contact_str, pr):
             
         current_para_lines.append(line)
         
-    if current_para_lines:
+    if current_para_lines and not seen_sincerely:
         para_text = " ".join(current_para_lines)
         if in_body:
-            if para_text == name or para_text == "Roberto Montero" or para_text == "[Full Name]":
-                elements.append(Spacer(1, pr["leading"]))
+            lower_para = para_text.lower()
+            if "sincerely" in lower_para or "best regards" in lower_para or "warm regards" in lower_para or "respectfully" in lower_para:
                 elements.append(Paragraph(para_text, body_style))
+                elements.append(Spacer(1, 22))
+                elements.append(Paragraph(name, body_style))
             else:
                 elements.append(Paragraph(para_text, body_style))
         else:

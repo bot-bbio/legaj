@@ -26,6 +26,8 @@ token.json
 # Local job tracker data (to prevent leaking personal applications)
 references/job-tracker.xlsx
 references/job-tracker.json
+references/.clip_port
+references/clipped-jobs.json
 outputs/
 
 # AI instruction docs (never commit)

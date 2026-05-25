@@ -1,11 +1,11 @@
 {
   "personal_info": {
-    "name": "[Full Name]",
-    "email": "[Email Address]",
-    "phone": "[Phone Number]",
-    "location": "[City, State]",
-    "linkedin": "[LinkedIn URL]",
-    "website": "[Website URL]"
+    "name": "Roberto Montero",
+    "email": "0.Roberto.Montero@gmail.com",
+    "phone": "(813)-597-5308",
+    "location": "New York, NY",
+    "linkedin": "",
+    "website": ""
   },
   "target_roles": [
     "Product Manager"
@@ -14,14 +14,28 @@
     {
       "institution": "Binghamton University, State University of New York",
       "degree": "Bachelor of Arts",
-      "major": "Sociology and English, Harpur College of Arts and Sciences",
+      "major": "Sociology and English",
       "graduation_date": "May 2020",
       "location": "Binghamton, NY",
       "gpa": "",
-      "details": "Published Research: [Last Name], [First Initial]. (2018). Love in the Flesh, Toni Morrison and Hortense Spillers 30 years after Beloved and Mama’s Baby, Papa’s Maybe. Alpenglow: Binghamton University Undergraduate Journal of Research and Creative Activity, 4(1). Retrieved from https://orb.binghamton.edu/alpenglowjournal/vol4/iss1/4\nConference Presentations: [Last Name], [First Initial]. (2018). Plantation Ecologies: mapping world-ecological transformations in Sugar and Cotton slavery from 1700-1860. Paper presented at Sixth Biennial Sociology Graduate Student Conference in Binghamton, NY. Presented as poster at Institute for the Advanced Studies in the Humanities symposium in Binghamton, NY."
+      "details": "Harpur College of Arts and Sciences"
     }
   ],
   "experience": [
+    {
+      "company": "Gerson Lehrman Group (GLG)",
+      "role": "Client Solutions Associate – Private Equity",
+      "location": "New York, NY",
+      "start_date": "September 2025",
+      "end_date": "Present",
+      "bullets": [
+        "Surpassed 157% achievement in personal KPIs while generating in excess of $400,000 in revenue during Q1of 2026",
+        "Acted as the primary liaison between cross-functional internal teams and external partners, navigating complex stakeholder interests and aligning project deliverables with client expectations to ensure long-term retention",
+        "Pioneered AI-Integrated workflows to maximize efficiency and mastery of proprietary CRM software, LinkedIn Recruiter and Salesforce to service client needs in cross-functional research projects",
+        "Generated over 133% revenue growth quarter-over-quarter for a middle market Private Equity client after taking over main project and relationship management responsibilities, including their highest monthly spend in over four years",
+        "Facilitated over 200 expert calls for clients through leveraging external recruiting efforts and internal resources within three months"
+      ]
+    },
     {
       "company": "Quadrant Strategies",
       "role": "Senior Research Coordinator",
@@ -29,9 +43,9 @@
       "start_date": "September 2022",
       "end_date": "April 2024",
       "bullets": [
-        "Directed end-to-end **research projects**, overseeing the execution of quantitative and qualitative studies to inform strategic decision-making and product development, coordinating timelines and budgets to ensure high-quality outcomes and **streamlined workflows** using Monday.com.",
-        "Leveraged LinkedIn Sales Navigator to implement strategic outreach and engagement workflows, identifying and nurturing key stakeholders to support product adoption and market intelligence initiatives.",
-        "Chaired the Process and Optimization Committee, utilizing Salesforce to implement **streamlined operations**, enhance organizational effectiveness through efficient **database management**, and transform existing workflows for improved efficiency."
+        "Directed end-to-end research projects, ensuring the effective execution of both quantitative and qualitative studies, including coordinating timelines, budgets, and quality standards using tools such as Monday.com",
+        "Maximized tools such as LinkedIn Sales Navigator for effective lead generation, developing targeted email sequences to strategically nurture prospects, ensuring a methodical approach to engagement and conversion",
+        "Leveraged Salesforce to efficiently manage a panelist database as the Chair of the Process and Optimization Committee charged with implementing streamlined operations and enhanced organizational effectiveness"
       ]
     },
     {
@@ -41,8 +55,8 @@
       "start_date": "October 2021",
       "end_date": "August 2022",
       "bullets": [
-        "Developed and delivered structured educational content for English and History classes, demonstrating adaptable instructional design and clear communication of complex subjects.",
-        "Collaborated effectively with lead instructors across diverse subjects (English, History, Science, Math), fostering cross-functional teamwork in dynamic educational environments."
+        "Conducted and planned lessons for coverages of English and History classes when necessary",
+        "Co-taught English, History, Science and Math classes to multiple grade levels with a primary instructor"
       ]
     },
     {
@@ -52,8 +66,8 @@
       "start_date": "September 2020",
       "end_date": "March 2021",
       "bullets": [
-        "Coordinated cross-functional teams (sales, maintenance) to optimize user onboarding workflows, contributing to occupancy rates exceeding the market standard 95% threshold and enhancing overall user experience.",
-        "Utilized MRI Property Management Suite for critical operational functions, including prospect screenings, tenant communications, and managing **legal documentation**, demonstrating proficiency in specialized systems for compliance and efficiency."
+        "Coordinated with sales and maintenance teams to boost occupancy rates above market standard 95% threshold and ensure an effective move-in experience for prospective residents",
+        "Used MRI Property Management Suite for prospect screenings, tenant communications, and legal documentation"
       ]
     },
     {
@@ -63,36 +77,29 @@
       "start_date": "September 2018",
       "end_date": "September 2020",
       "bullets": [
-        "Led a sales and marketing team, increasing rental sales revenue by over $250,000 for a private equity firm managing over $15 million in assets, demonstrating strategic leadership in achieving business growth objectives.",
-        "Managed comprehensive business operations using AppFolio PM software, including CRM, listing management, **contract drafting**, and sales reporting to inform strategic decision-making and optimize workflows.",
-        "Developed and implemented comprehensive marketing initiatives, encompassing strategic partner management, brand ambassador programs, and promotional product development, to drive market presence and user acquisition."
+        "Increased rental sales revenue in excess of $250,000 as the leader of sales and marketing team for a private equity real estate investment and development firm operating over $15 million in student housing and commercial assets",
+        "Used AppFolio PM software for CRM, listing management, contract drafting, and sales reports",
+        "Developed and implemented marketing initiatives through student community strategic partner management and outreach, brand ambassador management, promotional product development, and sponsored event planning"
       ]
     }
   ],
   "projects": [],
   "skills": {
     "product_management": [
-      "Generative AI Concepts",
-      "AI Model Evaluation",
-      "AI-Integrated Workflows",
       "Process Optimization",
-      "Workflow Transformation",
-      "Product Research",
+      "Relationship Management",
       "Strategic Planning",
-      "User Experience (UX) Principles",
-      "Cross-functional Collaboration",
-      "Legal Research Methodologies (from academic background)"
+      "Project Management"
     ],
     "technical": [
+      "Python",
       "Salesforce",
-      "Monday.com",
-      "AppFolio PM software",
-      "MRI Property Management Suite",
-      "Data Management & Analysis",
-      "Quantitative & Qualitative Research",
-      "Proprietary CRM software",
+      "LinkedIn Recruiter",
       "LinkedIn Sales Navigator",
-      "LinkedIn Recruiter"
+      "Monday.com",
+      "MRI Property Management Suite",
+      "AppFolio PM software",
+      "CRM"
     ]
   }
 }

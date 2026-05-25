@@ -2,17 +2,22 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
 	"image/color"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -584,12 +589,246 @@ type JobApplication struct {
 
 // Global state instance
 var state AppState
+var isGUIMode bool = false
+var activePort int = 8080
+var clipAuthToken string
+var clipListener net.Listener
+
+var trackerSelectedRows = make(map[int]bool)
+
+type ClippedJob struct {
+	Company     string `json:"company"`
+	Role        string `json:"role"`
+	Location    string `json:"location"`
+	Link        string `json:"link"`
+	Description string `json:"description"`
+}
+
+func saveClippedJob(job ClippedJob) {
+	os.MkdirAll("references", 0755)
+	filePath := "references/clipped-jobs.json"
+	var jobs []ClippedJob
+	data, err := os.ReadFile(filePath)
+	if err == nil {
+		_ = json.Unmarshal(data, &jobs)
+	}
+	jobs = append(jobs, job)
+	newData, err := json.MarshalIndent(jobs, "", "  ")
+	if err == nil {
+		_ = os.WriteFile(filePath, newData, 0644)
+	}
+}
+
+func loadClippedJobs() []ClippedJob {
+	filePath := "references/clipped-jobs.json"
+	var jobs []ClippedJob
+	data, err := os.ReadFile(filePath)
+	if err == nil {
+		_ = json.Unmarshal(data, &jobs)
+	}
+	return jobs
+}
+
+func isGenericRole(role string) bool {
+	r := strings.ToLower(strings.TrimSpace(role))
+	genericTitles := []string{
+		"jobs at career page",
+		"current openings",
+		"apply now",
+		"job posting",
+		"job details",
+		"careers",
+		"jobs",
+		"job search",
+		"work with us",
+		"career opportunities",
+	}
+	for _, gt := range genericTitles {
+		if r == gt || strings.Contains(r, gt) {
+			return true
+		}
+	}
+	return false
+}
+
+func correctGenericRole(apiKey, description, fallbackCompany string) string {
+	if apiKey == "" || description == "" {
+		return "(Role not detected)"
+	}
+	prompt := fmt.Sprintf(`You are an expert recruiter helper. Extract the exact job role/title from the following job description. Output ONLY the role title (e.g., "Senior Software Engineer"), with no other text, markdown, or conversational intro/outro.
+
+Job Description:
+%s`, description)
+	
+	result, err := callGeminiGo(apiKey, prompt, false)
+	if err == nil {
+		cleaned := strings.TrimSpace(result)
+		if cleaned != "" && len(cleaned) < 100 && !isGenericRole(cleaned) {
+			return cleaned
+		}
+	}
+	return "(Role not detected)"
+}
+
+func addClippedJobToInboxUI(job ClippedJob) {
+	c := job.Company
+	ro := job.Role
+	lo := job.Location
+	li := job.Link
+	de := job.Description
+	bd := sourceBadge(li)
+
+	openBtn := widget.NewButtonWithIcon("View", theme.HelpIcon(), func() {
+		openLink(li)
+	})
+	trackBtn := widget.NewButtonWithIcon("Track & Tailor", theme.DocumentCreateIcon(), func() {
+		runTrackAndTailorAutomation(c, ro, lo, li, de)
+	})
+	trackBtn.Importance = widget.HighImportance
+	addOnlyBtn := widget.NewButtonWithIcon("Add Tracker Only", theme.ContentAddIcon(), func() {
+		resumeName := fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(c, " ", "_"))
+		coverName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(c, " ", "_"))
+		_ = addApplicationGo(c, ro, lo, li, "Applied", resumeName, coverName, "Clipped from browser.")
+		reloadAllViews()
+	})
+
+	existing := findApplicationByLink(li)
+	if existing == nil {
+		existing = findApplicationByCompanyAndRole(c, ro)
+	}
+	if existing != nil {
+		trackBtn.SetText("Tracked (" + existing.Status + ")")
+		trackBtn.Disable()
+		addOnlyBtn.Disable()
+	}
+
+	row := container.New(&clipperRowLayout{},
+		widget.NewLabel(c),
+		widget.NewLabel(ro),
+		widget.NewLabel(lo),
+		widget.NewLabel(bd),
+		container.NewHBox(openBtn, trackBtn, addOnlyBtn),
+	)
+	state.ClipInboxBox.Add(row)
+}
+
+func loadClippedJobsToInbox() {
+	if state.ClipInboxBox == nil {
+		return
+	}
+	
+	jobs := loadClippedJobs()
+	if len(jobs) == 0 {
+		return
+	}
+	
+	state.ClipInboxBox.Objects = []fyne.CanvasObject{
+		container.New(&clipperRowLayout{},
+			widget.NewLabelWithStyle("Company", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle("Role", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle("Location", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle("Source", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle("Actions", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+		),
+		widget.NewSeparator(),
+	}
+	
+	for _, job := range jobs {
+		addClippedJobToInboxUI(job)
+	}
+	state.ClipInboxBox.Refresh()
+}
+
+func findClippedJobDescription(company, role, link string) string {
+	jobs := loadClippedJobs()
+	if link != "" {
+		for _, j := range jobs {
+			if j.Link == link && j.Description != "" {
+				return j.Description
+			}
+		}
+	}
+	for _, j := range jobs {
+		if strings.EqualFold(j.Company, company) && strings.EqualFold(j.Role, role) && j.Description != "" {
+			return j.Description
+		}
+	}
+	return ""
+}
+
+var roleKeywords = []string{
+	"engineer", "developer", "manager", "analyst", "lead", "director", "designer",
+	"specialist", "consultant", "architect", "intern", "qa", "tester", "scientist",
+	"officer", "administrator", "support", "writer", "editor", "coordinator", "head",
+	"vp", "president", "associate", "expert", "sr", "jr", "senior", "junior",
+	"staff", "principal", "recruiter", "strategist", "fellow", "counsel", "advocate",
+}
+
+func containsRoleKeyword(s string) bool {
+	sLower := strings.ToLower(s)
+	for _, kw := range roleKeywords {
+		if strings.Contains(sLower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+func extractCompanyFromTitle(title string) string {
+	titleLower := strings.ToLower(title)
+	if idx := strings.Index(titleLower, " at "); idx != -1 {
+		comp := title[idx+4:]
+		comp = titleSanitizerRegex.ReplaceAllString(comp, "")
+		comp = strings.TrimSpace(comp)
+		if comp != "" && len(comp) < 60 {
+			return comp
+		}
+	}
+	parts := strings.FieldsFunc(title, func(r rune) bool {
+		return r == '-' || r == '|' || r == '•'
+	})
+	if len(parts) >= 2 {
+		part0 := strings.TrimSpace(parts[0])
+		part1 := strings.TrimSpace(parts[1])
+		if containsRoleKeyword(part0) && !containsRoleKeyword(part1) {
+			return part1
+		}
+		if containsRoleKeyword(part1) && !containsRoleKeyword(part0) {
+			return part0
+		}
+		if len(part0) < 50 && part0 != "" {
+			return part0
+		}
+	}
+	return ""
+}
+
+func correctMissingCompany(apiKey, description, title string) string {
+	if apiKey == "" || description == "" {
+		return ""
+	}
+	prompt := fmt.Sprintf(`You are an expert recruiter helper. Extract the exact Company Name from the following job listing. Look at the title and description. Output ONLY the company name (e.g., "Google"), with no other text, markdown, or conversational intro/outro. If you cannot identify the company name, output "Unknown Company".
+
+Job Title: %s
+Job Description:
+%s`, title, description)
+
+	result, err := callGeminiGo(apiKey, prompt, false)
+	if err == nil {
+		cleaned := strings.TrimSpace(result)
+		if cleaned != "" && len(cleaned) < 80 && !strings.Contains(strings.ToLower(cleaned), "unknown company") {
+			return cleaned
+		}
+	}
+	return ""
+}
 
 func startFyneGUI() {
+	initClipServer()
 	state.App = app.NewWithID("com.legaj.desktop")
 	state.App.Settings().SetTheme(customTheme{})
 	state.Window = state.App.NewWindow("LeGaJ - Let's Get a Job Dashboard")
-	state.Window.Resize(fyne.NewSize(1000, 720))
+	state.Window.Resize(fyne.NewSize(1350, 750))
 
 	// Ensure standard output/references directories
 	os.MkdirAll("outputs", 0755)
@@ -657,6 +896,7 @@ func startFyneGUI() {
 		fyne.Do(func() {
 			refreshUI()
 			fillProfileForm()
+			loadClippedJobsToInbox()
 
 			// Onboarding Wizard triggers on startup if profile is uninitialized
 			if forceWizard || state.Profile.PersonalInfo.Name == "" {
@@ -780,14 +1020,89 @@ func saveProfileData() {
 	}
 }
 
+func saveTrackerDataGo() error {
+	jsonData, err := json.MarshalIndent(state.Applications, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile("references/job-tracker.json", jsonData, 0644)
+}
+
+func addApplicationGo(company, role, location, link, status, resume, coverLetter, notes string) error {
+	dateStr := time.Now().Format("2006-01-02")
+	if status == "" {
+		status = "Applied"
+	}
+	newApp := JobApplication{
+		Company:     company,
+		Role:        role,
+		Location:    location,
+		Date:        dateStr,
+		Link:        link,
+		Status:      status,
+		Resume:      resume,
+		CoverLetter: coverLetter,
+		Notes:       notes,
+	}
+	state.Applications = append(state.Applications, newApp)
+	return saveTrackerDataGo()
+}
+
+func updateApplicationGo(company, role, newStatus, notes string) error {
+	found := false
+	for i := range state.Applications {
+		if strings.EqualFold(strings.TrimSpace(state.Applications[i].Company), strings.TrimSpace(company)) &&
+			strings.EqualFold(strings.TrimSpace(state.Applications[i].Role), strings.TrimSpace(role)) {
+			state.Applications[i].Status = newStatus
+			if notes != "" {
+				currNotes := state.Applications[i].Notes
+				if currNotes != "" {
+					state.Applications[i].Notes = currNotes + " | " + notes
+				} else {
+					state.Applications[i].Notes = notes
+				}
+			}
+			found = true
+		}
+	}
+	if !found {
+		return fmt.Errorf("no application found matching %s at %s", role, company)
+	}
+	return saveTrackerDataGo()
+}
+
+func deleteApplicationGo(company, role string) error {
+	var newApps []JobApplication
+	found := false
+	for _, app := range state.Applications {
+		if strings.EqualFold(strings.TrimSpace(app.Company), strings.TrimSpace(company)) &&
+			strings.EqualFold(strings.TrimSpace(app.Role), strings.TrimSpace(role)) {
+			found = true
+		} else {
+			newApps = append(newApps, app)
+		}
+	}
+	if !found {
+		return fmt.Errorf("no application found matching %s at %s", role, company)
+	}
+	state.Applications = newApps
+	return saveTrackerDataGo()
+}
+
 func loadTrackerData() {
-	outText, err := RunManageApplications("list")
+	filePath := "references/job-tracker.json"
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		// Run python migration once if file does not exist
+		_, _ = RunManageApplications("list")
+	}
+
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		state.Applications = []JobApplication{}
 		return
 	}
 	var apps []JobApplication
-	err = json.Unmarshal([]byte(outText), &apps)
+	err = json.Unmarshal(data, &apps)
 	if err != nil {
 		state.Applications = []JobApplication{}
 		return
@@ -814,34 +1129,85 @@ func refreshUI() {
 	updateTrackerSelectionUI()
 }
 
+func getSelectedTrackerIndices() []int {
+	var indices []int
+	for rowIdx, checked := range trackerSelectedRows {
+		if checked && rowIdx < len(state.Applications) {
+			indices = append(indices, rowIdx)
+		}
+	}
+	if len(indices) == 0 && state.SelectedAppIdx >= 0 && state.SelectedAppIdx < len(state.Applications) {
+		indices = append(indices, state.SelectedAppIdx)
+	}
+	return indices
+}
+
 func updateTrackerSelectionUI() {
-	if state.SelectedAppIdx >= 0 && state.SelectedAppIdx < len(state.Applications) {
-		app := &state.Applications[state.SelectedAppIdx]
+	indices := getSelectedTrackerIndices()
+	if len(indices) > 0 {
+		// Set state.TrackerSelected to the first selected application for general details context
+		firstIdx := indices[0]
+		app := &state.Applications[firstIdx]
 		state.TrackerSelected = app
 
-		// Dynamically set toolbar status dropdown without triggering double updates
 		isUpdatingTrackerDropdown = true
-		trackerStatusSelect.SetSelected(app.Status)
+		if trackerStatusSelect != nil {
+			trackerStatusSelect.SetSelected(app.Status)
+		}
 		isUpdatingTrackerDropdown = false
 
-		// Enable/disable document opening buttons based on file existence
-		resPath := filepath.Join(state.SaveFolder, app.Resume)
-		if _, err := os.Stat(resPath); err == nil && app.Resume != "" {
-			trackerOpenResumeBtn.Enable()
-		} else {
-			trackerOpenResumeBtn.Disable()
-		}
+		// Perform file stats check in a background goroutine to unblock UI thread
+		go func() {
+			hasResume := false
+			hasCoverLetter := false
+			for _, idx := range indices {
+				if idx >= len(state.Applications) {
+					continue
+				}
+				curApp := &state.Applications[idx]
+				if curApp.Resume != "" {
+					resPath := filepath.Join(state.SaveFolder, curApp.Resume)
+					if _, err := os.Stat(resPath); err == nil {
+						hasResume = true
+					}
+				}
+				if curApp.CoverLetter != "" {
+					clPath := filepath.Join(state.SaveFolder, curApp.CoverLetter)
+					if _, err := os.Stat(clPath); err == nil {
+						hasCoverLetter = true
+					}
+				}
+			}
 
-		clPath := filepath.Join(state.SaveFolder, app.CoverLetter)
-		if _, err := os.Stat(clPath); err == nil && app.CoverLetter != "" {
-			trackerOpenCoverLetterBtn.Enable()
-		} else {
-			trackerOpenCoverLetterBtn.Disable()
-		}
+			// Update toolbar buttons on main thread
+			fyne.Do(func() {
+				// Verify if selection has not changed in the meantime
+				currentIndices := getSelectedTrackerIndices()
+				if len(currentIndices) == 0 {
+					trackerOpenResumeBtn.Disable()
+					trackerOpenCoverLetterBtn.Disable()
+					return
+				}
+
+				if hasResume {
+					trackerOpenResumeBtn.Enable()
+				} else {
+					trackerOpenResumeBtn.Disable()
+				}
+
+				if hasCoverLetter {
+					trackerOpenCoverLetterBtn.Enable()
+				} else {
+					trackerOpenCoverLetterBtn.Disable()
+				}
+			})
+		}()
 	} else {
 		state.TrackerSelected = nil
 		isUpdatingTrackerDropdown = true
-		trackerStatusSelect.ClearSelected()
+		if trackerStatusSelect != nil {
+			trackerStatusSelect.ClearSelected()
+		}
 		isUpdatingTrackerDropdown = false
 		trackerOpenResumeBtn.Disable()
 		trackerOpenCoverLetterBtn.Disable()
@@ -1099,22 +1465,26 @@ Return ONLY valid JSON. No markdown, no explanation.`, kw, loc)
 					summaryText := fmt.Sprintf("%d listing(s) found · %d verified active", len(tagged), verifiedCount)
 					state.SearchResultsBox.Add(widget.NewLabelWithStyle(summaryText, fyne.TextAlignLeading, fyne.TextStyle{Italic: true}))
 					state.SearchResultsBox.Add(widget.NewSeparator())
+
+					state.SearchResultsBox.Add(container.New(layout.NewGridLayout(5),
+						widget.NewLabelWithStyle("Company", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+						widget.NewLabelWithStyle("Role", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+						widget.NewLabelWithStyle("Location", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+						widget.NewLabelWithStyle("Source", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+						widget.NewLabelWithStyle("Actions", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+					))
+					state.SearchResultsBox.Add(widget.NewSeparator())
 				}
 
-				// ── Strategy 6: Render job cards with source badge + verification status ──
+				// ── Strategy 6: Render job rows with source badge + verification status ──
 				for _, t := range tagged {
 					r := t.job
-					compLabel := widget.NewLabelWithStyle(r.Company, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-					roleLabel := widget.NewLabel(fmt.Sprintf("%s  ·  %s", r.Role, r.Location))
-					descLabel := widget.NewLabel(r.Description)
-					descLabel.Wrapping = fyne.TextWrapWord
-
 					existing := findApplicationByLink(r.Link)
 					if existing == nil {
 						existing = findApplicationByCompanyAndRole(r.Company, r.Role)
 					}
 
-					openBtn := widget.NewButtonWithIcon("View Posting", theme.HelpIcon(), func() {
+					openBtn := widget.NewButtonWithIcon("View", theme.HelpIcon(), func() {
 						openLink(r.Link)
 					})
 					trackTailorBtn := widget.NewButtonWithIcon("Track & Tailor", theme.DocumentCreateIcon(), func() {
@@ -1123,33 +1493,27 @@ Return ONLY valid JSON. No markdown, no explanation.`, kw, loc)
 					trackTailorBtn.Importance = widget.HighImportance
 
 					if existing != nil {
-						trackTailorBtn.SetText("Already Tracked (" + existing.Status + ")")
+						trackTailorBtn.SetText("Tracked (" + existing.Status + ")")
 						trackTailorBtn.Disable()
 					}
 
-					// Source badge (S6)
-					badgeLabel := widget.NewLabelWithStyle("[" + t.badge + "]", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
-
-					header := container.NewHBox(compLabel, badgeLabel)
+					sourceStr := t.badge
 					if t.groundingVerified {
-						// Blue star — this URL was directly retrieved by Gemini's search
-						srcVerified := widget.NewLabelWithStyle("★ Source-Verified", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-						header = container.NewHBox(compLabel, badgeLabel, layout.NewSpacer(), srcVerified)
+						sourceStr = "★ " + t.badge
 					} else if t.alive {
-						checkLabel := widget.NewLabelWithStyle("✓ Live", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
-						header = container.NewHBox(compLabel, badgeLabel, layout.NewSpacer(), checkLabel)
+						sourceStr = "✓ " + t.badge
 					} else {
-						deadLabel := widget.NewLabelWithStyle("✗ Unavailable", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
-						header = container.NewHBox(compLabel, badgeLabel, layout.NewSpacer(), deadLabel)
+						sourceStr = "✗ " + t.badge
 					}
 
-					cardContent := container.NewVBox(
-						header,
-						roleLabel,
-						descLabel,
+					row := container.New(layout.NewGridLayout(5),
+						widget.NewLabel(r.Company),
+						widget.NewLabel(r.Role),
+						widget.NewLabel(r.Location),
+						widget.NewLabel(sourceStr),
 						container.NewHBox(openBtn, trackTailorBtn),
 					)
-					state.SearchResultsBox.Add(widget.NewCard("", "", cardContent))
+					state.SearchResultsBox.Add(row)
 				}
 
 				// ── Strategy 5: Fallback search links when no verified results ──
@@ -1190,37 +1554,56 @@ Return ONLY valid JSON. No markdown, no explanation.`, kw, loc)
 		widget.NewLabel("Location"), searchLocation,
 	)
 
-	searchCard := widget.NewCard("Job Discovery Engine", "Search active postings and auto-tailor/track assets instantly", container.NewVBox(
-		searchForm,
-		searchBtn,
-		widget.NewSeparator(),
+	searchCardContent := container.NewBorder(
+		container.NewVBox(searchForm, searchBtn, widget.NewSeparator()),
+		nil, nil, nil,
 		resultsScroll,
-	))
+	)
+	searchTab := widget.NewCard("Job Discovery Engine", "", searchCardContent)
 
 	// ── Clip Inbox Card (populated by the browser bookmarklet) ──
 	state.ClipInboxBox = container.NewVBox(
+		container.New(&clipperRowLayout{},
+			widget.NewLabelWithStyle("Company", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle("Role", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle("Location", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle("Source", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle("Actions", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+		),
+		widget.NewSeparator(),
 		widget.NewLabelWithStyle("No clipped jobs yet. Use the bookmarklet on any job board to clip listings here.",
 			fyne.TextAlignLeading, fyne.TextStyle{Italic: true}),
 	)
-	clipScroll := container.NewVScroll(state.ClipInboxBox)
-	clipScroll.SetMinSize(fyne.NewSize(600, 220))
+	clipContainer := container.New(&fixedHeightLayout{height: 220}, state.ClipInboxBox)
 	clearClipBtn := widget.NewButtonWithIcon("Clear Inbox", theme.DeleteIcon(), func() {
+		_ = os.Remove("references/clipped-jobs.json")
 		state.ClipInboxBox.Objects = []fyne.CanvasObject{
+			container.New(&clipperRowLayout{},
+				widget.NewLabelWithStyle("Company", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+				widget.NewLabelWithStyle("Role", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+				widget.NewLabelWithStyle("Location", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+				widget.NewLabelWithStyle("Source", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+				widget.NewLabelWithStyle("Actions", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+			),
+			widget.NewSeparator(),
 			widget.NewLabelWithStyle("Inbox cleared.", fyne.TextAlignLeading, fyne.TextStyle{Italic: true}),
 		}
 		state.ClipInboxBox.Refresh()
 	})
-	clipCard := widget.NewCard("Clip Inbox", "Jobs clipped from your browser via the bookmarklet appear here for review", container.NewVBox(
-		container.NewHBox(layout.NewSpacer(), clearClipBtn),
-		clipScroll,
-	))
 
-	content := container.NewVBox(
-		searchCard,
-		clipCard,
+	clipCardContent := container.NewBorder(
+		container.NewHBox(widget.NewLabel("Jobs clipped from your browser via the bookmarklet appear here for review"), layout.NewSpacer(), clearClipBtn),
+		nil, nil, nil,
+		clipContainer,
+	)
+	clipTab := widget.NewCard("Clip Inbox", "", clipCardContent)
+
+	subTabs := container.NewAppTabs(
+		container.NewTabItem("Discovery Engine", searchTab),
+		container.NewTabItem("Clipper Inbox", clipTab),
 	)
 
-	return container.NewScroll(content)
+	return subTabs
 }
 
 func createKPICard(title string, valueLabel *widget.Label, borderClr color.Color) fyne.CanvasObject {
@@ -1823,6 +2206,7 @@ type trackerCell struct {
 	widget.BaseWidget
 	clickable *clickableCell
 	status    *statusCell
+	check     *widget.Check
 	cellID    widget.TableCellID
 }
 
@@ -1830,6 +2214,7 @@ func newTrackerCell() *trackerCell {
 	tc := &trackerCell{
 		clickable: newClickableCell(),
 		status:    newStatusCell(),
+		check:     widget.NewCheck("", nil),
 	}
 	tc.ExtendBaseWidget(tc)
 	return tc
@@ -1846,20 +2231,76 @@ func (r *trackerCellRenderer) Layout(size fyne.Size) {
 
 	r.cell.status.Resize(size)
 	r.cell.status.Move(fyne.NewPos(0, 0))
+
+	r.cell.check.Resize(size)
+	r.cell.check.Move(fyne.NewPos(0, 0))
 }
 func (r *trackerCellRenderer) MinSize() fyne.Size {
 	return r.cell.clickable.MinSize()
 }
 func (r *trackerCellRenderer) Objects() []fyne.CanvasObject {
-	return []fyne.CanvasObject{r.cell.clickable, r.cell.status}
+	return []fyne.CanvasObject{r.cell.clickable, r.cell.status, r.cell.check}
 }
 func (r *trackerCellRenderer) Refresh() {
 	r.cell.clickable.Refresh()
 	r.cell.status.Refresh()
+	r.cell.check.Refresh()
 }
 
 func (tc *trackerCell) CreateRenderer() fyne.WidgetRenderer {
 	return &trackerCellRenderer{cell: tc}
+}
+
+type clipperRowLayout struct{}
+
+func (l *clipperRowLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	return fyne.NewSize(930, 32)
+}
+
+func (l *clipperRowLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	if len(objects) < 5 {
+		return
+	}
+	w := size.Width
+	if w < 930 {
+		w = 930
+	}
+	actionsWidth := float32(380)
+	colWidth := (w - actionsWidth) / 4
+
+	x := float32(0)
+	for i := 0; i < 4; i++ {
+		objects[i].Move(fyne.NewPos(x, 0))
+		objects[i].Resize(fyne.NewSize(colWidth, size.Height))
+		x += colWidth
+	}
+	objects[4].Move(fyne.NewPos(x, 0))
+	objects[4].Resize(fyne.NewSize(actionsWidth, size.Height))
+}
+
+type fixedHeightLayout struct {
+	height float32
+}
+
+func (l *fixedHeightLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	minW := float32(930)
+	for _, o := range objects {
+		if min := o.MinSize(); min.Width > minW {
+			minW = min.Width
+		}
+	}
+	return fyne.NewSize(minW, l.height)
+}
+
+func (l *fixedHeightLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	w := size.Width
+	if w < 930 {
+		w = 930
+	}
+	for _, o := range objects {
+		o.Resize(fyne.NewSize(w, l.height))
+		o.Move(fyne.NewPos(0, 0))
+	}
 }
 
 type customTableLayout struct{}
@@ -1869,14 +2310,14 @@ func (l *customTableLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
 }
 
 func (l *customTableLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
-	// Total width of other columns: 240 + 280 + 110 + 90 + 140 = 860
+	// Total width of other columns: 60 (Select) + 240 + 280 + 110 + 90 + 140 = 920
 	// 20px padding left for scrollbar and card borders
-	notesWidth := size.Width - 860 - 20
+	notesWidth := size.Width - 920 - 20
 	if notesWidth < 150 {
 		notesWidth = 150
 	}
 	if state.TrackerTable != nil {
-		state.TrackerTable.SetColumnWidth(5, notesWidth)
+		state.TrackerTable.SetColumnWidth(6, notesWidth)
 	}
 	for _, o := range objects {
 		o.Resize(size)
@@ -1898,15 +2339,27 @@ func buildTrackerTab() fyne.CanvasObject {
 		if isUpdatingTrackerDropdown {
 			return
 		}
-		if state.TrackerSelected != nil && selected != "" && selected != state.TrackerSelected.Status {
+		indices := getSelectedTrackerIndices()
+		if len(indices) > 0 && selected != "" {
+			progress := dialog.NewProgressInfinite("Updating Status", "Updating job application status...", state.Window)
+			progress.Show()
 			go func() {
-				_, err := RunManageApplications("update", state.TrackerSelected.Company, state.TrackerSelected.Role, selected, "")
-				fyne.Do(func() {
-					if err != nil {
-						dialog.ShowError(err, state.Window)
-					} else {
-						reloadAllViews()
+				var lastErr error
+				for _, idx := range indices {
+					app := &state.Applications[idx]
+					if app.Status != selected {
+						_, err := RunManageApplications("update", app.Company, app.Role, selected, "")
+						if err != nil {
+							lastErr = err
+						}
 					}
+				}
+				fyne.Do(func() {
+					progress.Hide()
+					if lastErr != nil {
+						dialog.ShowError(lastErr, state.Window)
+					}
+					reloadAllViews()
 				})
 			}()
 		}
@@ -1915,18 +2368,30 @@ func buildTrackerTab() fyne.CanvasObject {
 
 	// Document opening buttons on toolbar
 	trackerOpenResumeBtn = widget.NewButtonWithIcon("Open Resume", theme.DocumentIcon(), func() {
-		if state.TrackerSelected != nil && state.TrackerSelected.Resume != "" {
-			resPath := filepath.Join(state.SaveFolder, state.TrackerSelected.Resume)
-			openLink("file:///" + filepath.ToSlash(resPath))
+		indices := getSelectedTrackerIndices()
+		for _, idx := range indices {
+			app := &state.Applications[idx]
+			if app.Resume != "" {
+				resPath := filepath.Join(state.SaveFolder, app.Resume)
+				if _, err := os.Stat(resPath); err == nil {
+					openLink("file:///" + filepath.ToSlash(resPath))
+				}
+			}
 		}
 	})
 	trackerOpenResumeBtn.Disable()
 
 	// Document opening buttons on toolbar
 	trackerOpenCoverLetterBtn = widget.NewButtonWithIcon("Open Cover Letter", theme.DocumentIcon(), func() {
-		if state.TrackerSelected != nil && state.TrackerSelected.CoverLetter != "" {
-			clPath := filepath.Join(state.SaveFolder, state.TrackerSelected.CoverLetter)
-			openLink("file:///" + filepath.ToSlash(clPath))
+		indices := getSelectedTrackerIndices()
+		for _, idx := range indices {
+			app := &state.Applications[idx]
+			if app.CoverLetter != "" {
+				clPath := filepath.Join(state.SaveFolder, app.CoverLetter)
+				if _, err := os.Stat(clPath); err == nil {
+					openLink("file:///" + filepath.ToSlash(clPath))
+				}
+			}
 		}
 	})
 	trackerOpenCoverLetterBtn.Disable()
@@ -1934,7 +2399,7 @@ func buildTrackerTab() fyne.CanvasObject {
 	// Table widget setup for spreadsheet-like grid layout
 	state.TrackerTable = widget.NewTable(
 		func() (int, int) {
-			return len(state.Applications) + 1, 6 // 6 columns
+			return len(state.Applications) + 1, 7 // 7 columns
 		},
 		func() fyne.CanvasObject {
 			return newTrackerCell()
@@ -1948,9 +2413,10 @@ func buildTrackerTab() fyne.CanvasObject {
 			if id.Row == 0 {
 				tc.clickable.Show()
 				tc.status.Hide()
+				tc.check.Hide()
 
 				t := tc.clickable.text
-				headers := []string{"Company", "Role", "Location", "Date", "Status", "Notes"}
+				headers := []string{"Select", "Company", "Role", "Location", "Date", "Status", "Notes"}
 				t.Text = headers[id.Col]
 				t.TextStyle = fyne.TextStyle{Bold: true}
 				t.TextSize = 13 // slightly larger for headers
@@ -1959,9 +2425,23 @@ func buildTrackerTab() fyne.CanvasObject {
 				if id.Row-1 < len(state.Applications) {
 					app := state.Applications[id.Row-1]
 
-					if id.Col == 4 {
+					if id.Col == 0 {
+						tc.clickable.Hide()
+						tc.status.Hide()
+						tc.check.Show()
+
+						rowIdx := id.Row - 1
+						tc.check.OnChanged = nil
+						tc.check.SetChecked(trackerSelectedRows[rowIdx])
+						tc.check.OnChanged = func(checked bool) {
+							trackerSelectedRows[rowIdx] = checked
+							updateTrackerSelectionUI()
+						}
+						tc.check.Refresh()
+					} else if id.Col == 5 {
 						tc.clickable.Hide()
 						tc.status.Show()
+						tc.check.Hide()
 
 						tc.status.selected = app.Status
 						tc.status.text.Text = app.Status
@@ -1970,37 +2450,34 @@ func buildTrackerTab() fyne.CanvasObject {
 						roleName := app.Role
 						tc.status.onChanged = func(selected string) {
 							if selected != "" && selected != app.Status {
-								go func() {
-									_, err := RunManageApplications("update", compName, roleName, selected, "")
-									fyne.Do(func() {
-										if err != nil {
-											dialog.ShowError(err, state.Window)
-										} else {
-											reloadAllViews()
-										}
-									})
-								}()
+								err := updateApplicationGo(compName, roleName, selected, "")
+								if err != nil {
+									dialog.ShowError(err, state.Window)
+								} else {
+									reloadAllViews()
+								}
 							}
 						}
 						tc.status.Refresh()
 					} else {
 						tc.clickable.Show()
 						tc.status.Hide()
+						tc.check.Hide()
 
 						t := tc.clickable.text
 						t.TextStyle = fyne.TextStyle{}
 						t.TextSize = 12 // compact size for data cells
 
 						switch id.Col {
-						case 0:
-							t.Text = app.Company
 						case 1:
-							t.Text = app.Role
+							t.Text = app.Company
 						case 2:
-							t.Text = app.Location
+							t.Text = app.Role
 						case 3:
+							t.Text = app.Location
+						case 4:
 							t.Text = app.Date
-						case 5:
+						case 6:
 							t.Text = app.Notes
 						}
 						tc.clickable.Refresh()
@@ -2012,12 +2489,13 @@ func buildTrackerTab() fyne.CanvasObject {
 	)
 
 	// Set column widths to look like spreadsheet grid
-	state.TrackerTable.SetColumnWidth(0, 240) // Company (wider)
-	state.TrackerTable.SetColumnWidth(1, 280) // Role (wider)
-	state.TrackerTable.SetColumnWidth(2, 110) // Location
-	state.TrackerTable.SetColumnWidth(3, 90)  // Date
-	state.TrackerTable.SetColumnWidth(4, 140) // Status
-	state.TrackerTable.SetColumnWidth(5, 350) // Notes (wide Notes column)
+	state.TrackerTable.SetColumnWidth(0, 60)  // Select
+	state.TrackerTable.SetColumnWidth(1, 240) // Company (wider)
+	state.TrackerTable.SetColumnWidth(2, 280) // Role (wider)
+	state.TrackerTable.SetColumnWidth(3, 110) // Location
+	state.TrackerTable.SetColumnWidth(4, 90)  // Date
+	state.TrackerTable.SetColumnWidth(5, 140) // Status
+	state.TrackerTable.SetColumnWidth(6, 350) // Notes (wide Notes column)
 
 	state.TrackerTable.OnSelected = func(id widget.TableCellID) {
 		if id.Row > 0 && id.Row-1 < len(state.Applications) {
@@ -2031,11 +2509,60 @@ func buildTrackerTab() fyne.CanvasObject {
 	})
 
 	updateBtn := widget.NewButtonWithIcon("Update Details", theme.DocumentCreateIcon(), func() {
-		if state.TrackerSelected == nil {
-			dialog.ShowInformation("Selection Required", "Please select a job cell in the table first.", state.Window)
+		indices := getSelectedTrackerIndices()
+		if len(indices) == 0 {
+			dialog.ShowInformation("Selection Required", "Please select or check a job in the table first.", state.Window)
 			return
 		}
-		openAddJobModal(state.TrackerSelected)
+		if len(indices) > 1 {
+			dialog.ShowInformation("Single Selection Required", "Please check or select only one job to update.", state.Window)
+			return
+		}
+		openAddJobModal(&state.Applications[indices[0]])
+	})
+
+	deleteBtn := widget.NewButtonWithIcon("Delete Application", theme.DeleteIcon(), func() {
+		indices := getSelectedTrackerIndices()
+		if len(indices) == 0 {
+			dialog.ShowInformation("Selection Required", "Please select or check a job in the table first.", state.Window)
+			return
+		}
+
+		msg := "Are you sure you want to delete the selected job application?"
+		if len(indices) > 1 {
+			msg = fmt.Sprintf("Are you sure you want to delete the %d selected job applications?", len(indices))
+		}
+
+		dialog.ShowConfirm("Confirm Delete", msg, func(confirmed bool) {
+			if !confirmed {
+				return
+			}
+
+			progress := dialog.NewProgressInfinite("Deleting Applications", "Removing job applications from tracker...", state.Window)
+			progress.Show()
+
+			go func() {
+				var lastErr error
+				for _, idx := range indices {
+					app := &state.Applications[idx]
+					err := deleteApplicationGo(app.Company, app.Role)
+					if err != nil {
+						lastErr = err
+					}
+				}
+				fyne.Do(func() {
+					progress.Hide()
+					if lastErr != nil {
+						dialog.ShowError(lastErr, state.Window)
+					}
+					// Clear checkbox selections to prevent index out of bounds on reload
+					for k := range trackerSelectedRows {
+						delete(trackerSelectedRows, k)
+					}
+					reloadAllViews()
+				})
+			}()
+		}, state.Window)
 	})
 
 	syncBtn := widget.NewButtonWithIcon("Sync Email Updates", theme.ViewRefreshIcon(), func() {
@@ -2110,7 +2637,7 @@ func buildTrackerTab() fyne.CanvasObject {
 					}
 					resumeName := fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(company, " ", "_"))
 					coverName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(company, " ", "_"))
-					_, addErr := RunManageApplications("add", company, role, location, jobURL, resumeName, coverName, "Bulk imported from CSV.")
+					addErr := addApplicationGo(company, role, location, jobURL, "Applied", resumeName, coverName, "Bulk imported from CSV.")
 					if addErr == nil {
 						added++
 					} else {
@@ -2127,17 +2654,178 @@ func buildTrackerTab() fyne.CanvasObject {
 		})
 	})
 
+	tailorSelectedBtn := widget.NewButtonWithIcon("Tailor Selected", theme.SettingsIcon(), func() {
+		var selectedIndices []int
+		for rowIdx, selected := range trackerSelectedRows {
+			if selected && rowIdx < len(state.Applications) {
+				selectedIndices = append(selectedIndices, rowIdx)
+			}
+		}
+
+		if len(selectedIndices) == 0 {
+			dialog.ShowInformation("Selection Required", "Please select/check at least one application from the table.", state.Window)
+			return
+		}
+
+		progress := dialog.NewProgressInfinite("Bulk Tailoring Assets", fmt.Sprintf("Processing %d selected applications sequentially...", len(selectedIndices)), state.Window)
+		progress.Show()
+
+		go func() {
+			baseProfileBytes, err := os.ReadFile("references/user-profile.json")
+			if err != nil {
+				fyne.Do(func() {
+					progress.Hide()
+					dialog.ShowError(err, state.Window)
+				})
+				return
+			}
+
+			var prof Profile
+			json.Unmarshal(baseProfileBytes, &prof)
+			candName := prof.PersonalInfo.Name
+			if candName == "" {
+				candName = "[Full Name]"
+			}
+
+			var errorsList []string
+			for _, idx := range selectedIndices {
+				app := state.Applications[idx]
+
+				comp := titleSanitizerRegex.ReplaceAllString(app.Company, "")
+				comp = strings.TrimSpace(comp)
+				role := titleSanitizerRegex.ReplaceAllString(app.Role, "")
+				role = strings.TrimSpace(role)
+
+				resumePdfName := app.Resume
+				if resumePdfName == "" {
+					resumePdfName = fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(comp, " ", "_"))
+				}
+				coverLetterPdfName := app.CoverLetter
+				if coverLetterPdfName == "" {
+					coverLetterPdfName = fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(comp, " ", "_"))
+				}
+
+				desc := findClippedJobDescription(app.Company, app.Role, app.Link)
+				if desc == "" {
+					desc = app.Notes
+					if strings.HasPrefix(desc, "Clipped from browser. ") {
+						desc = strings.TrimPrefix(desc, "Clipped from browser. ")
+					}
+				}
+				if strings.TrimSpace(desc) == "" {
+					desc = fmt.Sprintf("Role: %s at %s", role, comp)
+				}
+
+				// 1. Tailor Resume
+				tailorPrompt := fmt.Sprintf(`You are an expert resume writer. Tailor the applicant's experience bullet points and skills in the base profile JSON to align with the target job description.
+
+Base Profile JSON:
+%s
+
+Target Job Description:
+%s
+
+Mandates:
+1. For each experience, rewrite relevant bullet points to emphasize accomplishments that align with the job requirements.
+2. YOU MUST strictly preserve all historical metrics (percentages, dollar values, size of teams) and truthfulness.
+3. Elevate and rank the most critical keywords in the skills section.
+4. Keep the exact same JSON structure. Do not add or remove jobs.
+5. Output ONLY valid JSON matching the profile schema. No explanations, no markdown blocks.`, string(baseProfileBytes), desc)
+
+				tailoredJson, err := callGeminiGo(state.ApiKey, tailorPrompt, true)
+				if err != nil {
+					errorsList = append(errorsList, fmt.Sprintf("%s - %s: resume tailoring failed: %v", comp, role, err))
+					continue
+				}
+
+				err = os.WriteFile("references/user-profile-tailored.json", []byte(tailoredJson), 0644)
+				if err != nil {
+					errorsList = append(errorsList, fmt.Sprintf("%s - %s: failed to write tailored JSON: %v", comp, role, err))
+					continue
+				}
+
+				resumeOutputPath := filepath.Join(state.SaveFolder, resumePdfName)
+				_, err = RunGenerateResume("references/user-profile-tailored.json", resumeOutputPath)
+				if err != nil {
+					errorsList = append(errorsList, fmt.Sprintf("%s - %s: resume compilation failed: %v", comp, role, err))
+					continue
+				}
+
+				// 2. Draft Cover Letter
+				genericTemplate, genErr := ensureGenericCoverLetter(state.ApiKey, baseProfileBytes)
+				if genErr != nil {
+					fmt.Println("Warning: Could not load or generate generic cover letter template:", genErr)
+				}
+
+				coverPrompt := fmt.Sprintf(`Write a professional 4-paragraph cover letter for %s for the role of "%s" at "%s".
+
+Important: Base the tone, style, and structure on the following generic template:
+---
+%s
+---
+
+Structure the cover letter exactly as follows:
+Paragraph 1: State the position applied for ("%s" at "%s") and a hook showing alignment with company mission based on the provided job description:
+"%s"
+Paragraph 2-3: Map 2 specific, quantified achievements from the provided profile to the target requirements.
+Paragraph 4: Professional closing and call to action.
+
+Use the following profile details: %s
+
+Strict Mandates:
+1. Do NOT mention where the job listing was found or reference referral sources (such as LinkedIn, Indeed, etc.).
+2. At the end of the letter, output only the sign-off 'Sincerely,' followed by the applicant's name. Do NOT output any other details (such as address, phone number, email, date, etc.) below the name or signature.
+
+Output ONLY the cover letter text, no conversational intro or outro.`, candName, role, comp, genericTemplate, role, comp, desc, string(baseProfileBytes))
+
+				coverLetterDraftText, err := callGeminiGo(state.ApiKey, coverPrompt, false)
+				if err != nil {
+					errorsList = append(errorsList, fmt.Sprintf("%s - %s: cover letter draft failed: %v", comp, role, err))
+					continue
+				}
+
+				tempDraftPath := filepath.Join("outputs", "temp_bulk_draft.txt")
+				err = os.WriteFile(tempDraftPath, []byte(coverLetterDraftText), 0644)
+				if err != nil {
+					errorsList = append(errorsList, fmt.Sprintf("%s - %s: failed to write temp cover letter draft: %v", comp, role, err))
+					continue
+				}
+
+				coverOutputPath := filepath.Join(state.SaveFolder, coverLetterPdfName)
+				_, err = RunGenerateCoverLetter("references/user-profile.json", tempDraftPath, coverOutputPath)
+				os.Remove(tempDraftPath)
+				if err != nil {
+					errorsList = append(errorsList, fmt.Sprintf("%s - %s: cover letter compilation failed: %v", comp, role, err))
+					continue
+				}
+			}
+
+			fyne.Do(func() {
+				progress.Hide()
+				for k := range trackerSelectedRows {
+					trackerSelectedRows[k] = false
+				}
+				reloadAllViews()
+				if len(errorsList) > 0 {
+					dialog.ShowError(fmt.Errorf("Bulk tailoring finished with errors:\n%s", strings.Join(errorsList, "\n")), state.Window)
+				} else {
+					dialog.ShowInformation("Bulk Tailoring Complete", fmt.Sprintf("Successfully tailored resume & cover letter PDFs for %d application(s)!", len(selectedIndices)), state.Window)
+				}
+			})
+		}()
+	})
+
 	controlBar := container.NewHBox(
 		addBtn,
 		bulkImportBtn,
 		updateBtn,
+		deleteBtn,
 		syncBtn,
+		tailorSelectedBtn,
 		widget.NewSeparator(),
-		widget.NewLabel("Status:"),
-		trackerStatusSelect,
-		layout.NewSpacer(),
 		trackerOpenResumeBtn,
 		trackerOpenCoverLetterBtn,
+		layout.NewSpacer(),
 	)
 
 	tableContainer := container.New(&customTableLayout{}, state.TrackerTable)
@@ -2202,11 +2890,24 @@ func openAddJobModal(job *JobApplication) {
 		go func() {
 			var err error
 			if job != nil {
-				_, err = RunManageApplications("update", compEnt.Text, roleEnt.Text, statusSelect.Selected, notesEnt.Text)
+				// Update all fields of the selected application in-place
+				for i := range state.Applications {
+					if state.Applications[i].Company == job.Company && state.Applications[i].Role == job.Role {
+						state.Applications[i].Company = compEnt.Text
+						state.Applications[i].Role = roleEnt.Text
+						state.Applications[i].Location = locEnt.Text
+						state.Applications[i].Date = dateEnt.Text
+						state.Applications[i].Link = linkEnt.Text
+						state.Applications[i].Status = statusSelect.Selected
+						state.Applications[i].Notes = notesEnt.Text
+						break
+					}
+				}
+				err = saveTrackerDataGo()
 			} else {
 				resPdfName := fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(compEnt.Text, " ", "_"))
 				clPdfName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(compEnt.Text, " ", "_"))
-				_, err = RunManageApplications("add", compEnt.Text, roleEnt.Text, locEnt.Text, linkEnt.Text, resPdfName, clPdfName, notesEnt.Text)
+				err = addApplicationGo(compEnt.Text, roleEnt.Text, locEnt.Text, linkEnt.Text, statusSelect.Selected, resPdfName, clPdfName, notesEnt.Text)
 			}
 
 			fyne.Do(func() {
@@ -2333,7 +3034,11 @@ Paragraph 1: State the position applied for and a hook showing alignment with co
 Paragraph 2-3: Map 2 specific, quantified achievements from experience to the target role.
 Paragraph 4: Professional closing and call to action.
 
-Output ONLY the cover letter text, no conversational intro or outro.`, role, comp, string(profileBytes), genericTemplate)
+Strict Mandates:
+1. Do NOT mention where the job listing was found or reference referral sources (such as LinkedIn, Indeed, etc.).
+2. At the end of the letter, output only the sign-off 'Sincerely,' followed by the applicant's name. Do NOT output any other details (such as address, phone number, email, date, etc.) below the name or signature.
+
+Output ONLY the cover letter text, no conversational intro or outro.`, candName, role, comp, string(profileBytes), genericTemplate)
 
 			coverLetterDraftText, err := callGeminiGo(state.ApiKey, draftPrompt, false)
 			if err != nil {
@@ -2652,7 +3357,7 @@ func buildHelpTab() fyne.CanvasObject {
 	// Multi-site bookmarklet — no prompt() fallbacks.
 	// Uses 127.0.0.1 (not localhost) to reliably reach the local server from HTTPS job board pages.
 	// Falls back to document.title parsing when site-specific selectors don't match.
-	bookmarkletJs := `javascript:(function(){
+	bookmarkletJs := fmt.Sprintf(`javascript:(function(){
   var h=window.location.hostname,p=window.location.href,c='',r='',l='',d='';
   try{
     if(h.includes('linkedin.com')){
@@ -2697,28 +3402,87 @@ func buildHelpTab() fyne.CanvasObject {
       c=t7.length>1?t7[t7.length-1].trim():h.split('.')[0];
       l=(document.querySelector('.iCIMS_InfoMsg')||{innerText:''}).innerText;
       d=(document.querySelector('#jobDetails')||{innerText:''}).innerText;
-    } else {
-      r=(document.querySelector('h1')||{innerText:''}).innerText||document.title;
+    }
+
+    if(!r){
+      var sel=['.job-title','.posting-title','.title','.role','h1'];
+      for(var i=0;i<sel.length;i++){
+        var el=document.querySelector(sel[i]);
+        if(el&&el.innerText.trim()){r=el.innerText.trim();break;}
+      }
+      if(!r){
+        var og=document.querySelector('meta[property="og:title"]');
+        if(og&&og.content.trim())r=og.content.trim();
+      }
+      if(!r&&document.title){
+        var ct=document.title.replace(/\s*[-|•|\|]\s*(LinkedIn|Indeed|ZipRecruiter|Glassdoor|Google).*$/i,'').trim();
+        r=ct;
+      }
+      if(!r||r.toLowerCase().includes('apply now')||r.toLowerCase().includes('current openings')||r.toLowerCase().includes('career page')||r.toLowerCase().includes('job details')){
+        var segs=window.location.pathname.split('/').filter(Boolean);
+        for(var j=0;j<segs.length;j++){
+          var s=segs[j];
+          if(s.length>5&&!s.includes('.')&&isNaN(s)){
+            r=decodeURIComponent(s).replace(/[-_]/g,' ').replace(/\b\w/g,function(x){return x.toUpperCase();});
+            break;
+          }
+        }
+      }
+    }
+
+    if(!c){
       var ht=document.title;
-      c=ht.includes(' at ')?ht.split(' at ').pop().split('|')[0].split('-')[0].trim():h.replace('www.','').split('.')[0];
-      l='';
-      d=(document.querySelector('main')||document.querySelector('article')||document.querySelector('[class*="description"]')||{innerText:''}).innerText;
+      c=ht.includes(' at ')?ht.split(' at ').pop().split('|')[0].split('-')[0].trim():'';
+    }
+
+    if(!l){
+      var els=document.querySelectorAll('*');
+      for(var i=0;i<els.length;i++){
+        var el=els[i];
+        if(el.children.length===0&&el.innerText.trim()){
+          var idc=(el.id+' '+el.className).toLowerCase();
+          if(idc.includes('location')||idc.includes('workplace')||idc.includes('remote')||idc.includes('hybrid')){
+            var txt=el.innerText.trim();
+            if(txt.length>2&&txt.length<100){l=txt;break;}
+          }
+        }
+      }
+      if(!l){
+        var geoRegex=/^[A-Z][a-zA-Z\s.]+,\s*[A-Z]{2}(\s+[A-Z][a-zA-Z\s.]+)?$/;
+        var tags=document.querySelectorAll('h2, h3, h4, p, span');
+        for(var i=0;i<tags.length;i++){
+          var txt=tags[i].innerText.trim();
+          if(geoRegex.test(txt)||txt.toLowerCase()==='remote'||txt.toLowerCase().includes('remote,')||txt.toLowerCase().includes('hybrid,')){
+            l=txt;
+            break;
+          }
+        }
+      }
+    }
+
+    if(!d){
+      var selD=['main','article','[class*="description"]','[id*="description"]','#job-details','#content','.section-wrapper','[data-automation-id="jobPostingDescription"]','.ashby-job-posting-description','#jobDescriptionText'];
+      for(var i=0;i<selD.length;i++){
+        var el=document.querySelector(selD[i]);
+        if(el&&el.innerText.trim()){d=el.innerText.trim();break;}
+      }
+      if(!d)d=document.body.innerText;
     }
   } catch(e){}
   c=(c||'').trim().substring(0,100);
   r=(r||'').trim().substring(0,150);
   l=(l||'').trim().substring(0,100);
-  d=(d||'').trim().substring(0,600);
+  d=(d||'').trim().substring(0,50000);
   if(!c&&!r){return;}
-  fetch('http://127.0.0.1:8080/clip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({company:c||h,role:r||document.title,location:l,link:p,description:d})})
+  fetch('http://127.0.0.1:%d/clip',{method:'POST',headers:{'Content-Type':'application/json','X-LeGaJ-Token':'%s'},body:JSON.stringify({company:c,role:r||document.title,location:l,link:p,description:d})})
     .then(function(res){return res.json();})
     .then(function(){alert('\u2705 Clipped! Check the Clip Inbox in LeGaJ.');}) 
     .catch(function(e){
-      var url='http://127.0.0.1:8080/clip?company='+encodeURIComponent(c||h)+'&role='+encodeURIComponent(r||document.title)+'&location='+encodeURIComponent(l)+'&link='+encodeURIComponent(p)+'&description='+encodeURIComponent(d);
+      var url='http://127.0.0.1:%d/clip?token=%s&company='+encodeURIComponent(c)+'&role='+encodeURIComponent(r||document.title)+'&location='+encodeURIComponent(l)+'&link='+encodeURIComponent(p)+'&description='+encodeURIComponent(d);
       var w=window.open(url,'_blank','width=500,height=400,status=no,menubar=no,toolbar=no');
-      if(!w){alert('\u274C Clip failed (Popup Blocked). Please allow popups for this site, or make sure LeGaJ is open.');}
+      if(!w){alert('\u274C Clip failed: Popup was blocked!\n\nTo allow job clipping on this site:\n1. Click the blocked popup icon in your browser address bar.\n2. Select \"Always allow popups and redirects from \" + window.location.origin + \".\n3. Click Done and try clipping again.\n\nAlso make sure LeGaJ is running and open.');}
     });
-})();`
+})();`, activePort, clipAuthToken, activePort, clipAuthToken)
 
 	bookmarkletEntry := widget.NewEntry()
 	bookmarkletEntry.SetText(bookmarkletJs)
@@ -2752,6 +3516,18 @@ func buildHelpTab() fyne.CanvasObject {
 		bookmarkletEntry,
 	))
 
+	absExtensionPath, _ := filepath.Abs("extension")
+	extensionCard := widget.NewCard("Clip to LeGaJ Chrome/Edge Extension", "A browser extension alternative that bypasses HTTPS mixed-content restrictions", container.NewVBox(
+		widget.NewLabel("If the bookmarklet fails due to HTTPS/Mixed Content restrictions on secure pages, load the local extension:"),
+		widget.NewLabel("1. Open Chrome/Edge and navigate to: chrome://extensions or edge://extensions"),
+		widget.NewLabel("2. Enable \"Developer mode\" (toggle switch in the top-right)."),
+		widget.NewLabel("3. Click \"Load unpacked\" (button in the top-left)."),
+		widget.NewLabel("4. Select the \"extension\" directory in your LeGaJ installation:"),
+		widget.NewLabel("   " + absExtensionPath),
+		widget.NewLabel("5. Pin the \"LeGaJ Clipper\" extension to your toolbar."),
+		widget.NewLabel("6. When on a job posting page, click the extension icon to clip the job instantly!"),
+	))
+
 	securityCard := widget.NewCard("Security & Ethics Disclosure", "", container.NewVBox(
 		widget.NewLabel("AI and the Internet are inherently dangerous. Any tool that inputs unverified information from the web is vulnerable to prompt injection. Use at your own risk."),
 		widget.NewLabel("• LeGaJ operates 100% locally. Your PII (name, email, phone) and Gemini API Keys are kept on your machine."),
@@ -2776,6 +3552,7 @@ func buildHelpTab() fyne.CanvasObject {
 		securityCard,
 		helpDoc,
 		bookmarkletCard,
+		extensionCard,
 		widget.NewSeparator(),
 		creditsRow,
 	)
@@ -3713,6 +4490,12 @@ Resume Text:
 // -------------------------------------------------------------
 
 func runTrackAndTailorAutomation(company, role, location, link, desc string) {
+	// Strip portal brand suffixes
+	company = titleSanitizerRegex.ReplaceAllString(company, "")
+	company = strings.TrimSpace(company)
+	role = titleSanitizerRegex.ReplaceAllString(role, "")
+	role = strings.TrimSpace(role)
+
 	progress := dialog.NewProgressInfinite("Pipeline Automating", "Tracking row, tailoring resume, drafting cover letter, compiling PDFs...", state.Window)
 	progress.Show()
 
@@ -3860,7 +4643,11 @@ Paragraph 4: Professional closing and call to action.
 
 Use the following profile details: %s
 
-Output ONLY the cover letter text, no conversational intro or outro.`, role, company, genericTemplate, role, company, desc, string(baseProfileBytes))
+Strict Mandates:
+1. Do NOT mention where the job listing was found or reference referral sources (such as LinkedIn, Indeed, etc.).
+2. At the end of the letter, output only the sign-off 'Sincerely,' followed by the applicant's name. Do NOT output any other details (such as address, phone number, email, date, etc.) below the name or signature.
+
+Output ONLY the cover letter text, no conversational intro or outro.`, candName, role, company, genericTemplate, role, company, desc, string(baseProfileBytes))
 
 		coverLetterDraftText, err := callGeminiGo(state.ApiKey, coverPrompt, false)
 		if err != nil {
@@ -4171,6 +4958,273 @@ func buildFileManagerTab() fyne.CanvasObject {
 var clipMux = http.NewServeMux()
 var clipServerStarted bool
 
+var titleSanitizerRegex = regexp.MustCompile(`(?i)\s*[-|•|\|]\s*(LinkedIn|Indeed|ZipRecruiter|Glassdoor|Google).*`)
+
+type IPRateLimiter struct {
+	mu  sync.Mutex
+	ips map[string][]time.Time
+}
+
+var limiter = IPRateLimiter{
+	ips: make(map[string][]time.Time),
+}
+
+func (l *IPRateLimiter) Allow(ip string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	window := 10 * time.Second
+	maxRequests := 5
+
+	var validTimes []time.Time
+	for _, t := range l.ips[ip] {
+		if now.Sub(t) < window {
+			validTimes = append(validTimes, t)
+		}
+	}
+
+	if len(validTimes) >= maxRequests {
+		l.ips[ip] = validTimes
+		return false
+	}
+
+	validTimes = append(validTimes, now)
+	l.ips[ip] = validTimes
+	return true
+}
+
+func saveActivePort(port int) {
+	os.MkdirAll("references", 0755)
+	_ = os.WriteFile("references/.clip_port", []byte(fmt.Sprintf("%d", port)), 0644)
+}
+
+func extractCompanyNameFromURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "Web"
+	}
+	host := strings.ToLower(u.Host)
+	if strings.Contains(host, ":") {
+		host, _, _ = net.SplitHostPort(host)
+	}
+
+	prefixes := []string{"www.", "careers.", "jobs.", "recruiting.", "app."}
+	for _, pref := range prefixes {
+		if strings.HasPrefix(host, pref) {
+			host = strings.TrimPrefix(host, pref)
+		}
+	}
+
+	parts := strings.Split(host, ".")
+	if len(parts) > 0 && parts[0] != "" {
+		return strings.Title(parts[0])
+	}
+	return "Web"
+}
+
+func writeExtensionFiles(port int, token string) {
+	err := os.MkdirAll("extension", 0755)
+	if err != nil {
+		fmt.Printf("Warning: Failed to create extension directory: %v\n", err)
+		return
+	}
+
+	manifest := `{
+  "manifest_version": 3,
+  "name": "LeGaJ Clipper",
+  "version": "1.0.0",
+  "description": "Clip job listings directly into LeGaJ",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "action": {
+    "default_title": "Clip Job to LeGaJ"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}`
+
+	background := `chrome.action.onClicked.addListener((tab) => {
+  chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    files: ['content.js']
+  });
+});`
+
+	content := fmt.Sprintf(`(async function() {
+  var h = window.location.hostname, p = window.location.href, c = '', r = '', l = '', d = '';
+  try {
+    if (h.includes('linkedin.com')) {
+      var t = document.title.replace(' | LinkedIn', '').split(' at ');
+      c = (document.querySelector('[data-tracking-control-name="public_jobs_topcard-org-name"]') || document.querySelector('.topcard__org-name-link') || document.querySelector('.job-details-jobs-unified-top-card__company-name a') || { innerText: t[1] || '' }).innerText;
+      r = (document.querySelector('h1.t-24') || document.querySelector('.topcard__title') || document.querySelector('.job-details-jobs-unified-top-card__job-title h1') || { innerText: t[0] || '' }).innerText;
+      l = (document.querySelector('.topcard__flavor--bullet') || document.querySelector('.job-details-jobs-unified-top-card__bullet') || { innerText: '' }).innerText;
+      d = (document.querySelector('.description__text') || document.querySelector('#job-details') || { innerText: '' }).innerText;
+    } else if (h.includes('indeed.com')) {
+      var t2 = document.title.replace(' - Indeed', '').split(' at ');
+      r = (document.querySelector('[data-testid="jobsearch-JobInfoHeader-title"]') || document.querySelector('h1.jobsearch-JobInfoHeader-title') || { innerText: t2[0] || '' }).innerText;
+      c = (document.querySelector('[data-company-name]') || document.querySelector('[data-testid="inlineHeader-companyName"]') || { innerText: t2[1] || '' }).innerText;
+      l = (document.querySelector('[data-testid="inlineHeader-companyLocation"]') || { innerText: '' }).innerText;
+      d = (document.querySelector('#jobDescriptionText') || { innerText: '' }).innerText;
+    } else if (h.includes('greenhouse.io') || h.includes('grnh.se')) {
+      var t3 = document.title.split(' - ');
+      r = (document.querySelector('h1.app-title') || document.querySelector('.app__title h1') || { innerText: t3[0] || '' }).innerText;
+      c = (document.querySelector('.company-name') || { innerText: t3[t3.length-1] || '' }).innerText;
+      l = (document.querySelector('.location') || { innerText: '' }).innerText;
+      d = (document.querySelector('#content') || { innerText: '' }).innerText;
+    } else if (h.includes('lever.co')) {
+      var t4 = document.title.split('|');
+      r = (document.querySelector('h2') || { innerText: t4[0] || '' }).innerText;
+      c = t4.length > 1 ? t4[t4.length-1].trim() : h.split('.')[0];
+      l = (document.querySelector('.sort-by-time.posting-category') || { innerText: '' }).innerText;
+      d = (document.querySelector('.section-wrapper') || { innerText: '' }).innerText;
+    } else if (h.includes('myworkdayjobs.com') || h.includes('workday.com')) {
+      var t5 = document.title.split('|');
+      r = (document.querySelector('[data-automation-id="jobPostingHeader"]') || { innerText: t5[0] || '' }).innerText;
+      c = t5.length > 1 ? t5[t5.length-1].trim() : h.split('.')[0];
+      l = (document.querySelector('[data-automation-id="locations"]') || { innerText: '' }).innerText;
+      d = (document.querySelector('[data-automation-id="jobPostingDescription"]') || { innerText: '' }).innerText;
+    } else if (h.includes('ashbyhq.com')) {
+      var t6 = document.title.split(' at ');
+      r = (document.querySelector('h1') || { innerText: t6[0] || '' }).innerText;
+      c = t6.length > 1 ? t6[t6.length-1].trim() : h.split('.')[0];
+      l = (document.querySelector('.ashby-job-posting-brief-location') || { innerText: '' }).innerText;
+      d = (document.querySelector('.ashby-job-posting-description') || { innerText: '' }).innerText;
+    } else if (h.includes('icims.com')) {
+      var t7 = document.title.split('-');
+      r = (document.querySelector('h1') || { innerText: t7[0] || '' }).innerText;
+      c = t7.length > 1 ? t7[t7.length-1].trim() : h.split('.')[0];
+      l = (document.querySelector('.iCIMS_InfoMsg') || { innerText: '' }).innerText;
+      d = (document.querySelector('#jobDetails') || { innerText: '' }).innerText;
+    }
+
+    if (!r) {
+      var sel = ['.job-title', '.posting-title', '.title', '.role', 'h1'];
+      for (var i = 0; i < sel.length; i++) {
+        var el = document.querySelector(sel[i]);
+        if (el && el.innerText.trim()) { r = el.innerText.trim(); break; }
+      }
+      if (!r) {
+        var og = document.querySelector('meta[property="og:title"]');
+        if (og && og.content.trim()) r = og.content.trim();
+      }
+      if (!r && document.title) {
+        var ct = document.title.replace(/\s*[-|•|\|]\s*(LinkedIn|Indeed|ZipRecruiter|Glassdoor|Google).*$/i, '').trim();
+        r = ct;
+      }
+      if (!r || r.toLowerCase().includes('apply now') || r.toLowerCase().includes('current openings') || r.toLowerCase().includes('career page') || r.toLowerCase().includes('job details')) {
+        var segs = window.location.pathname.split('/').filter(Boolean);
+        for (var j = 0; j < segs.length; j++) {
+          var s = segs[j];
+          if (s.length > 5 && !s.includes('.') && isNaN(s)) {
+            r = decodeURIComponent(s).replace(/[-_]/g, ' ').replace(/\b\w/g, function(x) { return x.toUpperCase(); });
+            break;
+          }
+        }
+      }
+    }
+
+    if (!c) {
+      var ht = document.title;
+      c = ht.includes(' at ') ? ht.split(' at ').pop().split('|')[0].split('-')[0].trim() : '';
+    }
+
+    if (!l) {
+      var els = document.querySelectorAll('*');
+      for (var i = 0; i < els.length; i++) {
+        var el = els[i];
+        if (el.children.length === 0 && el.innerText.trim()) {
+          var idc = (el.id + ' ' + el.className).toLowerCase();
+          if (idc.includes('location') || idc.includes('workplace') || idc.includes('remote') || idc.includes('hybrid')) {
+            var txt = el.innerText.trim();
+            if (txt.length > 2 && txt.length < 100) { l = txt; break; }
+          }
+        }
+      }
+      if (!l) {
+        var geoRegex = /^[A-Z][a-zA-Z\s.]+,\s*[A-Z]{2}(\s+[A-Z][a-zA-Z\s.]+)?$/;
+        var tags = document.querySelectorAll('h2, h3, h4, p, span');
+        for (var i = 0; i < tags.length; i++) {
+          var txt = tags[i].innerText.trim();
+          if (geoRegex.test(txt) || txt.toLowerCase() === 'remote' || txt.toLowerCase().includes('remote,') || txt.toLowerCase().includes('hybrid,')) {
+            l = txt;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!d) {
+      var selD = ['main', 'article', '[class*="description"]', '[id*="description"]', '#job-details', '#content', '.section-wrapper', '[data-automation-id="jobPostingDescription"]', '.ashby-job-posting-description', '#jobDescriptionText'];
+      for (var i = 0; i < selD.length; i++) {
+        var el = document.querySelector(selD[i]);
+        if (el && el.innerText.trim()) { d = el.innerText.trim(); break; }
+      }
+      if (!d) d = document.body.innerText;
+    }
+  } catch (e) {}
+
+  c = (c || '').trim().substring(0, 100);
+  r = (r || '').trim().substring(0, 150);
+  l = (l || '').trim().substring(0, 100);
+  d = (d || '').trim().substring(0, 50000);
+
+  if (!c && !r) {
+    alert("❌ Could not scrape job details from this page.");
+    return;
+  }
+
+  try {
+    let res = await fetch('http://127.0.0.1:%d/clip', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-LeGaJ-Token': '%s'
+      },
+      body: JSON.stringify({ company: c, role: r || document.title, location: l, link: p, description: d })
+    });
+    if (res.ok) {
+      alert('✅ Clipped successfully via LeGaJ Extension!');
+    } else {
+      alert('❌ Failed to send clip. Server returned: ' + res.status);
+    }
+  } catch (err) {
+    alert('❌ Failed to send clip. Is LeGaJ running?');
+  }
+})();`, port, token)
+
+	_ = os.WriteFile("extension/manifest.json", []byte(manifest), 0644)
+	_ = os.WriteFile("extension/background.js", []byte(background), 0644)
+	_ = os.WriteFile("extension/content.js", []byte(content), 0644)
+}
+
+func initClipServer() {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err == nil {
+		clipAuthToken = hex.EncodeToString(bytes)
+	} else {
+		clipAuthToken = "fallback_secure_token_123"
+	}
+
+	for port := 8080; port < 8100; port++ {
+		addr := fmt.Sprintf("127.0.0.1:%d", port)
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			clipListener = ln
+			activePort = port
+			saveActivePort(port)
+			writeExtensionFiles(port, clipAuthToken)
+			return
+		} else {
+			fmt.Printf("Port %d already in use, trying next...\n", port)
+		}
+	}
+	fmt.Println("Port 8080 already in use, clip server disabled")
+}
+
 func startClipServer() {
 	if clipServerStarted {
 		return
@@ -4178,16 +5232,38 @@ func startClipServer() {
 	clipServerStarted = true
 
 	clipMux.HandleFunc("/clip", func(w http.ResponseWriter, r *http.Request) {
-		// CORS + Chrome Private Network Access headers (required for HTTPS pages → localhost)
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-LeGaJ-Token")
 		w.Header().Set("Access-Control-Allow-Private-Network", "true")
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
+
+		// Rate Limiting Check
+		ip, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			ip = r.RemoteAddr
+		}
+		if !limiter.Allow(ip) {
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			return
+		}
+
+		// Token Verification
+		token := r.Header.Get("X-LeGaJ-Token")
+		if token == "" {
+			token = r.URL.Query().Get("token")
+		}
+		if token != clipAuthToken {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Max Body Size Guard (100KB)
+		r.Body = http.MaxBytesReader(w, r.Body, 100*1024)
 
 		var payload struct {
 			Company     string `json:"company"`
@@ -4213,7 +5289,6 @@ func startClipServer() {
 					return
 				}
 			} else {
-				// Form URL encoded or Multipart
 				err := r.ParseForm()
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusBadRequest)
@@ -4230,76 +5305,82 @@ func startClipServer() {
 			return
 		}
 
-		// Accept partial clips — bookmarklet may not always get all fields.
-		// Use the link domain as company fallback, and the full URL as role fallback.
 		if payload.Company == "" {
-			payload.Company = sourceBadge(payload.Link)
+			payload.Company = extractCompanyFromTitle(payload.Role)
+			if payload.Company == "" && payload.Description != "" {
+				corrected := correctMissingCompany(state.ApiKey, payload.Description, payload.Role)
+				if corrected != "" {
+					payload.Company = corrected
+				}
+			}
+			if payload.Company == "" {
+				payload.Company = "Unknown Company"
+			}
 		}
+		payload.Company = titleSanitizerRegex.ReplaceAllString(payload.Company, "")
+		payload.Company = strings.TrimSpace(payload.Company)
+
 		if payload.Role == "" {
 			payload.Role = "(Role not detected — update in tracker)"
 		}
+		payload.Role = titleSanitizerRegex.ReplaceAllString(payload.Role, "")
+		payload.Role = strings.TrimSpace(payload.Role)
 
-		// Route to Clip Inbox in Job Hunt tab for user review
+		// Generic title filtering and correction
+		if isGenericRole(payload.Role) {
+			corrected := correctGenericRole(state.ApiKey, payload.Description, payload.Company)
+			if corrected != "" {
+				payload.Role = corrected
+			}
+		}
+
+		// Save clipped job to local storage file references/clipped-jobs.json
+		saveClippedJob(ClippedJob{
+			Company:     payload.Company,
+			Role:        payload.Role,
+			Location:    payload.Location,
+			Link:        payload.Link,
+			Description: payload.Description,
+		})
+
+		// Safety Check: Avoid Fyne GUI operations in non-GUI / headless runs
+		if !isGUIMode || state.ClipInboxBox == nil {
+			if r.Method == "GET" {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("Clipped successfully (headless mode)"))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "clipped in headless mode"})
+			return
+		}
+
 		fyne.Do(func() {
 			if state.ClipInboxBox == nil {
 				return
 			}
-			// Remove placeholder label on first real clip
-			if len(state.ClipInboxBox.Objects) == 1 {
-				if _, ok := state.ClipInboxBox.Objects[0].(*widget.Label); ok {
-					state.ClipInboxBox.Objects = nil
+			if len(state.ClipInboxBox.Objects) <= 2 {
+				state.ClipInboxBox.Objects = []fyne.CanvasObject{
+					container.New(layout.NewGridLayout(5),
+						widget.NewLabelWithStyle("Company", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+						widget.NewLabelWithStyle("Role", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+						widget.NewLabelWithStyle("Location", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+						widget.NewLabelWithStyle("Source", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+						widget.NewLabelWithStyle("Actions", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+					),
+					widget.NewSeparator(),
 				}
 			}
 
-			c := payload.Company
-			ro := payload.Role
-			lo := payload.Location
-			li := payload.Link
-			de := payload.Description
-			bd := sourceBadge(li)
-
-			compLabel := widget.NewLabelWithStyle(c, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-			roleLabel := widget.NewLabel(fmt.Sprintf("%s  ·  %s", ro, lo))
-			badgeLabel := widget.NewLabelWithStyle("["+bd+"]", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
-			clipLabel := widget.NewLabelWithStyle("📎 Clipped from browser", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
-			header := container.NewHBox(compLabel, badgeLabel, layout.NewSpacer(), clipLabel)
-
-			descLabel := widget.NewLabel(de)
-			descLabel.Wrapping = fyne.TextWrapWord
-
-			existing := findApplicationByLink(li)
-			if existing == nil {
-				existing = findApplicationByCompanyAndRole(c, ro)
-			}
-
-			openBtn := widget.NewButtonWithIcon("View Posting", theme.HelpIcon(), func() {
-				openLink(li)
+			addClippedJobToInboxUI(ClippedJob{
+				Company:     payload.Company,
+				Role:        payload.Role,
+				Location:    payload.Location,
+				Link:        payload.Link,
+				Description: payload.Description,
 			})
-			trackBtn := widget.NewButtonWithIcon("Track & Tailor", theme.DocumentCreateIcon(), func() {
-				runTrackAndTailorAutomation(c, ro, lo, li, de)
-			})
-			trackBtn.Importance = widget.HighImportance
-			addOnlyBtn := widget.NewButtonWithIcon("Add to Tracker Only", theme.ContentAddIcon(), func() {
-				resumeName := fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(c, " ", "_"))
-				coverName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(c, " ", "_"))
-				_, _ = RunManageApplications("add", c, ro, lo, li, resumeName, coverName, "Clipped from browser. "+de)
-				reloadAllViews()
-			})
-
-			if existing != nil {
-				clipLabel.SetText("📎 Clipped (Tracked: " + existing.Status + ")")
-				trackBtn.SetText("Already Tracked (" + existing.Status + ")")
-				trackBtn.Disable()
-				addOnlyBtn.Disable()
-			}
-
-			cardContent := container.NewVBox(
-				header,
-				roleLabel,
-				descLabel,
-				container.NewHBox(openBtn, trackBtn, addOnlyBtn),
-			)
-			state.ClipInboxBox.Add(widget.NewCard("", "", cardContent))
 			state.ClipInboxBox.Refresh()
 		})
 
@@ -4340,7 +5421,11 @@ func startClipServer() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 	})
 
+	if !isGUIMode || clipListener == nil {
+		return
+	}
+
 	go func() {
-		_ = http.ListenAndServe("127.0.0.1:8080", clipMux)
+		_ = http.Serve(clipListener, clipMux)
 	}()
 }

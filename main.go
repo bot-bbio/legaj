@@ -17,6 +17,7 @@ func main() {
 	os.MkdirAll("references", 0755)
 
 	if len(os.Args) < 2 {
+		isGUIMode = true
 		startFyneGUI()
 		return
 	}
@@ -26,6 +27,7 @@ func main() {
 	switch command {
 	case "wizard":
 		forceWizard = true
+		isGUIMode = true
 		startFyneGUI()
 		return
 

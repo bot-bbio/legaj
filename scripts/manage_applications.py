@@ -105,6 +105,21 @@ def update_application_status(file_path, company, role, new_status, notes=None):
     else:
         print(f"No application found matching {role} at {company}.")
 
+def delete_application(file_path, company, role):
+    apps = load_apps(file_path)
+    new_apps = []
+    found = False
+    for app in apps:
+        if app.get("company", "").lower().strip() == company.lower().strip() and app.get("role", "").lower().strip() == role.lower().strip():
+            found = True
+        else:
+            new_apps.append(app)
+    if found:
+        save_apps(file_path, new_apps)
+        print(f"Successfully deleted application for {role} at {company}.")
+    else:
+        print(f"No application found matching {role} at {company}.")
+
 def scan_emails_and_sync(file_path, email_addr, password, imap_server):
     import imaplib
     import email
@@ -200,6 +215,7 @@ def main():
         print("Usage:")
         print("  python manage_applications.py <tracker_path> add <company> <role> <location> <link> [resume] [cover_letter] [notes]")
         print("  python manage_applications.py <tracker_path> update <company> <role> <new_status> [notes]")
+        print("  python manage_applications.py <tracker_path> delete <company> <role>")
         print("  python manage_applications.py <tracker_path> sync <email> <password> <imap_server>")
         print("  python manage_applications.py <tracker_path> list")
         sys.exit(1)
@@ -235,6 +251,13 @@ def main():
         new_status = sys.argv[5]
         notes = sys.argv[6] if len(sys.argv) > 6 else None
         update_application_status(tracker_path, company, role, new_status, notes)
+    elif action == "delete":
+        if len(sys.argv) < 5:
+            print("Missing arguments for 'delete' command.")
+            sys.exit(1)
+        company = sys.argv[3]
+        role = sys.argv[4]
+        delete_application(tracker_path, company, role)
     elif action == "sync":
         if len(sys.argv) < 6:
             print("Missing arguments for 'sync' command.")

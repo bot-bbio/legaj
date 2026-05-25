@@ -1,0 +1,4 @@
+// This file is auto-generated at startup by writeExtensionFiles() in gui.go.
+// The generated extension/content.js embeds a per-session auth token and the
+// live clip-server port, so it is gitignored. Do not edit or commit it.
+// See README for extension setup instructions.

@@ -185,9 +185,9 @@ def create_cover_letter_pdf(profile_path, draft_text_path, output_path):
     if not success:
         print(f"Warning: Cover Letter exceeded 1 page ({doc.page} pages) even with maximum visual lock compression.")
         
-    # Save a copy to G Drive if available
-    gdrive_dir = r"G:\My Drive\Personal Labour Mobile\Cover Letter PDFs\AI Cover Letters"
-    if os.path.exists(gdrive_dir):
+    # Save a copy to an optional backup directory if configured (SEC-005).
+    gdrive_dir = os.environ.get('LEGAJ_COVER_LETTER_DIR', '')
+    if gdrive_dir and os.path.exists(gdrive_dir):
         # Extract company name from the output filename
         base_name = os.path.basename(output_path)
         dest_path = os.path.join(gdrive_dir, base_name)

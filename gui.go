@@ -9,6 +9,7 @@ import (
 	"html"
 	"image/color"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -74,12 +75,22 @@ type Profile struct {
 	Skills       map[string][]string `json:"skills"`
 }
 
+// geminiClient is the shared HTTP client for all Gemini API calls. The 30s
+// timeout prevents a hung request from blocking the UI indefinitely (SEC-015).
+var geminiClient = &http.Client{Timeout: 30 * time.Second}
+
+// writeSecureFile writes files containing secrets or PII with owner-only
+// permissions (SEC-002, SEC-031). Use for .env and references/*.json.
+func writeSecureFile(path string, data []byte) error {
+	return os.WriteFile(path, data, 0600)
+}
+
 func callGeminiGo(apiKey, promptText string, isJson bool) (string, error) {
 	model := state.ApiModel
 	if model == "" {
 		model = "gemini-3.1-flash-lite"
 	}
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, apiKey)
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model)
 
 	requestBody := map[string]interface{}{
 		"contents": []interface{}{
@@ -104,7 +115,14 @@ func callGeminiGo(apiKey, promptText string, isJson bool) (string, error) {
 		return "", err
 	}
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonBytes))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonBytes))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", apiKey)
+
+	resp, err := geminiClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -167,7 +185,7 @@ func callGeminiWithGrounding(apiKey, promptText string) (GroundedResponse, error
 	if model == "" {
 		model = "gemini-3.1-flash-lite"
 	}
-	apiURL := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, apiKey)
+	apiURL := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model)
 
 	requestBody := map[string]interface{}{
 		"contents": []interface{}{
@@ -191,7 +209,14 @@ func callGeminiWithGrounding(apiKey, promptText string) (GroundedResponse, error
 		return GroundedResponse{}, err
 	}
 
-	resp, err := http.Post(apiURL, "application/json", bytes.NewBuffer(jsonBytes))
+	req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewBuffer(jsonBytes))
+	if err != nil {
+		return GroundedResponse{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", apiKey)
+
+	resp, err := geminiClient.Do(req)
 	if err != nil {
 		return GroundedResponse{}, err
 	}
@@ -978,7 +1003,7 @@ func saveConfigurations() error {
 	}
 	content := fmt.Sprintf("GEMINI_API_KEY=%s\nLEGAJ_API_MODEL=%s\nLEGAJ_TAILORING_STRATEGY=%s\nLEGAJ_EMAIL=%s\nLEGAJ_PASSWORD=%s\nLEGAJ_IMAP_SERVER=%s\nLEGAJ_SAVE_FOLDER=%s\n",
 		state.ApiKey, state.ApiModel, state.TailoringStrategy, state.Email, state.Password, state.ImapServer, state.SaveFolder)
-	return os.WriteFile(".env", []byte(content), 0644)
+	return writeSecureFile(".env", []byte(content))
 }
 
 func loadProfileData() {
@@ -1012,7 +1037,7 @@ func saveProfileData() {
 		dialog.ShowError(err, state.Window)
 		return
 	}
-	err = os.WriteFile("references/user-profile.json", jsonData, 0644)
+	err = writeSecureFile("references/user-profile.json", jsonData)
 	if err != nil {
 		dialog.ShowError(err, state.Window)
 		return
@@ -1024,7 +1049,7 @@ func saveTrackerDataGo() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile("references/job-tracker.json", jsonData, 0644)
+	return writeSecureFile("references/job-tracker.json", jsonData)
 }
 
 func addApplicationGo(company, role, location, link, status, resume, coverLetter, notes string) error {
@@ -1753,7 +1778,7 @@ Resume Text:
 					return
 				}
 
-				err = os.WriteFile("references/user-profile.json", []byte(parsedJsonStr), 0644)
+				err = writeSecureFile("references/user-profile.json", []byte(parsedJsonStr))
 				if err != nil {
 					dialog.ShowError(err, state.Window)
 					return
@@ -2737,7 +2762,7 @@ Mandates:
 					continue
 				}
 
-				err = os.WriteFile("references/user-profile-tailored.json", []byte(tailoredJson), 0644)
+				err = writeSecureFile("references/user-profile-tailored.json", []byte(tailoredJson))
 				if err != nil {
 					errorsList = append(errorsList, fmt.Sprintf("%s - %s: failed to write tailored JSON: %v", comp, role, err))
 					continue
@@ -2783,7 +2808,7 @@ Output ONLY the cover letter text, no conversational intro or outro.`, candName,
 					continue
 				}
 
-				tempDraftPath := filepath.Join("outputs", "temp_bulk_draft.txt")
+				tempDraftPath := filepath.Join(os.TempDir(), fmt.Sprintf("legaj_bulk_draft_%d.txt", time.Now().UnixNano()))
 				err = os.WriteFile(tempDraftPath, []byte(coverLetterDraftText), 0644)
 				if err != nil {
 					errorsList = append(errorsList, fmt.Sprintf("%s - %s: failed to write temp cover letter draft: %v", comp, role, err))
@@ -3048,7 +3073,7 @@ Output ONLY the cover letter text, no conversational intro or outro.`, candName,
 				return
 			}
 
-			tempDraftPath := filepath.Join("outputs", "temp_manual_draft.txt")
+			tempDraftPath := filepath.Join(os.TempDir(), fmt.Sprintf("legaj_manual_draft_%d.txt", time.Now().UnixNano()))
 			os.WriteFile(tempDraftPath, []byte(coverLetterDraftText), 0644)
 			defer os.Remove(tempDraftPath)
 
@@ -3122,7 +3147,7 @@ Mandates:
 			return
 		}
 
-		err = os.WriteFile("references/user-profile-tailored.json", []byte(tailoredJson), 0644)
+		err = writeSecureFile("references/user-profile-tailored.json", []byte(tailoredJson))
 		if err != nil {
 			fyne.Do(func() { callback("", err) })
 			return
@@ -4377,7 +4402,7 @@ Resume Text:
 					return
 				}
 
-				os.WriteFile("references/user-profile.json", []byte(parsedJsonStr), 0644)
+				writeSecureFile("references/user-profile.json", []byte(parsedJsonStr))
 				loadProfileData()
 
 				fyne.Do(func() {
@@ -4557,7 +4582,7 @@ func runTrackAndTailorAutomation(company, role, location, link, desc string) {
 
 		if state.TailoringStrategy == "none" {
 			// Not at all: Copy references/user-profile.json directly to references/user-profile-tailored.json
-			err = os.WriteFile("references/user-profile-tailored.json", baseProfileBytes, 0644)
+			err = writeSecureFile("references/user-profile-tailored.json", baseProfileBytes)
 			if err != nil {
 				fyne.Do(func() {
 					progress.Hide()
@@ -4613,7 +4638,7 @@ Mandates:
 			}
 
 			// Write tailored profile
-			err = os.WriteFile("references/user-profile-tailored.json", []byte(tailoredJson), 0644)
+			err = writeSecureFile("references/user-profile-tailored.json", []byte(tailoredJson))
 			if err != nil {
 				fyne.Do(func() {
 					progress.Hide()
@@ -4678,7 +4703,7 @@ Output ONLY the cover letter text, no conversational intro or outro.`, candName,
 		}
 
 		// Save draft cover letter to temp file
-		tempDraftPath := filepath.Join("outputs", "temp_auto_draft.txt")
+		tempDraftPath := filepath.Join(os.TempDir(), fmt.Sprintf("legaj_auto_draft_%d.txt", time.Now().UnixNano()))
 		err = os.WriteFile(tempDraftPath, []byte(coverLetterDraftText), 0644)
 		if err != nil {
 			fyne.Do(func() {
@@ -5208,7 +5233,8 @@ func writeExtensionFiles(port int, token string) {
     if (res.ok) {
       alert('✅ Clipped successfully via LeGaJ Extension!');
     } else {
-      alert('❌ Failed to send clip. Server returned: ' + res.status);
+      var msg = await res.text();
+      alert('❌ Failed to send clip. Server returned ' + res.status + ':\n' + msg.trim());
     }
   } catch (err) {
     alert('❌ Failed to send clip. Is LeGaJ running?');
@@ -5221,11 +5247,20 @@ func writeExtensionFiles(port int, token string) {
 }
 
 func initClipServer() {
-	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err == nil {
-		clipAuthToken = hex.EncodeToString(bytes)
-	} else {
-		clipAuthToken = "fallback_secure_token_123"
+	tokenFile := "references/.clip_token"
+	if data, err := os.ReadFile(tokenFile); err == nil {
+		if t := strings.TrimSpace(string(data)); len(t) == 32 {
+			clipAuthToken = t
+		}
+	}
+	if clipAuthToken == "" {
+		b := make([]byte, 16)
+		if _, err := rand.Read(b); err != nil {
+			log.Fatalf("SECURITY: crypto/rand unavailable — cannot generate auth token: %v", err)
+		}
+		clipAuthToken = hex.EncodeToString(b)
+		os.MkdirAll("references", 0755)
+		_ = os.WriteFile(tokenFile, []byte(clipAuthToken), 0600)
 	}
 
 	for port := 8080; port < 8100; port++ {
@@ -5277,7 +5312,7 @@ func startClipServer() {
 			token = r.URL.Query().Get("token")
 		}
 		if token != clipAuthToken {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			http.Error(w, "Unauthorized: your bookmarklet token is outdated.\n\nIn LeGaJ, open the Help tab, re-copy the bookmarklet code, and reinstall it in your browser.", http.StatusUnauthorized)
 			return
 		}
 

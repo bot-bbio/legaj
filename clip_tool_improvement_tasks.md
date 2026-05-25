@@ -10,7 +10,7 @@ A roadmap of actionable tasks to fix potential bugs, security weaknesses, and re
 - [ ] **Dynamic Port Allocation**
   - Implement a fallback loop checking ports `8080`, `8081`, `8082`, etc., until an open port is bound.
 - [ ] **Dynamic Bookmarklet Generation**
-  - Update the bookmarklet generator function [buildFileManagerTab](file:///C:/Users/molus/projects/legaj/gui.go#L4098) to dynamically embed the active port number into the bookmarklet script.
+  - Update the bookmarklet generator function [buildFileManagerTab](gui.go#L4098) to dynamically embed the active port number into the bookmarklet script.
 - [ ] **App Port Registry**
   - Save the active port to a temporary file (e.g., `references/.clip_port`) so scripts and external tools can read the current active port.
 
@@ -18,7 +18,7 @@ A roadmap of actionable tasks to fix potential bugs, security weaknesses, and re
 - [ ] **Browser Extension Option**
   - Transition from a pure bookmarklet to a minimal chrome/edge extension (which bypasses local mixed-content restrictions on HTTPS sites).
 - [ ] **Enhanced Popup Instructions**
-  - Improve popup blocker warning messages in [gui.go](file:///C:/Users/molus/projects/legaj/gui.go#L2719) to guide users on how to allow popups for major job sites.
+  - Improve popup blocker warning messages in [gui.go](gui.go#L2719) to guide users on how to allow popups for major job sites.
 
 ### 3. Scraper Resilience & Title Sanitization
 - [ ] **Title Sanitizer Regex**

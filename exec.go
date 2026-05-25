@@ -3,15 +3,32 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 )
 
-const pythonPath = "C:\\Users\\molus\\AppData\\Local\\Programs\\Python\\Python312\\python.exe"
+// getPythonPath dynamically resolves the path to the Python executable.
+func getPythonPath() string {
+	if path, err := exec.LookPath("python"); err == nil {
+		return path
+	}
+	localAppData := os.Getenv("LOCALAPPDATA")
+	if localAppData != "" {
+		for _, ver := range []string{"Python312", "Python311", "Python310"} {
+			p := filepath.Join(localAppData, "Programs", "Python", ver, "python.exe")
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+	}
+	return "python"
+}
 
 // runPythonScript executes a Python script with the given arguments and returns standard output
 func runPythonScript(scriptPath string, args ...string) (string, error) {
 	fullArgs := append([]string{scriptPath}, args...)
-	cmd := exec.Command(pythonPath, fullArgs...)
+	cmd := exec.Command(getPythonPath(), fullArgs...)
 	
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

@@ -33,7 +33,7 @@ This orchestrator skill guides the user step-by-step through their job search pr
 ### Phase 4: Job Tracker Setup
 1. **Initialize spreadsheet**: Check if `references/job-tracker.xlsx` exists. If not, run the creation script:
    ```powershell
-   & "C:\Users\molus\AppData\Local\Programs\Python\Python312\python.exe" scripts/create_tracker.py
+   & "python" scripts/create_tracker.py
    ```
 2. **Status Report**: Confirm the spreadsheet is ready. Explain that they can view, add, or update jobs by talking to you directly. Show them a formatted Markdown list/table of any existing entries.
 
@@ -50,4 +50,4 @@ Once onboarding is complete, explain to the user that they can run commands or a
 
 ## Foundational Mandates
 - **Conversational Tone**: Use warm, encouraging language. Avoid technical jargon or exposing raw terminal syntax unless troubleshooting.
-- **Python Path**: Always use the full path to `python.exe` located at `C:\Users\molus\AppData\Local\Programs\Python\Python312\python.exe`.
+- **Python Path**: Always use the full path to `python.exe` located at `python`.

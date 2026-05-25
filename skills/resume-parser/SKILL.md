@@ -12,7 +12,7 @@ This skill automates the extraction and structuring of a resume from PDF, DOCX, 
 1. **Get File Path:** Ask the user for the path to their existing resume file (PDF, DOCX, TXT, or MD) if not already provided.
 2. **Extract Text:** Run `scripts/parse_resume.py` to extract the raw text content:
    ```powershell
-   & "C:\Users\molus\AppData\Local\Programs\Python\Python312\python.exe" <path-to-legaj>/scripts/parse_resume.py "<resume_path>"
+   & "python" <path-to-legaj>/scripts/parse_resume.py "<resume_path>"
    ```
 3. **Parse and Structure:** Take the output raw text and map it into the JSON schema defined in `references/user-profile.json`. 
    Ensure it includes:
@@ -27,4 +27,4 @@ This skill automates the extraction and structuring of a resume from PDF, DOCX, 
 
 ## Foundational Mandates
 - **Always preserve detail:** Do not summarize bullet points too heavily during parsing; keep the action-result structure of resume bullets.
-- **Python Path:** Always use the full path to `python.exe` located at `C:\Users\molus\AppData\Local\Programs\Python\Python312\python.exe`.
+- **Python Path:** Always use the full path to `python.exe` located at `python`.

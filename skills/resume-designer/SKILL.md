@@ -11,13 +11,13 @@ This skill compiles structured JSON profile data (either the base profile or a t
 
 1. **Select Source JSON:** Ask the user if they want to build the resume from the base profile (`references/user-profile.json`) or a tailored profile (`references/user-profile-tailored.json`). Default to `references/user-profile-tailored.json` if it exists.
 2. **Determine Output Path:** Ask the user for the output PDF file path. Default to:
-   `C:\Users\molus\projects\legaj\outputs\<Name>_Resume.pdf` (or tailored company-specific naming like `<Company>_Resume_Tailored.pdf`).
+   `~\projects\legaj\outputs\<Name>_Resume.pdf` (or tailored company-specific naming like `<Company>_Resume_Tailored.pdf`).
 3. **Generate PDF:** Run `scripts/generate_resume_pdf.py` passing the source JSON and the output PDF path:
    ```powershell
-   & "C:\Users\molus\AppData\Local\Programs\Python\Python312\python.exe" <path-to-legaj>/scripts/generate_resume_pdf.py "<source_json>" "<output_pdf_path>"
+   & "python" <path-to-legaj>/scripts/generate_resume_pdf.py "<source_json>" "<output_pdf_path>"
    ```
 4. **Validation:** Ensure the script exits successfully. Inform the user of the path where the PDF is located.
 
 ## Foundational Mandates
 - **Single Page Constraints:** Ensure the content in the source JSON is concise. The PDF styling is set with compact margins (0.5 inch) and spacing to fit standard career profiles on exactly one page.
-- **Python Path:** Always use the full path to `python.exe` located at `C:\Users\molus\AppData\Local\Programs\Python\Python312\python.exe`.
+- **Python Path:** Always use the full path to `python.exe` located at `python`.

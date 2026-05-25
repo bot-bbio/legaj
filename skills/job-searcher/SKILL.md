@@ -12,7 +12,7 @@ This skill searches for active job listings matching the user's criteria, genera
 1. **Input Collection:** Ask the user for job keywords (e.g., "Product Manager", "Software Engineer") and location (e.g., "New York, NY", "Remote").
 2. **Generate Board Links:** Run the `scripts/search_jobs.py` script to generate direct search links:
    ```powershell
-   & "C:\Users\molus\AppData\Local\Programs\Python\Python312\python.exe" <path-to-legaj>/scripts/search_jobs.py "<keywords>" "<location>"
+   & "python" <path-to-legaj>/scripts/search_jobs.py "<keywords>" "<location>"
    ```
 3. **Live Web Search:** Use the agent's web search capability to lookup actual postings published in the last 7 days matching the keywords.
 4. **Compile Results:** Parse findings and compile a table containing:
@@ -26,4 +26,4 @@ This skill searches for active job listings matching the user's criteria, genera
 
 ## Foundational Mandates
 - **Ensure Clickable Links:** Always provide fully formed URLs that the user can click directly to view listings.
-- **Python Path:** Always use the full path to `python.exe` located at `C:\Users\molus\AppData\Local\Programs\Python\Python312\python.exe`.
+- **Python Path:** Always use the full path to `python.exe` located at `python`.

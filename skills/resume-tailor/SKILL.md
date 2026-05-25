@@ -18,9 +18,9 @@ This skill tailors the applicant's experience bullets and highlighted skills to 
 4. **Save Tailored Profile:** Write the tailored profile output to `references/user-profile-tailored.json`.
 5. **Run Diff Report:** Run `scripts/tailor_resume.py` to display a nice visual diff of the changes:
    ```powershell
-   & "C:\Users\molus\AppData\Local\Programs\Python\Python312\python.exe" <path-to-legaj>/scripts/tailor_resume.py "references/user-profile.json" "references/user-profile-tailored.json"
+   & "python" <path-to-legaj>/scripts/tailor_resume.py "references/user-profile.json" "references/user-profile-tailored.json"
    ```
 
 ## Foundational Mandates
 - **Retain metrics:** Ensure all historical metrics (percentages, dollar values, size of teams) are strictly preserved.
-- **Python Path:** Always use the full path to `python.exe` located at `C:\Users\molus\AppData\Local\Programs\Python\Python312\python.exe`.
+- **Python Path:** Always use the full path to `python.exe` located at `python`.

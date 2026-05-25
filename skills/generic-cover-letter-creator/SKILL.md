@@ -14,6 +14,6 @@ This skill extracts the style, tone, and structure of an existing cover letter p
 3. **Save Template File:** Save the generated template text to `references/generic_cover_letter_template.txt`.
 4. **Compile PDF:** Compile the PDF representation of the template to `outputs/generic_cover_letter_template.pdf` using the PDF generation script:
    ```powershell
-   & "C:\Users\molus\AppData\Local\Programs\Python\Python312\python.exe" scripts/generate_cover_letter_pdf.py "references/user-profile.json" "references/generic_cover_letter_template.txt" "outputs/generic_cover_letter_template.pdf"
+   & "python" scripts/generate_cover_letter_pdf.py "references/user-profile.json" "references/generic_cover_letter_template.txt" "outputs/generic_cover_letter_template.pdf"
    ```
 5. **Notify User:** Inform the user that their generic cover letter template has been created and saved at `references/generic_cover_letter_template.txt` and `outputs/generic_cover_letter_template.pdf`.

@@ -122,11 +122,11 @@
   }
 
   try {
-    let res = await fetch('http://127.0.0.1:8080/clip', {
+    let res = await fetch('http://127.0.0.1:8081/clip', {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
-        'X-LeGaJ-Token': 'f0fb3dd2779fdcdbe536d96f5a1b0a91'
+        'X-LeGaJ-Token': '7b9ef3f04c4a6801533c82d9246c0871'
       },
       body: JSON.stringify({ company: c, role: r || document.title, location: l, link: p, description: d })
     });

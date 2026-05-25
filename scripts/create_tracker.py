@@ -34,5 +34,5 @@ def create_tracker(file_path):
         print(f"Error creating tracker: {e}")
 
 if __name__ == "__main__":
-    target = sys.argv[1] if len(sys.argv) > 1 else "C:\\Users\\molus\\projects\\legaj\\references\\job-tracker.json"
+    target = sys.argv[1] if len(sys.argv) > 1 else "references/job-tracker.json"
     create_tracker(target)

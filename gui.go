@@ -851,11 +851,10 @@ func startFyneGUI() {
 
 	// Setup default save path if none
 	if state.SaveFolder == "" {
-		gdrive := `G:\My Drive\Personal Labour Mobile\Cover Letter PDFs\AI Cover Letters`
-		if _, err := os.Stat(gdrive); err == nil {
-			state.SaveFolder = gdrive
+		if _, err := os.Stat("outputs"); err == nil {
+			state.SaveFolder = "outputs"
 		} else {
-			state.SaveFolder = `C:\Users\molus\projects\legaj\outputs`
+			state.SaveFolder = "."
 		}
 	}
 
@@ -3348,10 +3347,29 @@ func buildSettingsTab() fyne.CanvasObject {
 
 // 7. HELP & DOCUMENTATION VIEW
 func buildHelpTab() fyne.CanvasObject {
-	helpDoc := widget.NewCard("LeGaJ Help & Documentation", "", container.NewVBox(
-		widget.NewLabel("1. Overview: Matches profile details to job postings, tailors experiences, drafts cover letters, and logs tracked row states locally."),
-		widget.NewLabel("2. Save Directory: Output PDFs (Resume/Cover Letter) compile into your Custom Save Folder (defaults to Google Drive)."),
-		widget.NewLabel("3. Templates: Formatting applies Times New Roman styling and strict single-page constraints."),
+	helpDoc := widget.NewCard("Step-by-Step Job Hunt Guide", "Follow this workflow to get the most out of LeGaJ", container.NewVBox(
+		widget.NewLabelWithStyle("Step 1: Setup & API Keys", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("• Go to the Settings tab to enter your Gemini API Key. Click Save Configurations.\n• Tip: You can run the Setup Wizard at any time to configure local directories."),
+
+		widget.NewLabelWithStyle("Step 2: Initialize Your Profile", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("• Upload your existing PDF or DOCX resume to extract details automatically,\n  or fill in the forms in the Base Profile tab manually.\n• This base profile acts as your main resume reference."),
+
+		widget.NewLabelWithStyle("Step 3: Clip & Track Job Openings", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("• Search for jobs in the Job Hunt -> Discovery Engine.\n• Install the bookmarklet or Chrome extension (details below) to clip jobs from LinkedIn/Indeed.\n• Review clipped jobs in the Clipper Inbox and click 'Add to Tracker' to save them."),
+
+		widget.NewLabelWithStyle("Step 4: Tailor Your Resume & Cover Letter", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("• Open the Tailor Assets tab and select the job application.\n• Review the requirements and click 'Tailor Profile' to optimize your experiences.\n• Click 'Compile Tailored Resume' or 'Compile Cover Letter' to generate clean, 1-page PDFs."),
+
+		widget.NewLabelWithStyle("Step 5: Prepare for Interviews", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("• Select your job application in the Interview Prep tab and click 'Start Coaching'.\n• Practice behavioral questions with the built-in Flashcard Player.\n• Export cards to Anki or read your generated Markdown cheatsheet in the outputs folder."),
+	))
+
+	troubleshootCard := widget.NewCard("Troubleshooting & File Locations", "Where things are stored and how to resolve common issues", container.NewVBox(
+		widget.NewLabelWithStyle("Folder Structure", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("• references/user-profile.json: Holds your editable base profile.\n• references/job-tracker.json: Contains your tracked job applications.\n• outputs/: The folder where tailored PDFs, Anki decks, and cheatsheets are compiled."),
+
+		widget.NewLabelWithStyle("Common Issues & Fixes", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("• Bookmarklet not working? Check browser address bar for blocked pop-ups and enable permissions.\n• Mixed Content error? Install the unpacked Chrome/Edge extension detailed below instead.\n• ReportLab or GenAnki error? Ensure Python is installed and run: pip install -r requirements.txt"),
 	))
 
 	// Multi-site bookmarklet — no prompt() fallbacks.
@@ -3551,6 +3569,7 @@ func buildHelpTab() fyne.CanvasObject {
 		canvas.NewText("Help & Documentation", theme.PrimaryColor()),
 		securityCard,
 		helpDoc,
+		troubleshootCard,
 		bookmarkletCard,
 		extensionCard,
 		widget.NewSeparator(),

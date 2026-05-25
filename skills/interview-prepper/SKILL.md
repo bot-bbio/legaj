@@ -19,14 +19,14 @@ This skill automates the creation of study materials (Anki decks) and a 1-page s
      - Core company facts.
      - Behavioral questions (e.g., "Tell me about a time you resolved conflict") with STAR structure outline.
      - Industry-specific frameworks or concepts (e.g., RICE prioritization, SQL queries, Product Sense frameworks).
-3. **Save Temp JSON:** Save this structured data to a temporary JSON file at `C:\Users\molus\projects\legaj\outputs\temp_prep_data.json`.
+3. **Save Temp JSON:** Save this structured data to a temporary JSON file at `~\projects\legaj\outputs\temp_prep_data.json`.
 4. **Generate Assets:** Run the `scripts/prepare_interview.py` script:
    ```powershell
-   & "C:\Users\molus\AppData\Local\Programs\Python\Python312\python.exe" <path-to-legaj>/scripts/prepare_interview.py "outputs/temp_prep_data.json" "all"
+   & "python" <path-to-legaj>/scripts/prepare_interview.py "outputs/temp_prep_data.json" "all"
    ```
 5. **Cleanup:** Delete the temporary `temp_prep_data.json` file.
 6. **Notification:** Direct the user to their new Anki deck (`.apkg`) and the cheatsheet Markdown file under the `outputs/` folder.
 
 ## Foundational Mandates
 - **Anki Ready Formatting:** Format flashcard questions and answers clearly. Use bolding and lists for readability in Anki's template.
-- **Python Path:** Always use the full path to `python.exe` located at `C:\Users\molus\AppData\Local\Programs\Python\Python312\python.exe`.
+- **Python Path:** Always use the full path to `python.exe` located at `python`.

@@ -1,62 +1,77 @@
 # 📎 LeGaJ — Let's Get a Job
 
-LeGaJ (Let's Get a Job) is a modern, offline-first application designed to streamline, structure, and automate the job search process. Built with a **Go + Fyne GUI/CLI frontend** and a **Python script backend**, LeGaJ combines local data parsing, ReportLab document generation, and Gemini AI capabilities to act as a personal recruitment coach.
+[![Go Version](https://img.shields.io/badge/Go-1.25%2B-00ADD8?style=flat-square&logo=go)](https://go.dev)
+[![Python Version](https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&logo=python)](https://python.org)
+[![Fyne Version](https://img.shields.io/badge/UI-Fyne%20v2-blueviolet?style=flat-square)](https://fyne.io)
 
-Designed specifically to hold the user's hand through the job application lifecycle, it is equally friendly to fresh graduates with zero terminal experience (via a full-featured graphical interface) and power users (via a complete command-line interface).
+LeGaJ (Let's Get a Job) is a modern, offline-first job search suite. It integrates a **Go + Fyne GUI/CLI desktop interface** with a **Python scripts runner** for parsing resume files, tailoring bullet points via the Gemini API, compiling single-page PDF resumes/cover letters, and tracking job applications locally.
+
+Designed with accessibility in mind, LeGaJ guides fresh graduates through the recruitment lifecycle with a user-friendly GUI while offering a full-featured CLI for advanced users and scripts.
 
 ---
 
 ## 🚀 Key Features
 
-*   **Step-by-Step Onboarding Wizard**: A structured graphical guide to set up your API credentials, directories, and base profile immediately on first launch.
-*   **Local Resume Parser**: Extracts unstructured text from PDF, DOCX, TXT, and Markdown resumes into a clean, structured JSON profile.
-*   **Gemini AI-Powered Resume Tailoring**: Compares your base profile against target job descriptions to rewrite experience bullet points and reorder skills, emphasizing critical keywords while strictly preserving historical metrics.
-*   **Publication-Quality PDF Compiler**: Compiles your tailored profile or cover letter into a professional, single-page, print-ready PDF using standard typography and geometry constraints (ReportLab).
-*   **Job Tracker & Email Sync**: A local job application tracker (`job-tracker.json`) that can automatically scan your email inbox (via secure IMAP) for application confirmations, interview invitations, or rejections, updating their status automatically.
-*   **One-Click Browser Clipper**: Clip job listings from LinkedIn, Indeed, Greenhouse, Lever, Workday, Ashby, and iCIMS directly into your application's inbox using a browser bookmarklet or custom unpacked Chrome/Edge extension.
-*   **Interview Preparation Coach**: Automatically drafts elevator pitches, answers to tough behavioral questions (using the STAR method), and compiles a downloadable **Anki flashcard deck (`.apkg`)** and Markdown cheatsheet for study.
+* **Onboarding Setup Wizard** – Step-by-step GUI setup for Gemini API configurations, workspace paths, and base resume import on the first launch.
+* **Local Resume Parser** – Extracts data from PDF, DOCX, TXT, and Markdown files into a standardized profile JSON structure.
+* **AI Resume Tailoring** – Synthesizes your profile against job descriptions, dynamically rewriting bullet points and reordering skills to highlight relevant keywords.
+* **Print-Ready PDF Compiler** – Uses ReportLab to generate professional, single-page, print-ready PDF documents adhering to strict geometry constraints.
+* **Automated Job Tracker & Email Sync** – Tracks applications locally (`job-tracker.json`) and synchronizes status updates by scanning your inbox via secure IMAP.
+* **One-Click Browser Clipper** – Saves job postings from LinkedIn, Indeed, Greenhouse, Lever, Workday, Ashby, and iCIMS into your desktop Clipper Inbox.
+* **STAR Prep & Flashcards** – Generates elevator pitches, behavioral answers, and exportable **Anki decks (`.apkg`)** or study guides.
 
 ---
 
 ## 🛠️ Architecture & Tech Stack
 
-LeGaJ uses a hybrid frontend/backend model to optimize cross-platform performance:
-*   **Frontend / UI Shell**: Written in Go (1.25+) using the [Fyne v2](https://fyne.io/) GUI library. Handles application state, the local HTTP clipper server, API communication with Gemini, and GUI navigation.
-*   **Core Backend**: A set of modular Python scripts located in `scripts/` that handle heavy file I/O:
-    *   `parse_resume.py` (uses `pypdf` and `python-docx`)
-    *   `generate_resume_pdf.py` / `generate_cover_letter_pdf.py` (uses `reportlab`)
-    *   `prepare_interview.py` (uses `genanki`)
-    *   `manage_applications.py` (uses `openpyxl` / JSON parsing)
-    *   `search_jobs.py` (performs queries to gather active listings)
+LeGaJ operates on a hybrid desktop frontend and a Python-powered document processing backend:
+
+```mermaid
+graph TD
+    A[Go Fyne GUI / CLI] -->|Local HTTP Server| B[Clipper Browser Tools]
+    A -->|Calls via Exec| C[Python Scripts Runner]
+    C -->|parse_resume.py| D[(Resume Files PDF/DOCX)]
+    C -->|generate_resume_pdf.py| E[(ReportLab PDF Compiler)]
+    C -->|prepare_interview.py| F[(GenAnki Deck Builder)]
+    A -->|Secure HTTPS| G[Gemini API]
+    A -->|IMAP Client| H[User Email Inbox]
+```
+
+### Stack Components
+* **Frontend Shell**: Built with Go using [Fyne v2](https://fyne.io) for cross-platform visual widgets.
+* **Core Scripts**:
+  - `parse_resume.py`: Extracts and parses resume elements (uses `pypdf`, `python-docx`).
+  - `generate_resume_pdf.py` / `generate_cover_letter_pdf.py`: Compiles high-fidelity single-page documents (uses `reportlab`).
+  - `prepare_interview.py`: Assembles SRS flashcard decks (uses `genanki`).
+  - `manage_applications.py`: Local database controller for application tracking.
+  - `search_jobs.py`: Scrapes and fetches matches for Discovery Engine queries.
 
 ---
 
 ## 📦 Installation & Setup
 
 ### Prerequisites
-1. **Python 3.12+**: Installed and accessible on your system.
-2. **Go**: Installed if compiling from source.
+1. **Python 3.12+** – Must be installed and added to your system's PATH.
+2. **Go 1.25+** – Required if you are compiling from source.
 
-### Setup Instructions
+### Run Instructions
 
-#### Option A: One-Click Setup (Recommended for Windows / GUI Users)
-Simply double-click the [setup_and_run.bat](setup_and_run.bat) file in your File Explorer. 
-
-This script will automatically:
-1. Detect your local Python installation.
-2. Upgrade `pip` and install all required Python libraries.
-3. Launch the LeGaJ GUI application immediately.
+#### Option A: One-Click Setup (Recommended for Windows)
+Simply double-click the [setup_and_run.bat](setup_and_run.bat) file. This script will automatically:
+1. Detect your Python environment.
+2. Upgrade `pip` and install all required libraries from `requirements.txt`.
+3. Launch the LeGaJ GUI dashboard.
 
 #### Option B: Manual Terminal Setup
-1. Install Python package dependencies:
+1. Install Python dependencies:
    ```powershell
    pip install -r requirements.txt
    ```
-2. Run the onboarding wizard to configure your directories and Gemini API Key:
+2. Initialize directories and setup configuration:
    ```powershell
    ./legaj.exe wizard
    ```
-3. Alternatively, launch the graphical dashboard:
+3. Run the graphical user interface:
    ```powershell
    ./legaj.exe
    ```
@@ -65,19 +80,17 @@ This script will automatically:
 
 ## 🖥️ Graphical User Interface (GUI) Guide
 
-The GUI contains nine tabs accessible from the main navigation panel:
+LeGaJ divides its functions into nine main views available from the header navigation bar:
 
-1.  **Dashboard**: Overview of your active applications, current search statistics, quick links to tailors/preps, and system status.
-2.  **Job Hunt**:
-    *   *Discovery Engine*: Search for active job postings by keyword and location.
-    *   *Clipper Inbox*: Review listings clipped from your browser. Easily convert clipped listings into tracked applications with one click.
-3.  **Base Profile**: Edit your core information (contact details, target roles, experience bullets, and skills) in a clean form. This data is saved locally to `references/user-profile.json`.
-4.  **Job Tracker**: View, edit, add, or delete tracked applications. Update application statuses (`Wishlist`, `Applied`, `Interviewing`, `Offer`, `Rejected`) and append interview notes.
-5.  **Tailor Assets**: Select a tracked job application, paste the job description, and call the Gemini API to automatically rewrite experience bullets and draft cover letters tailored specifically to that role.
-6.  **File Manager**: Explore, open, or select files within your configured local directories.
-7.  **Interview Prep**: Generate STAR-method study flashcards and elevator pitches based on your profile and target company description. Play interactive flashcards directly inside the app or export them to Anki.
-8.  **Settings**: Update your Gemini API key, select models, adjust save directories (e.g., pointing to a local Google Drive folder), and enter IMAP credentials for email synchronization.
-9.  **Help**: Full installation instructions for the browser clipper bookmarklet, Chrome extension instructions, and documentation.
+1. **Dashboard** – High-level summary of your active job applications, success ratios, and clipper listener status.
+2. **Job Hunt** – Search for roles using the *Discovery Engine* and check incoming clipped listings in the *Clipper Inbox*.
+3. **Base Profile** – Interactive form to manage your master details, experiences, and education stored in `references/user-profile.json`.
+4. **Job Tracker** – Table displaying job statuses (`Wishlist`, `Applied`, `Interviewing`, `Offer`, `Rejected`) and interview schedules.
+5. **Tailor Assets** – Input a target job description and prompt Gemini to rewrite experiences. Render print-ready PDF drafts.
+6. **File Manager** – Browse, open, and rename assets in your local outputs and workspace paths directly from the app.
+7. **Interview Prep** – Study STAR flashcards in a built-in player, export cards to Anki, or read text cheatsheets.
+8. **Settings** – Configure API keys, adjust target folders, and input IMAP email details for background sync.
+9. **Help** – Collapsible guides, bookmarklet installers, Chrome extension loading tips, and security disclosures.
 
 ---
 
@@ -112,24 +125,22 @@ For automation or command-line workflows, LeGaJ provides a robust set of CLI com
 
 ## 📎 The Browser Clipper System
 
-LeGaJ includes a local HTTP server (running in the background on the port configured in Settings) that listens for POST requests from job boards to capture job information. You can use two methods to send data to this server:
+LeGaJ runs a local HTTP listener on the port set in your settings. You can send jobs to it from your browser:
 
-### 1. The Bookmarklet (Easiest)
-Copy the bookmarklet code generated inside the **Help** tab of the GUI, add a new bookmark in your browser, and paste the code as the URL. When viewing a job description on LinkedIn or Indeed, click the bookmark to send the company name, role title, description, and link to your LeGaJ Clipper Inbox.
+### 1. The Bookmarklet
+Copy the bookmarklet script from the **Help** tab, create a new browser bookmark, and paste the code as the URL. Tap it on any job posting page to add it instantly to your Clipper Inbox.
 
-### 2. Unpacked Chrome/Edge Extension (Bypasses HTTPS restrictions)
-If a site restricts bookmarklets via Content Security Policies (CSP), load the unpackaged extension:
-1. Open your browser and navigate to `chrome://extensions` or `edge://extensions`.
-2. Enable **Developer mode** (top-right toggle switch).
-3. Click **Load unpacked** (top-left button).
-4. Select the `extension` folder inside the LeGaJ directory.
-5. Click the extension icon when viewing a job listing to clip it instantly.
+### 2. Chrome/Edge Extension
+For sites with strict Content Security Policies that block external scripts, use our local unpacked extension:
+1. Navigate to `chrome://extensions` or `edge://extensions`.
+2. Turn on **Developer mode** (top-right).
+3. Click **Load unpacked** (top-left) and select the `extension` directory in your LeGaJ installation.
+4. Pin the **LeGaJ Clipper** icon to clip listings.
 
 ---
 
 ## 🔒 Security & Privacy Guardrails
 
-1.  **No Auto-Submit**: LeGaJ will **never** submit job applications automatically. It compiles documentation and organizes data, leaving you in complete control of submission.
-2.  **100% Local Storage**: Your PII (name, phone, email, addresses), resume contents, and tracker data remain entirely on your local disk.
-3.  **Local API Keys**: API keys for Gemini are kept in a local, uncommitted `.env` file. No middleman servers receive your API requests.
-4.  **Sandbox Policy**: Avoid executing external or unverified scripts directly. All document generation and parsing are executed via isolated Python packages.
+1. **No Auto-Submit** – LeGaJ does not submit applications automatically. You review and send all files yourself.
+2. **Local-First Storage** – Your personal data, resumes, credentials, and job logs never leave your disk.
+3. **Direct Keys** – Gemini API requests are made directly to Google; no server proxy sits in between.

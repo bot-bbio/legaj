@@ -2378,9 +2378,9 @@ func (l *customTableLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
 }
 
 func (l *customTableLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
-	// Columns 0-5 total 920px. Give Notes all remaining space so total column
-	// widths never exceed the widget width — this keeps horizontal scroll off.
-	notesWidth := size.Width - 920
+	// Columns 0-5 total 920px. Give Notes the remaining space minus the 6
+	// inter-column separator dividers so total content width == widget width.
+	notesWidth := size.Width - 920 - float32(6)*theme.SeparatorThicknessSize()
 	if notesWidth < 1 {
 		notesWidth = 1
 	}
@@ -3416,34 +3416,24 @@ func buildSettingsTab() fyne.CanvasObject {
 
 // 7. HELP & DOCUMENTATION VIEW
 func buildHelpTab() fyne.CanvasObject {
-	helpDoc := widget.NewCard("Step-by-Step Job Hunt Guide", "Follow this workflow to get the most out of LeGaJ", container.NewVBox(
-		widget.NewLabelWithStyle("Step 1: Setup & API Keys", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabel("• Go to the Settings tab to enter your Gemini API Key. Click Save Configurations.\n• Tip: You can run the Setup Wizard at any time to configure local directories."),
+	// Create markdown widgets for each documentation section
+	onboardingMd := "### 🚀 Get Started with LeGaJ\n" +
+		"Follow this step-by-step workflow to maximize your job application success:\n\n" +
+		"* **Step 1: Setup & API Keys**\n" +
+		"  Head over to the **Settings** tab and enter your *Gemini API Key*. Save configurations to store them securely. You can also run the *Setup Wizard* to initialize target folders.\n" +
+		"* **Step 2: Initialize Your Profile**\n" +
+		"  Upload your existing resume (PDF/DOCX) or fill in details in the **Base Profile** tab. This forms your main resume reference.\n" +
+		"* **Step 3: Track & Clip Job Openings**\n" +
+		"  Discover jobs in the **Discovery Engine** or clip listings from job boards (LinkedIn, Indeed, etc.) directly into your inbox using our browser tools. Review and add them to your tracker.\n" +
+		"* **Step 4: Tailor Your Assets**\n" +
+		"  Go to the **Tailor Assets** tab, select a job application, and click **Tailor Profile** to optimize your experience bullet points. You can then compile tailored resumes and cover letters to single-page, print-ready PDFs.\n" +
+		"* **Step 5: Practice & Prepare**\n" +
+		"  Generate customized interview cheatsheets and financial/behavioral flashcards in the **Interview Prep** tab. Review them using the card player or export to Anki."
 
-		widget.NewLabelWithStyle("Step 2: Initialize Your Profile", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabel("• Upload your existing PDF or DOCX resume to extract details automatically,\n  or fill in the forms in the Base Profile tab manually.\n• This base profile acts as your main resume reference."),
+	onboardingRichText := widget.NewRichTextFromMarkdown(onboardingMd)
+	onboardingRichText.Wrapping = fyne.TextWrapWord
 
-		widget.NewLabelWithStyle("Step 3: Clip & Track Job Openings", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabel("• Search for jobs in the Job Hunt -> Discovery Engine.\n• Install the bookmarklet or Chrome extension (details below) to clip jobs from LinkedIn/Indeed.\n• Review clipped jobs in the Clipper Inbox and click 'Add to Tracker' to save them."),
-
-		widget.NewLabelWithStyle("Step 4: Tailor Your Resume & Cover Letter", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabel("• Open the Tailor Assets tab and select the job application.\n• Review the requirements and click 'Tailor Profile' to optimize your experiences.\n• Click 'Compile Tailored Resume' or 'Compile Cover Letter' to generate clean, 1-page PDFs."),
-
-		widget.NewLabelWithStyle("Step 5: Prepare for Interviews", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabel("• Select your job application in the Interview Prep tab and click 'Start Coaching'.\n• Practice behavioral questions with the built-in Flashcard Player.\n• Export cards to Anki or read your generated Markdown cheatsheet in the outputs folder."),
-	))
-
-	troubleshootCard := widget.NewCard("Troubleshooting & File Locations", "Where things are stored and how to resolve common issues", container.NewVBox(
-		widget.NewLabelWithStyle("Folder Structure", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabel("• references/user-profile.json: Holds your editable base profile.\n• references/job-tracker.json: Contains your tracked job applications.\n• outputs/: The folder where tailored PDFs, Anki decks, and cheatsheets are compiled."),
-
-		widget.NewLabelWithStyle("Common Issues & Fixes", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabel("• Bookmarklet not working? Check browser address bar for blocked pop-ups and enable permissions.\n• Mixed Content error? Install the unpacked Chrome/Edge extension detailed below instead.\n• ReportLab or GenAnki error? Ensure Python is installed and run: pip install -r requirements.txt"),
-	))
-
-	// Multi-site bookmarklet — no prompt() fallbacks.
-	// Uses 127.0.0.1 (not localhost) to reliably reach the local server from HTTPS job board pages.
-	// Falls back to document.title parsing when site-specific selectors don't match.
+	// Bookmarklet configuration
 	bookmarkletJs := fmt.Sprintf(`javascript:(function(){
   var h=window.location.hostname,p=window.location.href,c='',r='',l='',d='';
   try{
@@ -3581,46 +3571,86 @@ func buildHelpTab() fyne.CanvasObject {
 	})
 	copyBtn.Importance = widget.HighImportance
 
-	installSteps := widget.NewCard("How to Install the Bookmarklet", "", container.NewVBox(
-		widget.NewLabel("1. Click \"Copy Bookmarklet Code\" above."),
-		widget.NewLabel("2. Open your browser (Chrome / Firefox / Edge)."),
-		widget.NewLabel("3. Show the bookmarks bar: Ctrl+Shift+B (Windows) or ⌘+Shift+B (Mac)."),
-		widget.NewLabel("4. Right-click the bookmarks bar → \"Add page\" or \"Add bookmark\"."),
-		widget.NewLabel("5. Set any name (e.g. \"📎 Clip to LeGaJ\")."),
-		widget.NewLabel("6. Paste the copied code as the URL / Address."),
-		widget.NewLabel("7. Save. You're done!"),
-		widget.NewSeparator(),
-		widget.NewLabel("Works on: LinkedIn · Indeed · Greenhouse · Lever · Workday · Ashby · most career pages."),
-		widget.NewLabel("When on a job posting page, click the bookmark → details clip into your Clip Inbox instantly."),
-	))
+	bookmarkletMd := "### 📎 Instant Job Clipper\n" +
+		"The LeGaJ bookmarklet allows you to instantly save job listings from LinkedIn, Indeed, Greenhouse, Lever, Workday, Ashby, and iCIMS directly to your local application inbox.\n\n" +
+		"#### 🔧 How to Install\n" +
+		"1. Click the **Copy Bookmarklet Code** button below to copy the javascript setup.\n" +
+		"2. Ensure your browser's bookmarks bar is visible (\\x60Ctrl+Shift+B\\x60 or \\x60Cmd+Shift+B\\x60).\n" +
+		"3. Right-click the bookmarks bar and select **Add page** or **Add bookmark**.\n" +
+		"4. Set the name to **📎 Clip to LeGaJ** and paste the copied code into the **URL / Address** field.\n" +
+		"5. Save the bookmark.\n\n" +
+		"#### 🖱️ How to Use\n" +
+		"Simply click the **📎 Clip to LeGaJ** bookmark while viewing a job description on any supported job site. The application details (role title, company, description, and link) will instantly clip into your local Inbox."
 
-	bookmarkletCard := widget.NewCard("Clip to LeGaJ Browser Bookmarklet", "One-click job clipping from any job board directly into LeGaJ", container.NewVBox(
-		copyBtn,
+	bookmarkletRichText := widget.NewRichTextFromMarkdown(bookmarkletMd)
+	bookmarkletRichText.Wrapping = fyne.TextWrapWord
+
+	bookmarkletBox := container.NewVBox(
+		bookmarkletRichText,
 		widget.NewSeparator(),
-		installSteps,
-		widget.NewSeparator(),
-		widget.NewLabel("Advanced: bookmark URL source code (for manual paste):"),
+		container.NewHBox(copyBtn, layout.NewSpacer()),
+		widget.NewLabel("Advanced: bookmark URL source code (for manual copy):"),
 		bookmarkletEntry,
-	))
+	)
 
+	// Chrome Extension
 	absExtensionPath, _ := filepath.Abs("extension")
-	extensionCard := widget.NewCard("Clip to LeGaJ Chrome/Edge Extension", "A browser extension alternative that bypasses HTTPS mixed-content restrictions", container.NewVBox(
-		widget.NewLabel("If the bookmarklet fails due to HTTPS/Mixed Content restrictions on secure pages, load the local extension:"),
-		widget.NewLabel("1. Open Chrome/Edge and navigate to: chrome://extensions or edge://extensions"),
-		widget.NewLabel("2. Enable \"Developer mode\" (toggle switch in the top-right)."),
-		widget.NewLabel("3. Click \"Load unpacked\" (button in the top-left)."),
-		widget.NewLabel("4. Select the \"extension\" directory in your LeGaJ installation:"),
-		widget.NewLabel("   " + absExtensionPath),
-		widget.NewLabel("5. Pin the \"LeGaJ Clipper\" extension to your toolbar."),
-		widget.NewLabel("6. When on a job posting page, click the extension icon to clip the job instantly!"),
-	))
+	extensionMd := fmt.Sprintf("### 🧩 Chrome & Edge Extension\n"+
+		"If a site's Content Security Policy blocks the bookmarklet, install our lightweight Chrome/Edge extension:\n\n"+
+		"1. Open Chrome or Edge and navigate to \\x60chrome://extensions\\x60 or \\x60edge://extensions\\x60.\n"+
+		"2. Enable **Developer mode** via the toggle switch in the top-right corner.\n"+
+		"3. Click the **Load unpacked** button in the top-left corner.\n"+
+		"4. Select the \\x60extension\\x60 directory located inside your LeGaJ installation:\n"+
+		"   %s\n"+
+		"5. Pin the **LeGaJ Clipper** extension to your browser toolbar.\n"+
+		"6. Click the extension icon on any job posting page to clip details instantly.", absExtensionPath)
 
-	securityCard := widget.NewCard("Security & Ethics Disclosure", "", container.NewVBox(
-		widget.NewLabel("AI and the Internet are inherently dangerous. Any tool that inputs unverified information from the web is vulnerable to prompt injection. Use at your own risk."),
-		widget.NewLabel("• LeGaJ operates 100% locally. Your PII (name, email, phone) and Gemini API Keys are kept on your machine."),
-		widget.NewLabel("• The application NEVER auto-submits applications. It compiles PDFs for you to review and apply yourself."),
-		widget.NewLabel("• AI features are used solely for structuring profile fields, tailoring resume bullets, and drafting cover letters."),
-	))
+	extensionRichText := widget.NewRichTextFromMarkdown(extensionMd)
+	extensionRichText.Wrapping = fyne.TextWrapWord
+
+	// Troubleshooting & Locations
+	troubleshootMd := "### 🔧 Troubleshooting & Locations\n\n" +
+		"#### 📂 File & Folder Structure\n" +
+		"* **\\x60references/user-profile.json\\x60**: Holds your editable base profile.\n" +
+		"* **\\x60references/job-tracker.json\\x60**: Contains your tracked job applications.\n" +
+		"* **\\x60outputs/\\x60**: Folder where tailored PDFs, Anki decks, and cheatsheets are compiled.\n\n" +
+		"#### 💡 Common Issues & Fixes\n" +
+		"* **Bookmarklet not responding?** Make sure LeGaJ is open and running. Check browser address bar for blocked pop-ups.\n" +
+		"* **HTTPS/Mixed Content error?** Modern browsers restrict local HTTP connections from HTTPS web pages. Use the unpacked Chrome/Edge extension.\n" +
+		"* **ReportLab or GenAnki error?** Ensure Python is installed and run \\x60pip install -r requirements.txt\\x60 to install package dependencies."
+
+	troubleshootRichText := widget.NewRichTextFromMarkdown(troubleshootMd)
+	troubleshootRichText.Wrapping = fyne.TextWrapWord
+
+	// Security & Ethics Disclosure
+	securityMd := "### 🔒 Security, Privacy & Ethics\n" +
+		"AI and web scraping come with security risks, particularly prompt injections. LeGaJ is designed to protect your privacy:\n\n" +
+		"* **Local-First Processing**: Your resume contents, personal info (PII), and application histories remain strictly on your local disk.\n" +
+		"* **Direct API Connections**: Your Gemini API key is stored in your local \\x60.env\\x60 and sent directly to Google. No third-party servers act as an intermediary.\n" +
+		"* **No Auto-Submit**: LeGaJ never automatically submits applications. It only prepares draft PDFs and tracks logs, keeping you in complete control."
+
+	securityRichText := widget.NewRichTextFromMarkdown(securityMd)
+	securityRichText.Wrapping = fyne.TextWrapWord
+
+	// Accordion layout
+	accordion := widget.NewAccordion(
+		widget.NewAccordionItem("1. Step-by-Step Onboarding Guide", onboardingRichText),
+		widget.NewAccordionItem("2. Browser Clipper Bookmarklet", bookmarkletBox),
+		widget.NewAccordionItem("3. Chrome/Edge Extension Setup", extensionRichText),
+		widget.NewAccordionItem("4. Troubleshooting & File Locations", troubleshootRichText),
+		widget.NewAccordionItem("5. Security & Ethics Disclosure", securityRichText),
+	)
+	accordion.MultiOpen = true
+	accordion.Open(0)
+
+	// Header and title
+	titleText := canvas.NewText("Help & Documentation", theme.PrimaryColor())
+	titleText.TextSize = 20
+	titleText.TextStyle = fyne.TextStyle{Bold: true}
+
+	// Verbatim Warning label at the very top of the help page
+	warningLabel := widget.NewLabel("AI and the Internet are inherently dangerous. Any tool that inputs unverified information from the web is vulnerable to prompt injection. Use at your own risk.")
+	warningLabel.Wrapping = fyne.TextWrapWord
 
 	githubBtn := widget.NewButtonWithIcon("GitHub: /bot-bbio", theme.HelpIcon(), func() {
 		openLink("https://github.com/bot-bbio")
@@ -3635,12 +3665,13 @@ func buildHelpTab() fyne.CanvasObject {
 	)
 
 	content := container.NewVBox(
-		canvas.NewText("Help & Documentation", theme.PrimaryColor()),
-		securityCard,
-		helpDoc,
-		troubleshootCard,
-		bookmarkletCard,
-		extensionCard,
+		container.NewVBox(
+			titleText,
+			widget.NewLabel("Follow instructions and troubleshoot issues here."),
+			warningLabel,
+		),
+		widget.NewSeparator(),
+		accordion,
 		widget.NewSeparator(),
 		creditsRow,
 	)

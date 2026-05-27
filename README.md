@@ -71,6 +71,92 @@ Simply double-click the [setup_and_run.bat](setup_and_run.bat) file. This script
    ./legaj.exe
    ```
 
+#### Option C: macOS (from Source)
+
+> **New to the Mac terminal?** Open **Terminal** by pressing `Cmd + Space`, typing `Terminal`, and hitting Enter. All commands below are pasted and run there.
+
+**Quick install (recommended):** The setup script checks for every dependency, installs anything missing via [Homebrew](https://brew.sh), and launches the app automatically.
+
+```bash
+git clone https://github.com/bot-bbio/legaj.git
+cd legaj
+chmod +x install_mac.sh && ./install_mac.sh
+```
+
+The script will walk you through anything that needs a manual step (e.g. the Xcode CLT install dialog). Re-run it after each prompt and it will pick up where it left off.
+
+---
+
+**Manual install** — if you prefer to do each step yourself:
+
+**1. Xcode Command Line Tools**
+
+The Fyne UI framework uses `cgo`, which requires Apple's C compiler and system frameworks. Run:
+```bash
+xcode-select --install
+```
+Follow the on-screen prompt. This also installs `git`. You can skip this step if you have already installed Xcode or the CLT before.
+
+**2. Go 1.25+**
+
+Download the macOS `.pkg` installer from [go.dev/dl](https://go.dev/dl/) and run it, or use [Homebrew](https://brew.sh):
+```bash
+brew install go
+```
+Verify the install: `go version` must print `go1.25` or higher.
+
+**3. Python 3.12+**
+
+Download the macOS installer from [python.org/downloads](https://www.python.org/downloads/) and run it, or use Homebrew:
+```bash
+brew install python@3.12
+```
+Verify the install: `python3 --version` must print `Python 3.12.x` or higher.
+
+**4. Clone the repository**
+```bash
+git clone https://github.com/bot-bbio/legaj.git
+cd legaj
+```
+
+**5. Install Python dependencies**
+
+All Python packages used by the scripts are pinned in `requirements.txt`:
+```bash
+pip3 install -r requirements.txt
+```
+
+This installs the following libraries (and their transitive dependencies):
+
+| Package | Used for |
+| :--- | :--- |
+| `reportlab` | Generating PDF resumes and cover letters |
+| `pypdf` | Parsing PDF resume files |
+| `python-docx` | Parsing Word (.docx) resume files |
+| `requests` | HTTP calls in the job search tool |
+| `beautifulsoup4` | Parsing job board HTML in the job search tool |
+| `genanki` | Creating Anki flashcard decks for interview prep |
+| `openpyxl` | Spreadsheet export |
+
+**6. Run LeGaJ**
+```bash
+go run .
+```
+Go will automatically download its own module dependencies (`fyne` and others listed in `go.mod`) on first run. Or build a persistent binary first:
+```bash
+go build -o legaj
+./legaj
+```
+
+> **First launch:** The setup wizard runs automatically on first start. You can also trigger it explicitly:
+> ```bash
+> go run . wizard
+> ```
+>
+> **Data location:** LeGaJ writes your profile, job tracker, and generated PDFs to `~/Library/Application Support/LeGaJ/`. This directory is created automatically on first launch.
+>
+> **Gemini API key:** Required for AI resume tailoring. Enter it in the **Settings** tab during setup.
+
 ---
 
 ## 🖥️ Graphical User Interface (GUI) Guide

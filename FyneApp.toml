@@ -1,0 +1,8 @@
+Website = "https://github.com/bot-bbio"
+
+[Details]
+Icon = "Icon.png"
+Name = "LeGaJ"
+ID = "com.botbbio.legaj"
+Version = "1.0.0"
+Build = 1

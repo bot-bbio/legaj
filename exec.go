@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 )
 
 // getPythonPath resolves the Python executable, preferring the canonical
@@ -26,20 +28,59 @@ func getPythonPath() string {
 	return "python"
 }
 
-// runPythonScript executes a Python script with the given arguments and returns standard output
+// toolsBinaryPath locates the bundled "legaj-tools" executable produced by
+// PyInstaller. In a packaged install the frozen binary lives next to the GUI
+// executable (or in a sibling tools/ directory), so no Python runtime is
+// required on the user's machine. Returns ("", false) when no frozen binary is
+// found, in which case the caller falls back to running the .py scripts with a
+// system Python interpreter (development mode).
+func toolsBinaryPath() (string, bool) {
+	exeName := "legaj-tools"
+	if runtime.GOOS == "windows" {
+		exeName += ".exe"
+	}
+
+	var candidates []string
+	if self, err := os.Executable(); err == nil {
+		dir := filepath.Dir(self)
+		candidates = append(candidates,
+			filepath.Join(dir, "tools", exeName),
+			filepath.Join(dir, exeName),
+		)
+	}
+	candidates = append(candidates, filepath.Join("tools", exeName))
+
+	for _, c := range candidates {
+		if info, err := os.Stat(c); err == nil && !info.IsDir() {
+			return c, true
+		}
+	}
+	return "", false
+}
+
+// runPythonScript executes a tool with the given arguments and returns standard
+// output. If the frozen "legaj-tools" binary is present it is invoked with the
+// tool name as the first argument (e.g. "parse_resume"); otherwise the original
+// .py script is run via the system Python interpreter.
 func runPythonScript(scriptPath string, args ...string) (string, error) {
-	fullArgs := append([]string{scriptPath}, args...)
-	cmd := exec.Command(getPythonPath(), fullArgs...)
-	
+	var cmd *exec.Cmd
+	if bin, ok := toolsBinaryPath(); ok {
+		tool := strings.TrimSuffix(filepath.Base(scriptPath), ".py")
+		cmd = exec.Command(bin, append([]string{tool}, args...)...)
+	} else {
+		fullArgs := append([]string{scriptPath}, args...)
+		cmd = exec.Command(getPythonPath(), fullArgs...)
+	}
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	
+
 	err := cmd.Run()
 	if err != nil {
-		return "", fmt.Errorf("error running script %s: %v (stderr: %s)", scriptPath, err, stderr.String())
+		return "", fmt.Errorf("error running tool %s: %v (stderr: %s)", scriptPath, err, stderr.String())
 	}
-	
+
 	return stdout.String(), nil
 }
 

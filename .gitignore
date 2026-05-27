@@ -6,6 +6,18 @@
 *.dylib
 legaj
 
+# Packaging build artifacts
+dist/
+build/
+packaging/staging/
+*.app/
+*.dmg
+
+# Code-signing material (NEVER commit certificates or keys)
+*.pfx
+*.cer
+*.p12
+
 # Python cache & virtualenv
 __pycache__/
 *.pyc
@@ -29,6 +41,7 @@ references/job-tracker.json
 references/user-profile.json
 references/user-profile-tailored.json
 references/.clip_port
+references/.clip_token
 references/clipped-jobs.json
 outputs/
 
@@ -40,6 +53,9 @@ extension/manifest.json
 # AI instruction docs (never commit)
 legac docs new.md
 new requirements.md
+
+# Planning & task-tracking docs (local only)
+\# Final Production to do list.md
 
 # Security audit & plan — never commit
 SECURITY_AUDIT.md

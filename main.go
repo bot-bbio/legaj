@@ -12,6 +12,10 @@ import (
 var forceWizard bool
 
 func main() {
+	// Pin the working directory to a writable data location for packaged builds
+	// (no-op for source/dev runs). Must run before any relative path is touched.
+	resolveAppHome()
+
 	// Initialize directories
 	os.MkdirAll("outputs", 0755)
 	os.MkdirAll("references", 0755)
@@ -338,11 +342,11 @@ func handleManageAppsCmd() {
 			fmt.Printf("%-20s %-25s %-12s %-12s %-15s\n", "Company", "Role", "Applied Date", "Status", "Location")
 			fmt.Println("--------------------------------------------------------------------------------")
 			for _, app := range apps {
-				fmt.Printf("%-20s %-25s %-12s %-12s %-15s\n", 
-					limitString(fmt.Sprintf("%v", app["company"]), 20), 
-					limitString(fmt.Sprintf("%v", app["role"]), 25), 
-					app["date"], 
-					app["status"], 
+				fmt.Printf("%-20s %-25s %-12s %-12s %-15s\n",
+					limitString(fmt.Sprintf("%v", app["company"]), 20),
+					limitString(fmt.Sprintf("%v", app["role"]), 25),
+					app["date"],
+					app["status"],
 					limitString(fmt.Sprintf("%v", app["location"]), 15))
 			}
 			fmt.Println("--------------------------------------------------------------------------------")
@@ -439,4 +443,3 @@ func limitString(s string, limit int) string {
 	}
 	return s
 }
-

@@ -31,6 +31,41 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
+const (
+	// clipCardTitle is the user-facing name of the job-leads inbox.
+	clipCardTitle = "Job Leads"
+	// linkedInCreditDisplay is the author credit shown on the Settings and Help tabs.
+	linkedInCreditDisplay = "LinkedIn: Roberto Montero"
+	// linkedInCreditURL is the profile linked by the author credit button.
+	linkedInCreditURL = "https://linkedin.com/in/alvvays"
+	// trackerColSelectWidth is the width of the Job Tracker's selection-checkbox
+	// column. Kept compact so the checkbox isn't surrounded by dead space.
+	trackerColSelectWidth = float32(40)
+)
+
+// getTailorModeOptions returns the choices offered by the "Tailor Selected"
+// dialog, in display order.
+func getTailorModeOptions() []string {
+	return []string{"Resume", "Cover Letter", "Both"}
+}
+
+// wizardNavigator encapsulates step navigation for the setup wizard so the
+// Skip-button behavior can be unit tested independently of the GUI.
+type wizardNavigator struct {
+	currentStep int
+	totalSteps  int
+}
+
+// skip returns the step to advance to when the user presses Skip. For any step
+// before the last it advances by one (shouldClose=false). On the final step it
+// signals the wizard should close (nextStep=0, shouldClose=true).
+func (wn *wizardNavigator) skip() (nextStep int, shouldClose bool) {
+	if wn.currentStep >= wn.totalSteps {
+		return 0, true
+	}
+	return wn.currentStep + 1, false
+}
+
 type PersonalInfo struct {
 	Name     string `json:"name"`
 	Email    string `json:"email"`
@@ -684,7 +719,7 @@ func correctGenericRole(apiKey, description, fallbackCompany string) string {
 
 Job Description:
 %s`, description)
-	
+
 	result, err := callGeminiGo(apiKey, prompt, false)
 	if err == nil {
 		cleaned := strings.TrimSpace(result)
@@ -741,12 +776,12 @@ func loadClippedJobsToInbox() {
 	if state.ClipInboxBox == nil {
 		return
 	}
-	
+
 	jobs := loadClippedJobs()
 	if len(jobs) == 0 {
 		return
 	}
-	
+
 	state.ClipInboxBox.Objects = []fyne.CanvasObject{
 		container.New(&clipperRowLayout{},
 			widget.NewLabelWithStyle("Company", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
@@ -757,7 +792,7 @@ func loadClippedJobsToInbox() {
 		),
 		widget.NewSeparator(),
 	}
-	
+
 	for _, job := range jobs {
 		addClippedJobToInboxUI(job)
 	}
@@ -888,11 +923,12 @@ func startFyneGUI() {
 	jobHuntTab := buildJobHuntTab()
 	profileTab := buildProfileTab()
 	trackerTab := buildTrackerTab()
-	tailoringTab := buildTailoringTab()
 	fileManagerTab := buildFileManagerTab()
-	prepTab := buildPrepTab()
 	settingsTab := buildSettingsTab()
 	helpTab := buildHelpTab()
+	// Tailor Assets and Interview Prep tabs are temporarily disabled pending
+	// further testing. buildTailoringTab() and buildPrepTab() are intentionally
+	// left defined so the features can be re-enabled in the future.
 
 	// Arrange layout
 	tabs := container.NewAppTabs(
@@ -900,9 +936,7 @@ func startFyneGUI() {
 		container.NewTabItemWithIcon("Job Hunt", theme.SearchIcon(), jobHuntTab),
 		container.NewTabItemWithIcon("Base Profile", theme.AccountIcon(), profileTab),
 		container.NewTabItemWithIcon("Job Tracker", theme.ListIcon(), trackerTab),
-		container.NewTabItemWithIcon("Tailor Assets", theme.DocumentCreateIcon(), tailoringTab),
 		container.NewTabItemWithIcon("File Manager", theme.FolderIcon(), fileManagerTab),
-		container.NewTabItemWithIcon("Interview Prep", theme.QuestionIcon(), prepTab),
 		container.NewTabItemWithIcon("Settings", theme.SettingsIcon(), settingsTab),
 		container.NewTabItemWithIcon("Help", theme.HelpIcon(), helpTab),
 	)
@@ -1238,6 +1272,33 @@ func updateTrackerSelectionUI() {
 	}
 }
 
+// resolveDocumentPath joins folder and filename and verifies the file exists on
+// disk. It returns the joined path and true on success, or ("", false) if the
+// filename is empty or the file cannot be stat'd.
+func resolveDocumentPath(folder, filename string) (string, bool) {
+	if strings.TrimSpace(filename) == "" {
+		return "", false
+	}
+	full := filepath.Join(folder, filename)
+	if _, err := os.Stat(full); err != nil {
+		return "", false
+	}
+	return full, true
+}
+
+// openDocument resolves a saved document by filename and opens it with the OS
+// default handler. It reports a friendly dialog if the file cannot be found.
+func openDocument(filename, label string) {
+	path, ok := resolveDocumentPath(state.SaveFolder, filename)
+	if !ok {
+		dialog.ShowInformation("File Not Found",
+			fmt.Sprintf("Could not find the %s file. Make sure it has been generated and that your Save Folder in Settings is correct.", label),
+			state.Window)
+		return
+	}
+	openLink("file:///" + filepath.ToSlash(path))
+}
+
 func openLink(urlString string) {
 	if strings.HasPrefix(urlString, "file://") {
 		localPath := strings.TrimPrefix(urlString, "file://")
@@ -1409,11 +1470,11 @@ Return ONLY valid JSON. No markdown, no explanation.`, kw, loc)
 
 			// ── Strategy 3: Domain tier scoring — filter Tier 3 / search-page links ──
 			type taggedResult struct {
-				job              JobResult
-				alive            bool
+				job               JobResult
+				alive             bool
 				groundingVerified bool
-				tier             int
-				badge            string
+				tier              int
+				badge             string
 			}
 			var tagged []taggedResult
 			var searchPageLinks []JobResult // Tier 3 — relegated to fallback section
@@ -1458,14 +1519,14 @@ Return ONLY valid JSON. No markdown, no explanation.`, kw, loc)
 					state.SearchResultsBox.Add(widget.NewLabel(
 						"You can use these direct search links to browse active listings, then click your bookmarklet to clip them here:",
 					))
-					
+
 					fallbackLinks := []struct{ name, link string }{
 						{"LinkedIn Jobs", fmt.Sprintf("https://www.linkedin.com/jobs/search/?keywords=%s&location=%s", url.QueryEscape(kw), url.QueryEscape(loc))},
 						{"Indeed", fmt.Sprintf("https://www.indeed.com/jobs?q=%s&l=%s", url.QueryEscape(kw), url.QueryEscape(loc))},
 						{"Google Jobs", fmt.Sprintf("https://www.google.com/search?q=%s&ibp=htl;jobs", url.QueryEscape(kw+" jobs in "+loc))},
 						{"Glassdoor", fmt.Sprintf("https://www.glassdoor.com/Job/jobs.htm?sc.keyword=%s&locT=C&locId=0", url.QueryEscape(kw))},
 					}
-					
+
 					for _, fl := range fallbackLinks {
 						flLink := fl.link
 						flName := fl.name
@@ -1585,7 +1646,7 @@ Return ONLY valid JSON. No markdown, no explanation.`, kw, loc)
 	)
 	searchTab := widget.NewCard("Job Discovery Engine", "", searchCardContent)
 
-	// ── Clip Inbox Card (populated by the browser bookmarklet) ──
+	// ── Job Leads Card (populated by the browser bookmarklet) ──
 	state.ClipInboxBox = container.NewVBox(
 		container.New(&clipperRowLayout{},
 			widget.NewLabelWithStyle("Company", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
@@ -1620,11 +1681,15 @@ Return ONLY valid JSON. No markdown, no explanation.`, kw, loc)
 		nil, nil, nil,
 		container.NewHScroll(clipContainer),
 	)
-	clipTab := widget.NewCard("Clip Inbox", "", clipCardContent)
+	clipTab := widget.NewCard(clipCardTitle, "", clipCardContent)
+
+	// The Job Discovery Engine is temporarily disabled pending further testing.
+	// searchTab is still built above so the feature can be re-enabled later; it
+	// is intentionally not added to the visible sub-tabs for now.
+	_ = searchTab
 
 	subTabs := container.NewAppTabs(
-		container.NewTabItem("Discovery Engine", searchTab),
-		container.NewTabItem("Clipper Inbox", clipTab),
+		container.NewTabItem("Job Leads", clipTab),
 	)
 
 	return subTabs
@@ -2117,7 +2182,7 @@ func (c *clickableCell) DoubleTapped(ev *fyne.PointEvent) {
 	state.TrackerTable.Select(c.cellID)
 	if c.cellID.Row > 0 && c.cellID.Row-1 < len(state.Applications) {
 		app := &state.Applications[c.cellID.Row-1]
-		openAddJobModal(app)
+		openAddJobModal(app, c.cellID.Col)
 	}
 }
 
@@ -2230,7 +2295,7 @@ func (sc *statusCell) DoubleTapped(ev *fyne.PointEvent) {
 	state.TrackerTable.Select(sc.cellID)
 	if sc.cellID.Row > 0 && sc.cellID.Row-1 < len(state.Applications) {
 		app := &state.Applications[sc.cellID.Row-1]
-		openAddJobModal(app)
+		openAddJobModal(app, sc.cellID.Col)
 	}
 }
 
@@ -2301,11 +2366,11 @@ func newScrollInterceptor(target *container.Scroll) *scrollInterceptor {
 
 type emptyRenderer struct{}
 
-func (e *emptyRenderer) Destroy()                        {}
-func (e *emptyRenderer) Layout(_ fyne.Size)              {}
-func (e *emptyRenderer) MinSize() fyne.Size              { return fyne.NewSize(0, 0) }
-func (e *emptyRenderer) Objects() []fyne.CanvasObject    { return nil }
-func (e *emptyRenderer) Refresh()                        {}
+func (e *emptyRenderer) Destroy()                     {}
+func (e *emptyRenderer) Layout(_ fyne.Size)           {}
+func (e *emptyRenderer) MinSize() fyne.Size           { return fyne.NewSize(0, 0) }
+func (e *emptyRenderer) Objects() []fyne.CanvasObject { return nil }
+func (e *emptyRenderer) Refresh()                     {}
 
 func (si *scrollInterceptor) CreateRenderer() fyne.WidgetRenderer {
 	return &emptyRenderer{}
@@ -2321,8 +2386,18 @@ func (si *scrollInterceptor) MinSize() fyne.Size { return fyne.NewSize(0, 0) }
 
 type clipperRowLayout struct{}
 
+// clipperActionsWidth is the fixed width reserved for the row's action buttons
+// ("Open", "Track & Tailor", "Add Tracker Only"). It must be wide enough to hold
+// all three side by side without clipping the last button. Applied uniformly to
+// both the header and data rows so their columns stay aligned.
+const clipperActionsWidth = float32(440)
+
+// clipperRowMinWidth is the minimum overall row width: the actions column plus a
+// 140px floor for each of the four data columns.
+const clipperRowMinWidth = clipperActionsWidth + 4*140
+
 func (l *clipperRowLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
-	return fyne.NewSize(930, 32)
+	return fyne.NewSize(clipperRowMinWidth, 32)
 }
 
 func (l *clipperRowLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
@@ -2330,10 +2405,10 @@ func (l *clipperRowLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 		return
 	}
 	w := size.Width
-	if w < 930 {
-		w = 930
+	if w < clipperRowMinWidth {
+		w = clipperRowMinWidth
 	}
-	actionsWidth := float32(380)
+	actionsWidth := clipperActionsWidth
 	colWidth := (w - actionsWidth) / 4
 
 	x := float32(0)
@@ -2351,7 +2426,7 @@ type fixedHeightLayout struct {
 }
 
 func (l *fixedHeightLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
-	minW := float32(930)
+	minW := clipperRowMinWidth
 	for _, o := range objects {
 		if min := o.MinSize(); min.Width > minW {
 			minW = min.Width
@@ -2362,8 +2437,8 @@ func (l *fixedHeightLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
 
 func (l *fixedHeightLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 	w := size.Width
-	if w < 930 {
-		w = 930
+	if w < clipperRowMinWidth {
+		w = clipperRowMinWidth
 	}
 	for _, o := range objects {
 		o.Resize(fyne.NewSize(w, l.height))
@@ -2408,59 +2483,55 @@ func buildTrackerTab() fyne.CanvasObject {
 			return
 		}
 		indices := getSelectedTrackerIndices()
-		if len(indices) > 0 && selected != "" {
-			progress := dialog.NewProgressInfinite("Updating Status", "Updating job application status...", state.Window)
-			progress.Show()
-			go func() {
-				var lastErr error
-				for _, idx := range indices {
-					app := &state.Applications[idx]
-					if app.Status != selected {
-						_, err := RunManageApplications("update", app.Company, app.Role, selected, "")
-						if err != nil {
-							lastErr = err
-						}
-					}
-				}
-				fyne.Do(func() {
-					progress.Hide()
-					if lastErr != nil {
-						dialog.ShowError(lastErr, state.Window)
-					}
-					reloadAllViews()
-				})
-			}()
+		if len(indices) == 0 || selected == "" {
+			return
 		}
+
+		// Update the in-memory model immediately for instant UI feedback. The
+		// previous implementation spawned an external Python process per row and
+		// then reloaded every view, which made each status change feel sluggish.
+		changed := false
+		for _, idx := range indices {
+			if idx < len(state.Applications) && state.Applications[idx].Status != selected {
+				state.Applications[idx].Status = selected
+				changed = true
+			}
+		}
+		if !changed {
+			return
+		}
+
+		if state.TrackerTable != nil {
+			state.TrackerTable.Refresh()
+		}
+		updateDashboardStats()
+
+		// Persist to disk in the background so the dropdown stays responsive.
+		go func() {
+			if err := saveTrackerDataGo(); err != nil {
+				fyne.Do(func() { dialog.ShowError(err, state.Window) })
+			}
+		}()
 	})
 	trackerStatusSelect.PlaceHolder = "Change Status"
 
 	// Document opening buttons on toolbar
 	trackerOpenResumeBtn = widget.NewButtonWithIcon("Open Resume", theme.DocumentIcon(), func() {
 		indices := getSelectedTrackerIndices()
-		for _, idx := range indices {
-			app := &state.Applications[idx]
-			if app.Resume != "" {
-				resPath := filepath.Join(state.SaveFolder, app.Resume)
-				if _, err := os.Stat(resPath); err == nil {
-					openLink("file:///" + filepath.ToSlash(resPath))
-				}
-			}
+		if len(indices) == 0 {
+			return
 		}
+		openDocument(state.Applications[indices[0]].Resume, "resume")
 	})
 	trackerOpenResumeBtn.Disable()
 
 	// Document opening buttons on toolbar
 	trackerOpenCoverLetterBtn = widget.NewButtonWithIcon("Open Cover Letter", theme.DocumentIcon(), func() {
 		indices := getSelectedTrackerIndices()
-		for _, idx := range indices {
-			app := &state.Applications[idx]
-			if app.CoverLetter != "" {
-				clPath := filepath.Join(state.SaveFolder, app.CoverLetter)
-				if _, err := os.Stat(clPath); err == nil {
-					openLink("file:///" + filepath.ToSlash(clPath))
-				}
-			}
+		if len(indices) == 0 {
+			return
 		}
+		openDocument(state.Applications[indices[0]].CoverLetter, "cover letter")
 	})
 	trackerOpenCoverLetterBtn.Disable()
 
@@ -2557,12 +2628,12 @@ func buildTrackerTab() fyne.CanvasObject {
 	)
 
 	// Set column widths to look like spreadsheet grid
-	state.TrackerTable.SetColumnWidth(0, 60)  // Select
-	state.TrackerTable.SetColumnWidth(1, 240) // Company
-	state.TrackerTable.SetColumnWidth(2, 280) // Role
-	state.TrackerTable.SetColumnWidth(3, 110) // Location
-	state.TrackerTable.SetColumnWidth(4, 90)  // Date
-	state.TrackerTable.SetColumnWidth(5, 140) // Status
+	state.TrackerTable.SetColumnWidth(0, trackerColSelectWidth) // Select
+	state.TrackerTable.SetColumnWidth(1, 240)                   // Company
+	state.TrackerTable.SetColumnWidth(2, 280)                   // Role
+	state.TrackerTable.SetColumnWidth(3, 110)                   // Location
+	state.TrackerTable.SetColumnWidth(4, 90)                    // Date
+	state.TrackerTable.SetColumnWidth(5, 140)                   // Status
 	// Notes (col 6) width is managed entirely by customTableLayout.Layout
 
 	state.TrackerTable.OnSelected = func(id widget.TableCellID) {
@@ -2573,7 +2644,7 @@ func buildTrackerTab() fyne.CanvasObject {
 	}
 
 	addBtn := widget.NewButtonWithIcon("Add Application", theme.ContentAddIcon(), func() {
-		openAddJobModal(nil)
+		openAddJobModal(nil, -1)
 	})
 
 	updateBtn := widget.NewButtonWithIcon("Update Details", theme.DocumentCreateIcon(), func() {
@@ -2586,7 +2657,7 @@ func buildTrackerTab() fyne.CanvasObject {
 			dialog.ShowInformation("Single Selection Required", "Please check or select only one job to update.", state.Window)
 			return
 		}
-		openAddJobModal(&state.Applications[indices[0]])
+		openAddJobModal(&state.Applications[indices[0]], -1)
 	})
 
 	deleteBtn := widget.NewButtonWithIcon("Delete Application", theme.DeleteIcon(), func() {
@@ -2633,28 +2704,9 @@ func buildTrackerTab() fyne.CanvasObject {
 		}, state.Window)
 	})
 
-	syncBtn := widget.NewButtonWithIcon("Sync Email Updates", theme.ViewRefreshIcon(), func() {
-		if state.Email == "" || state.Password == "" || state.ImapServer == "" {
-			dialog.ShowInformation("Configuration Needed", "Please configure your IMAP Email settings in Settings tab first.", state.Window)
-			return
-		}
-
-		progress := dialog.NewProgressInfinite("Email Synchronization", "Connecting to mail server and checking updates...", state.Window)
-		progress.Show()
-
-		go func() {
-			outText, err := RunManageApplications("sync", state.Email, state.Password, state.ImapServer)
-			fyne.Do(func() {
-				progress.Hide()
-				if err != nil {
-					dialog.ShowError(err, state.Window)
-					return
-				}
-				dialog.ShowInformation("Sync complete", outText, state.Window)
-				reloadAllViews()
-			})
-		}()
-	})
+	// The "Sync Email Updates" (IMAP) button is temporarily disabled while the
+	// email-sync feature is hidden. RunManageApplications("sync", ...) remains
+	// available so the button can be restored in the future.
 
 	// Relocated Bulk Import Button
 	bulkImportBtn := widget.NewButtonWithIcon("Bulk Import", theme.FolderOpenIcon(), func() {
@@ -2722,6 +2774,10 @@ func buildTrackerTab() fyne.CanvasObject {
 		})
 	})
 
+	// Forward-declared so the button's mode-selection callback can invoke it;
+	// the implementation is assigned just below.
+	var runTailorSelected func(selectedIndices []int, doResume, doCover bool)
+
 	tailorSelectedBtn := widget.NewButtonWithIcon("Tailor Selected", theme.SettingsIcon(), func() {
 		var selectedIndices []int
 		for rowIdx, selected := range trackerSelectedRows {
@@ -2735,6 +2791,29 @@ func buildTrackerTab() fyne.CanvasObject {
 			return
 		}
 
+		modeRadio := widget.NewRadioGroup(getTailorModeOptions(), nil)
+		modeRadio.SetSelected("Both")
+		dialog.ShowCustomConfirm("Tailor Selected", "Tailor", "Cancel",
+			container.NewVBox(
+				widget.NewLabel("What would you like to tailor for the selected application(s)?"),
+				modeRadio,
+			),
+			func(confirmed bool) {
+				if !confirmed {
+					return
+				}
+				mode := modeRadio.Selected
+				if mode == "" {
+					return
+				}
+				doResume := mode == "Resume" || mode == "Both"
+				doCover := mode == "Cover Letter" || mode == "Both"
+
+				runTailorSelected(selectedIndices, doResume, doCover)
+			}, state.Window)
+	})
+
+	runTailorSelected = func(selectedIndices []int, doResume, doCover bool) {
 		progress := dialog.NewProgressInfinite("Bulk Tailoring Assets", fmt.Sprintf("Processing %d selected applications sequentially...", len(selectedIndices)), state.Window)
 		progress.Show()
 
@@ -2785,7 +2864,8 @@ func buildTrackerTab() fyne.CanvasObject {
 				}
 
 				// 1. Tailor Resume
-				tailorPrompt := fmt.Sprintf(`You are an expert resume writer. Tailor the applicant's experience bullet points and skills in the base profile JSON to align with the target job description.
+				if doResume {
+					tailorPrompt := fmt.Sprintf(`You are an expert resume writer. Tailor the applicant's experience bullet points and skills in the base profile JSON to align with the target job description.
 
 Base Profile JSON:
 %s
@@ -2800,32 +2880,34 @@ Mandates:
 4. Keep the exact same JSON structure. Do not add or remove jobs.
 5. Output ONLY valid JSON matching the profile schema. No explanations, no markdown blocks.`, string(baseProfileBytes), desc)
 
-				tailoredJson, err := callGeminiGo(state.ApiKey, tailorPrompt, true)
-				if err != nil {
-					errorsList = append(errorsList, fmt.Sprintf("%s - %s: resume tailoring failed: %v", comp, role, err))
-					continue
-				}
+					tailoredJson, err := callGeminiGo(state.ApiKey, tailorPrompt, true)
+					if err != nil {
+						errorsList = append(errorsList, fmt.Sprintf("%s - %s: resume tailoring failed: %v", comp, role, err))
+						continue
+					}
 
-				err = writeSecureFile("references/user-profile-tailored.json", []byte(tailoredJson))
-				if err != nil {
-					errorsList = append(errorsList, fmt.Sprintf("%s - %s: failed to write tailored JSON: %v", comp, role, err))
-					continue
-				}
+					err = writeSecureFile("references/user-profile-tailored.json", []byte(tailoredJson))
+					if err != nil {
+						errorsList = append(errorsList, fmt.Sprintf("%s - %s: failed to write tailored JSON: %v", comp, role, err))
+						continue
+					}
 
-				resumeOutputPath := filepath.Join(state.SaveFolder, resumePdfName)
-				_, err = RunGenerateResume("references/user-profile-tailored.json", resumeOutputPath)
-				if err != nil {
-					errorsList = append(errorsList, fmt.Sprintf("%s - %s: resume compilation failed: %v", comp, role, err))
-					continue
+					resumeOutputPath := filepath.Join(state.SaveFolder, resumePdfName)
+					_, err = RunGenerateResume("references/user-profile-tailored.json", resumeOutputPath)
+					if err != nil {
+						errorsList = append(errorsList, fmt.Sprintf("%s - %s: resume compilation failed: %v", comp, role, err))
+						continue
+					}
 				}
 
 				// 2. Draft Cover Letter
-				genericTemplate, genErr := ensureGenericCoverLetter(state.ApiKey, baseProfileBytes)
-				if genErr != nil {
-					fmt.Println("Warning: Could not load or generate generic cover letter template:", genErr)
-				}
+				if doCover {
+					genericTemplate, genErr := ensureGenericCoverLetter(state.ApiKey, baseProfileBytes)
+					if genErr != nil {
+						fmt.Println("Warning: Could not load or generate generic cover letter template:", genErr)
+					}
 
-				coverPrompt := fmt.Sprintf(`Write a professional 4-paragraph cover letter for %s for the role of "%s" at "%s".
+					coverPrompt := fmt.Sprintf(`Write a professional 4-paragraph cover letter for %s for the role of "%s" at "%s".
 
 Important: Base the tone, style, and structure on the following generic template:
 ---
@@ -2846,26 +2928,37 @@ Strict Mandates:
 
 Output ONLY the cover letter text, no conversational intro or outro.`, candName, role, comp, genericTemplate, role, comp, desc, string(baseProfileBytes))
 
-				coverLetterDraftText, err := callGeminiGo(state.ApiKey, coverPrompt, false)
-				if err != nil {
-					errorsList = append(errorsList, fmt.Sprintf("%s - %s: cover letter draft failed: %v", comp, role, err))
-					continue
-				}
+					coverLetterDraftText, err := callGeminiGo(state.ApiKey, coverPrompt, false)
+					if err != nil {
+						errorsList = append(errorsList, fmt.Sprintf("%s - %s: cover letter draft failed: %v", comp, role, err))
+						continue
+					}
 
-				tempDraftPath := filepath.Join(os.TempDir(), fmt.Sprintf("legaj_bulk_draft_%d.txt", time.Now().UnixNano()))
-				err = os.WriteFile(tempDraftPath, []byte(coverLetterDraftText), 0644)
-				if err != nil {
-					errorsList = append(errorsList, fmt.Sprintf("%s - %s: failed to write temp cover letter draft: %v", comp, role, err))
-					continue
-				}
+					tempDraftPath := filepath.Join(os.TempDir(), fmt.Sprintf("legaj_bulk_draft_%d.txt", time.Now().UnixNano()))
+					err = os.WriteFile(tempDraftPath, []byte(coverLetterDraftText), 0644)
+					if err != nil {
+						errorsList = append(errorsList, fmt.Sprintf("%s - %s: failed to write temp cover letter draft: %v", comp, role, err))
+						continue
+					}
 
-				coverOutputPath := filepath.Join(state.SaveFolder, coverLetterPdfName)
-				_, err = RunGenerateCoverLetter("references/user-profile.json", tempDraftPath, coverOutputPath)
-				os.Remove(tempDraftPath)
-				if err != nil {
-					errorsList = append(errorsList, fmt.Sprintf("%s - %s: cover letter compilation failed: %v", comp, role, err))
-					continue
+					coverOutputPath := filepath.Join(state.SaveFolder, coverLetterPdfName)
+					_, err = RunGenerateCoverLetter("references/user-profile.json", tempDraftPath, coverOutputPath)
+					os.Remove(tempDraftPath)
+					if err != nil {
+						errorsList = append(errorsList, fmt.Sprintf("%s - %s: cover letter compilation failed: %v", comp, role, err))
+						continue
+					}
 				}
+			}
+
+			var tailoredLabel string
+			switch {
+			case doResume && doCover:
+				tailoredLabel = "resume & cover letter PDFs"
+			case doResume:
+				tailoredLabel = "resume PDFs"
+			default:
+				tailoredLabel = "cover letter PDFs"
 			}
 
 			fyne.Do(func() {
@@ -2877,18 +2970,17 @@ Output ONLY the cover letter text, no conversational intro or outro.`, candName,
 				if len(errorsList) > 0 {
 					dialog.ShowError(fmt.Errorf("Bulk tailoring finished with errors:\n%s", strings.Join(errorsList, "\n")), state.Window)
 				} else {
-					dialog.ShowInformation("Bulk Tailoring Complete", fmt.Sprintf("Successfully tailored resume & cover letter PDFs for %d application(s)!", len(selectedIndices)), state.Window)
+					dialog.ShowInformation("Bulk Tailoring Complete", fmt.Sprintf("Successfully tailored %s for %d application(s)!", tailoredLabel, len(selectedIndices)), state.Window)
 				}
 			})
 		}()
-	})
+	}
 
 	controlBar := container.NewHBox(
 		addBtn,
 		bulkImportBtn,
 		updateBtn,
 		deleteBtn,
-		syncBtn,
 		tailorSelectedBtn,
 		widget.NewSeparator(),
 		trackerOpenResumeBtn,
@@ -2909,7 +3001,10 @@ func updateTrackerList() {
 	}
 }
 
-func openAddJobModal(job *JobApplication) {
+// openAddJobModal opens the Job Card editor. focusColumn is the table column the
+// user double-clicked (1=Company, 2=Role, 3=Location, 6=Notes); pass -1 to open
+// without focusing a specific field.
+func openAddJobModal(job *JobApplication, focusColumn int) {
 	compEnt := widget.NewEntry()
 	roleEnt := widget.NewEntry()
 	locEnt := widget.NewEntry()
@@ -2990,6 +3085,22 @@ func openAddJobModal(job *JobApplication) {
 	}, state.Window)
 	d.Resize(fyne.NewSize(500, 450))
 	d.Show()
+
+	// Place the cursor in the field matching the double-clicked column.
+	var focusTarget fyne.Focusable
+	switch focusColumn {
+	case 1:
+		focusTarget = compEnt
+	case 2:
+		focusTarget = roleEnt
+	case 3:
+		focusTarget = locEnt
+	case 6:
+		focusTarget = notesEnt
+	}
+	if focusTarget != nil {
+		state.Window.Canvas().Focus(focusTarget)
+	}
 }
 
 // 4. DOCUMENT TAILORING VIEW
@@ -3381,20 +3492,20 @@ func buildSettingsTab() fyne.CanvasObject {
 		showOnboardingWizard()
 	})
 
+	// Email / IMAP credential fields are temporarily hidden from the settings
+	// form while the email-sync feature is disabled. The underlying widgets and
+	// persisted values are retained so the feature can be re-enabled later.
 	form := container.New(layout.NewFormLayout(),
 		widget.NewLabel("Gemini API Key"), state.SettingsApiKey,
 		widget.NewLabel("Gemini API Model"), state.SettingsApiModel,
 		widget.NewLabel("Save Folder"), state.SettingsSaveFolder,
-		widget.NewLabel("Email Address"), state.SettingsEmail,
-		widget.NewLabel("IMAP App Password"), state.SettingsPassword,
-		widget.NewLabel("IMAP Server"), state.SettingsImapServer,
 	)
 
 	githubBtn := widget.NewButtonWithIcon("GitHub: /bot-bbio", theme.HelpIcon(), func() {
 		openLink("https://github.com/bot-bbio")
 	})
-	linkedinBtn := widget.NewButtonWithIcon("LinkedIn: /alvvays", theme.HelpIcon(), func() {
-		openLink("https://linkedin.com/in/alvvays")
+	linkedinBtn := widget.NewButtonWithIcon(linkedInCreditDisplay, theme.HelpIcon(), func() {
+		openLink(linkedInCreditURL)
 	})
 	creditsRow := container.NewHBox(
 		widget.NewLabel("Credits:"),
@@ -3414,23 +3525,25 @@ func buildSettingsTab() fyne.CanvasObject {
 	return container.NewScroll(content)
 }
 
-// 7. HELP & DOCUMENTATION VIEW
-func buildHelpTab() fyne.CanvasObject {
-	// Create markdown widgets for each documentation section
-	onboardingMd := "### 🚀 Get Started with LeGaJ\n" +
+// onboardingGuideText returns the markdown shown in the Help tab's Get Started
+// section. It reflects only the currently active features.
+func onboardingGuideText() string {
+	return "### 🚀 Get Started with LeGaJ\n" +
 		"Follow this step-by-step workflow to maximize your job application success:\n\n" +
 		"* **Step 1: Setup & API Keys**\n" +
 		"  Head over to the **Settings** tab and enter your *Gemini API Key*. Save configurations to store them securely. You can also run the *Setup Wizard* to initialize target folders.\n" +
 		"* **Step 2: Initialize Your Profile**\n" +
 		"  Upload your existing resume (PDF/DOCX) or fill in details in the **Base Profile** tab. This forms your main resume reference.\n" +
-		"* **Step 3: Track & Clip Job Openings**\n" +
-		"  Discover jobs in the **Discovery Engine** or clip listings from job boards (LinkedIn, Indeed, etc.) directly into your inbox using our browser tools. Review and add them to your tracker.\n" +
-		"* **Step 4: Tailor Your Assets**\n" +
-		"  Go to the **Tailor Assets** tab, select a job application, and click **Tailor Profile** to optimize your experience bullet points. You can then compile tailored resumes and cover letters to single-page, print-ready PDFs.\n" +
-		"* **Step 5: Practice & Prepare**\n" +
-		"  Generate customized interview cheatsheets and financial/behavioral flashcards in the **Interview Prep** tab. Review them using the card player or export to Anki."
+		"* **Step 3: Collect Job Leads**\n" +
+		"  Clip listings from job boards (LinkedIn, Indeed, etc.) directly into your **Job Leads** inbox using our browser tools. Review them and add the ones you like to your tracker.\n" +
+		"* **Step 4: Track Your Applications**\n" +
+		"  Use the **Job Tracker** to manage every application's status, open saved documents, and keep your search organized from wishlist to offer."
+}
 
-	onboardingRichText := widget.NewRichTextFromMarkdown(onboardingMd)
+// 7. HELP & DOCUMENTATION VIEW
+func buildHelpTab() fyne.CanvasObject {
+	// Create markdown widgets for each documentation section
+	onboardingRichText := widget.NewRichTextFromMarkdown(onboardingGuideText())
 	onboardingRichText.Wrapping = fyne.TextWrapWord
 
 	// Bookmarklet configuration
@@ -3553,7 +3666,7 @@ func buildHelpTab() fyne.CanvasObject {
   if(!c&&!r){return;}
   fetch('http://127.0.0.1:%d/clip',{method:'POST',headers:{'Content-Type':'application/json','X-LeGaJ-Token':'%s'},body:JSON.stringify({company:c,role:r||document.title,location:l,link:p,description:d})})
     .then(function(res){return res.json();})
-    .then(function(){alert('\u2705 Clipped! Check the Clip Inbox in LeGaJ.');}) 
+    .then(function(){alert('\u2705 Clipped! Check your Job Leads in LeGaJ.');})
     .catch(function(e){
       var url='http://127.0.0.1:%d/clip?token=%s&company='+encodeURIComponent(c)+'&role='+encodeURIComponent(r||document.title)+'&location='+encodeURIComponent(l)+'&link='+encodeURIComponent(p)+'&description='+encodeURIComponent(d);
       var w=window.open(url,'_blank','width=500,height=400,status=no,menubar=no,toolbar=no');
@@ -3655,8 +3768,8 @@ func buildHelpTab() fyne.CanvasObject {
 	githubBtn := widget.NewButtonWithIcon("GitHub: /bot-bbio", theme.HelpIcon(), func() {
 		openLink("https://github.com/bot-bbio")
 	})
-	linkedinBtn := widget.NewButtonWithIcon("LinkedIn: /alvvays", theme.HelpIcon(), func() {
-		openLink("https://linkedin.com/in/alvvays")
+	linkedinBtn := widget.NewButtonWithIcon(linkedInCreditDisplay, theme.HelpIcon(), func() {
+		openLink(linkedInCreditURL)
 	})
 	creditsRow := container.NewHBox(
 		widget.NewLabel("Credits:"),
@@ -3998,17 +4111,9 @@ func showOnboardingWizard() {
 	backBtn.Disable()
 	nextBtn.Disable() // Disabled by default in step 1 until connections verified
 
-	var skipBtn *widget.Button
-	skipBtn = widget.NewButton("Skip Wizard", func() {
-		if skipBtn.Text == "Skip Step" {
-			dialog.ShowInformation("Setup Finished", "Profile and connectivity setup complete (grounding verification skipped).", wizardWindow)
-			reloadAllViews()
-			wizardWindow.Close()
-		} else {
-			reloadAllViews()
-			wizardWindow.Close()
-		}
-	})
+	// The Skip button advances one step at a time (rather than closing the whole
+	// wizard); its handler is assigned below once the step-navigation helpers exist.
+	skipBtn := widget.NewButton("Skip Wizard", nil)
 
 	// Step 1: Welcome & Paths & Connections Test & API Model Selection
 	apiKeyEntry := widget.NewPasswordEntry()
@@ -4185,8 +4290,6 @@ func showOnboardingWizard() {
 		widget.NewLabel("- For every industry/role: Tailor it once for your target role in general."),
 		widget.NewLabel("- By specific job descriptions: Dynamically tailor your resume for each job description."),
 	)
-
-
 
 	// Step 5: Cover Letter Template Setup
 	clChoiceSelect := widget.NewSelect([]string{
@@ -4368,6 +4471,42 @@ func showOnboardingWizard() {
 			nextBtn.Disable() // Disabled until grounding test runs successfully
 			skipBtn.SetText("Skip Step")
 		}
+	}
+
+	// showStep switches the visible wizard panel to the given 1-based step.
+	showStep := func(n int) {
+		var panel fyne.CanvasObject
+		switch n {
+		case 1:
+			panel = step1
+		case 2:
+			panel = step2
+		case 3:
+			panel = step3
+		case 4:
+			panel = step4
+		case 5:
+			panel = step5_cl
+		default:
+			panel = step6
+		}
+		currentStep = n
+		stepContainer.Objects = []fyne.CanvasObject{panel}
+		stepContainer.Refresh()
+		updateButtons()
+	}
+
+	// The Skip button advances a single step; on the final step it finishes setup.
+	skipBtn.OnTapped = func() {
+		nav := &wizardNavigator{currentStep: currentStep, totalSteps: 6}
+		nextStep, shouldClose := nav.skip()
+		if shouldClose {
+			dialog.ShowInformation("Setup Finished", "Profile and connectivity setup complete (grounding verification skipped).", wizardWindow)
+			reloadAllViews()
+			wizardWindow.Close()
+			return
+		}
+		showStep(nextStep)
 	}
 
 	bypassAction := func() {
@@ -5532,7 +5671,7 @@ func startClipServer() {
 <body>
     <div class="card">
       <h1>✓ Clipped Successfully!</h1>
-      <p>Job application details for <strong>` + html.EscapeString(payload.Company) + `</strong> have been sent to your LeGaJ Clip Inbox.</p>
+      <p>Job application details for <strong>` + html.EscapeString(payload.Company) + `</strong> have been sent to your LeGaJ Job Leads inbox.</p>
       <button onclick="window.close()">Close Window</button>
     </div>
     <script>

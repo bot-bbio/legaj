@@ -160,9 +160,11 @@ func TestSecNoPIIInSource(t *testing.T) {
 		"scripts/generate_cover_letter_pdf.py",
 		"scripts/manage_applications.py",
 	)
+	// Note: the author's name is intentionally present as a public credit on the
+	// Help/Settings tabs (see linkedInCreditDisplay), so it is not treated as PII
+	// here. Contact details and machine-specific paths must still never appear.
 	pii := map[string]string{
 		"813.597.5308":                          "SEC-004: phone number",
-		"Roberto Montero":                        "SEC-004: full name",
 		`C:\Users\molus\projects\legaj\outputs`: "SEC-004: hardcoded output path",
 	}
 	for pattern, label := range pii {

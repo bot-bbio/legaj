@@ -4,7 +4,7 @@
     stages both, and produces an Inno Setup installer.
 
 .DESCRIPTION
-    Pipeline (Option B distribution — no Python required on the target machine):
+    Pipeline (Option B distribution - no Python required on the target machine):
       1. PyInstaller freezes scripts/legaj_tools.py -> dist/legaj-tools.exe
       2. fyne packages the Go GUI         -> legaj.exe (with icon + metadata)
       3. Stage legaj.exe + tools/legaj-tools.exe into packaging/staging
@@ -53,7 +53,7 @@ if (-not $fyne) {
 if (Test-Path "Icon.png") {
     & fyne package --os windows --icon Icon.png --release
 } else {
-    Write-Host "    Icon.png not found — building without an embedded icon." -ForegroundColor Yellow
+    Write-Host "    Icon.png not found - building without an embedded icon." -ForegroundColor Yellow
     & $go build -ldflags="-H windowsgui" -o legaj.exe .
 }
 if (-not (Test-Path "legaj.exe")) { throw "GUI build did not produce legaj.exe" }
@@ -74,7 +74,7 @@ if (-not $iscc) {
 }
 if (-not $iscc) {
     Write-Host "    Inno Setup (ISCC.exe) not found. Install it from https://jrsoftware.org/isdl.php" -ForegroundColor Yellow
-    Write-Host "    Staging is ready at $staging — re-run ISCC packaging\legaj.iss once installed." -ForegroundColor Yellow
+    Write-Host "    Staging is ready at $staging - re-run ISCC packaging\legaj.iss once installed." -ForegroundColor Yellow
     exit 0
 }
 & $iscc "packaging\legaj.iss"

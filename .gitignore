@@ -65,3 +65,26 @@ SECURITY_IMPLEMENTATION_PLAN.md
 .DS_Store
 Thumbs.db
 scratch/
+
+# Internal workflow harness (never commit)
+.claude/
+skills/
+
+# Internal planning & task docs (local only)
+REFINEMENT_PLAN.md
+final_tweaks.md
+implementation.md
+game breaking bugs.md
+game_breaking_bugs_implementation_plan.md
+Tab Merge.md
+
+# Build & runtime logs
+*.log
+build_run.log
+
+# Debug screenshots
+error*.png
+error*.PNG
+
+# Runtime data logs
+references/*.log

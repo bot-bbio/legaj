@@ -1,12 +1,16 @@
 import os
 import sys
 
+def _die(msg):
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
 def parse_pdf(file_path):
     try:
         from pypdf import PdfReader
     except ImportError:
-        return "Error: pypdf library is not installed."
-        
+        _die("Error: pypdf library is not installed. Run `pip install -r requirements.txt`.")
+
     try:
         reader = PdfReader(file_path)
         text = ""
@@ -16,14 +20,14 @@ def parse_pdf(file_path):
                 text += page_text + "\n"
         return text.strip()
     except Exception as e:
-        return f"Error reading PDF file: {str(e)}"
+        _die(f"Error reading PDF file: {str(e)}")
 
 def parse_docx(file_path):
     try:
         import docx
     except ImportError:
-        return "Error: python-docx library is not installed."
-        
+        _die("Error: python-docx library is not installed. Run `pip install -r requirements.txt`.")
+
     try:
         doc = docx.Document(file_path)
         text = ""
@@ -35,37 +39,39 @@ def parse_docx(file_path):
                 text += " | ".join(row_text) + "\n"
         return text.strip()
     except Exception as e:
-        return f"Error reading DOCX file: {str(e)}"
+        _die(f"Error reading DOCX file: {str(e)}")
 
 def parse_txt(file_path):
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             return f.read()
     except Exception as e:
-        return f"Error reading text file: {str(e)}"
+        _die(f"Error reading text file: {str(e)}")
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python parse_resume.py <resume_path>")
-        sys.exit(1)
-        
+        _die("Usage: python parse_resume.py <resume_path>")
+
     file_path = sys.argv[1]
     if not os.path.exists(file_path):
-        print(f"Error: File '{file_path}' does not exist.")
-        sys.exit(1)
-        
+        _die(f"Error: File '{file_path}' does not exist.")
+
     ext = os.path.splitext(file_path)[1].lower()
-    
+
     if ext == '.pdf':
         text = parse_pdf(file_path)
-    elif ext in ['.docx', '.doc']:
+    elif ext == '.docx':
         text = parse_docx(file_path)
+    elif ext == '.doc':
+        _die("Error: Legacy .doc format is not supported. Please save the file as .docx or PDF and try again.")
     elif ext in ['.txt', '.md']:
         text = parse_txt(file_path)
     else:
-        print(f"Error: Unsupported file format '{ext}'. Supported formats: PDF, DOCX, TXT, MD.")
-        sys.exit(1)
-        
+        _die(f"Error: Unsupported file format '{ext}'. Supported formats: PDF, DOCX, TXT, MD.")
+
+    if not text or not text.strip():
+        _die(f"Error: No text could be extracted from '{file_path}'. The file may be empty or image-only.")
+
     print(text)
 
 if __name__ == "__main__":

@@ -84,9 +84,24 @@ func runPythonScript(scriptPath string, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-// RunParseResume calls parse_resume.py
+// RunParseResume calls parse_resume.py. On exit 0 we still defensively reject
+// near-empty output or output that begins with "Error:" — older revisions of
+// the script printed errors to stdout with exit 0, and this guard prevents the
+// error text from being passed downstream to the Gemini parse prompt as if it
+// were résumé content.
 func RunParseResume(resumePath string) (string, error) {
-	return runPythonScript("scripts/parse_resume.py", resumePath)
+	out, err := runPythonScript("scripts/parse_resume.py", resumePath)
+	if err != nil {
+		return "", err
+	}
+	trimmed := strings.TrimSpace(out)
+	if len(trimmed) < 20 {
+		return "", fmt.Errorf("parse_resume produced no usable text (got %q)", trimmed)
+	}
+	if strings.HasPrefix(trimmed, "Error:") {
+		return "", fmt.Errorf("parse_resume failed: %s", trimmed)
+	}
+	return out, nil
 }
 
 // RunTailorResume calls tailor_resume.py

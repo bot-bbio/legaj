@@ -41,6 +41,13 @@ const (
 	// trackerColSelectWidth is the width of the Job Tracker's selection-checkbox
 	// column. Kept compact so the checkbox isn't surrounded by dead space.
 	trackerColSelectWidth = float32(40)
+	// resumeTailoringEnabled gates the AI-driven resume tailoring feature
+	// (Track & Tailor pipeline, Tailor Selected bulk action, wizard Step 4
+	// strategy selector). The 1.0 alpha ships with this OFF because output
+	// quality is not yet at a suitable level; the implementation is
+	// intentionally retained for a future build. To re-enable, flip to true
+	// and the original UI surfaces will re-appear without further changes.
+	resumeTailoringEnabled = false
 )
 
 // getTailorModeOptions returns the choices offered by the "Tailor Selected"
@@ -101,13 +108,22 @@ type Project struct {
 	Details      string   `json:"details"`
 }
 
+// ResumeSection captures any résumé section the parser intuits dynamically
+// (e.g. Publications, Certifications, Awards). Standard sections map to typed
+// fields above; anything the résumé actually contains beyond those lives here.
+type ResumeSection struct {
+	Title string   `json:"title"`
+	Items []string `json:"items"`
+}
+
 type Profile struct {
-	PersonalInfo PersonalInfo        `json:"personal_info"`
-	TargetRoles  []string            `json:"target_roles"`
-	Education    []Education         `json:"education"`
-	Experience   []Experience        `json:"experience"`
-	Projects     []Project           `json:"projects"`
-	Skills       map[string][]string `json:"skills"`
+	PersonalInfo       PersonalInfo        `json:"personal_info"`
+	TargetRoles        []string            `json:"target_roles"`
+	Education          []Education         `json:"education"`
+	Experience         []Experience        `json:"experience"`
+	Projects           []Project           `json:"projects"`
+	Skills             map[string][]string `json:"skills"`
+	AdditionalSections []ResumeSection     `json:"additional_sections,omitempty"`
 }
 
 // geminiClient is the shared HTTP client for all Gemini API calls. The 30s
@@ -120,7 +136,12 @@ func writeSecureFile(path string, data []byte) error {
 	return os.WriteFile(path, data, 0600)
 }
 
-func callGeminiGo(apiKey, promptText string, isJson bool) (string, error) {
+// callGeminiOnce is a single, non-retrying call to the Gemini generateContent
+// endpoint. It returns the extracted text, the HTTP status code (so callers
+// can decide on retry policy), and any error. The status code is 0 when the
+// failure is at the transport layer (e.g. network timeout) — those are also
+// retryable.
+func callGeminiOnce(apiKey, promptText string, isJson bool) (string, int, error) {
 	model := state.ApiModel
 	if model == "" {
 		model = "gemini-3.1-flash-lite"
@@ -147,29 +168,29 @@ func callGeminiGo(apiKey, promptText string, isJson bool) (string, error) {
 
 	jsonBytes, err := json.Marshal(requestBody)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonBytes))
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-goog-api-key", apiKey)
 
 	resp, err := geminiClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "", resp.StatusCode, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+		return "", resp.StatusCode, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	var apiResp struct {
@@ -184,11 +205,11 @@ func callGeminiGo(apiKey, promptText string, isJson bool) (string, error) {
 
 	err = json.Unmarshal(bodyBytes, &apiResp)
 	if err != nil {
-		return "", err
+		return "", resp.StatusCode, err
 	}
 
 	if len(apiResp.Candidates) == 0 || len(apiResp.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("empty response from Gemini API")
+		return "", resp.StatusCode, fmt.Errorf("empty response from Gemini API")
 	}
 
 	text := apiResp.Candidates[0].Content.Parts[0].Text
@@ -197,7 +218,31 @@ func callGeminiGo(apiKey, promptText string, isJson bool) (string, error) {
 		text = strings.TrimSuffix(text, "```")
 		text = strings.TrimSpace(text)
 	}
-	return text, nil
+	return text, resp.StatusCode, nil
+}
+
+// callGeminiGo wraps callGeminiOnce with retry/backoff for transient failures.
+// Retryable: HTTP 429 (rate limit), 503 (overloaded), and transport-layer
+// errors (status code 0). All other errors fail fast. Schedule: 4 attempts with
+// 2s / 4s / 8s sleeps between them, capped at ~14s total wait.
+func callGeminiGo(apiKey, promptText string, isJson bool) (string, error) {
+	const maxAttempts = 4
+	backoffs := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
+
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		text, status, err := callGeminiOnce(apiKey, promptText, isJson)
+		if err == nil {
+			return text, nil
+		}
+		lastErr = err
+		retryable := status == http.StatusServiceUnavailable || status == http.StatusTooManyRequests || status == 0
+		if !retryable || attempt == maxAttempts-1 {
+			return "", err
+		}
+		time.Sleep(backoffs[attempt])
+	}
+	return "", lastErr
 }
 
 // GroundingSource is a real URL retrieved by Gemini during its web search.
@@ -588,9 +633,10 @@ type AppState struct {
 	RolesEntry      *widget.Entry
 	TechSkillsEntry *widget.Entry
 	PmSkillsEntry   *widget.Entry
-	EduContainer    *fyne.Container
-	ExpContainer    *fyne.Container
-	ProjContainer   *fyne.Container
+	EduContainer        *fyne.Container
+	ExpContainer        *fyne.Container
+	ProjContainer       *fyne.Container
+	AddlSectionsContainer *fyne.Container
 
 	// Tracker widgets
 	TrackerTable    *widget.Table
@@ -657,11 +703,27 @@ var clipListener net.Listener
 var trackerSelectedRows = make(map[int]bool)
 
 type ClippedJob struct {
-	Company     string `json:"company"`
-	Role        string `json:"role"`
-	Location    string `json:"location"`
-	Link        string `json:"link"`
-	Description string `json:"description"`
+	Company      string `json:"company"`
+	Role         string `json:"role"`
+	Location     string `json:"location"`
+	Link         string `json:"link"`
+	Description  string `json:"description"`
+	NeedsReview  bool   `json:"needs_review,omitempty"`
+	ReviewReason string `json:"review_reason,omitempty"`
+}
+
+// logClipFailure appends a structured entry to references/clip-failures.log when
+// the clipper falls back on company or role detection. The file is owner-only
+// (0600) since it may contain scraped PII / company context. Failures are
+// non-fatal: the clip is still saved (with NeedsReview=true) so the user can
+// correct it in the inbox.
+func logClipFailure(scrapedCompany, scrapedRole, finalCompany, finalRole, link, reason string) {
+	os.MkdirAll("references", 0755)
+	path := "references/clip-failures.log"
+	entry := fmt.Sprintf("%s\treason=%q\tlink=%q\tscraped=(company=%q role=%q)\tfinal=(company=%q role=%q)\n",
+		time.Now().Format(time.RFC3339), reason, link, scrapedCompany, scrapedRole, finalCompany, finalRole)
+	existing, _ := os.ReadFile(path)
+	_ = writeSecureFile(path, append(existing, []byte(entry)...))
 }
 
 func saveClippedJob(job ClippedJob) {
@@ -737,20 +799,43 @@ func addClippedJobToInboxUI(job ClippedJob) {
 	li := job.Link
 	de := job.Description
 	bd := sourceBadge(li)
+	needsReview := job.NeedsReview
+	reviewReason := job.ReviewReason
+
+	// Wrap Track & Tailor / Add Tracker Only with a confirm dialog when the
+	// clipper flagged the extraction as low-confidence (Bugs 8 + 10).
+	confirmThen := func(action func()) func() {
+		return func() {
+			if !needsReview {
+				action()
+				return
+			}
+			msg := fmt.Sprintf("This clip was flagged for review (%s). The company/role may be incorrect — verify before tracking.\n\nProceed anyway?", reviewReason)
+			dialog.ShowConfirm("Verify Job Details", msg, func(ok bool) {
+				if ok {
+					action()
+				}
+			}, state.Window)
+		}
+	}
 
 	openBtn := widget.NewButtonWithIcon("View", theme.HelpIcon(), func() {
 		openLink(li)
 	})
-	trackBtn := widget.NewButtonWithIcon("Track & Tailor", theme.DocumentCreateIcon(), func() {
+	trackBtnLabel := "Track & Tailor"
+	if !resumeTailoringEnabled {
+		trackBtnLabel = "Track & Apply"
+	}
+	trackBtn := widget.NewButtonWithIcon(trackBtnLabel, theme.DocumentCreateIcon(), confirmThen(func() {
 		runTrackAndTailorAutomation(c, ro, lo, li, de)
-	})
+	}))
 	trackBtn.Importance = widget.HighImportance
-	addOnlyBtn := widget.NewButtonWithIcon("Add Tracker Only", theme.ContentAddIcon(), func() {
+	addOnlyBtn := widget.NewButtonWithIcon("Add Tracker Only", theme.ContentAddIcon(), confirmThen(func() {
 		resumeName := fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(c, " ", "_"))
 		coverName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(c, " ", "_"))
 		_ = addApplicationGo(c, ro, lo, li, "Applied", resumeName, coverName, "Clipped from browser.")
 		reloadAllViews()
-	})
+	}))
 
 	existing := findApplicationByLink(li)
 	if existing == nil {
@@ -762,8 +847,14 @@ func addClippedJobToInboxUI(job ClippedJob) {
 		addOnlyBtn.Disable()
 	}
 
+	companyLabel := widget.NewLabel(c)
+	if needsReview {
+		companyLabel = widget.NewLabel("⚠ " + c)
+		companyLabel.TextStyle = fyne.TextStyle{Bold: true}
+	}
+
 	row := container.New(&clipperRowLayout{},
-		widget.NewLabel(c),
+		companyLabel,
 		widget.NewLabel(ro),
 		widget.NewLabel(lo),
 		widget.NewLabel(bd),
@@ -844,23 +935,74 @@ func extractCompanyFromTitle(title string) string {
 			return comp
 		}
 	}
-	parts := strings.FieldsFunc(title, func(r rune) bool {
-		return r == '-' || r == '|' || r == '•'
-	})
-	if len(parts) >= 2 {
-		part0 := strings.TrimSpace(parts[0])
-		part1 := strings.TrimSpace(parts[1])
-		if containsRoleKeyword(part0) && !containsRoleKeyword(part1) {
-			return part1
+	// Pipe / bullet separators are reliable "Role | Company" portal markers
+	// and we accept any length on either side.
+	if parts := strings.FieldsFunc(title, func(r rune) bool {
+		return r == '|' || r == '•'
+	}); len(parts) >= 2 {
+		if comp := pickCompanySide(parts[0], parts[1], 50); comp != "" {
+			return comp
 		}
-		if containsRoleKeyword(part1) && !containsRoleKeyword(part0) {
-			return part0
-		}
-		if len(part0) < 50 && part0 != "" {
-			return part0
+	}
+	// Hyphens appear inside role titles all the time ("Sr. Client Solutions
+	// Manager, Performance & Expansion - Marketing Solutions"), so only
+	// split on a single hyphen AND require BOTH sides to be short. This
+	// keeps clean cases like "Google - Senior Engineer" working but
+	// rejects role strings with internal punctuation.
+	if strings.Count(title, "-") == 1 {
+		idx := strings.Index(title, "-")
+		left := strings.TrimSpace(title[:idx])
+		right := strings.TrimSpace(title[idx+1:])
+		if len(left) > 0 && len(left) <= 30 && len(right) > 0 && len(right) <= 30 {
+			if comp := pickCompanySide(left, right, 30); comp != "" {
+				return comp
+			}
 		}
 	}
 	return ""
+}
+
+// pickCompanySide chooses the company half of a two-part title split. When one
+// side contains a role keyword and the other does not, the other side wins;
+// otherwise the leftmost side wins if it is within maxLen.
+func pickCompanySide(left, right string, maxLen int) string {
+	l := strings.TrimSpace(left)
+	r := strings.TrimSpace(right)
+	if containsRoleKeyword(l) && !containsRoleKeyword(r) {
+		return r
+	}
+	if containsRoleKeyword(r) && !containsRoleKeyword(l) {
+		return l
+	}
+	if len(l) < maxLen && l != "" {
+		return l
+	}
+	return ""
+}
+
+// cleanText normalizes pasted/scraped text for safe display in Fyne widgets and
+// storage. It converts CRLF/CR line endings to LF and strips non-printable
+// control characters (which render as "?" boxes), while preserving newlines and
+// tabs.
+func cleanText(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	var sb strings.Builder
+	for _, r := range s {
+		if (r < 32 && r != '\n' && r != '\t') || r == 127 {
+			continue
+		}
+		sb.WriteRune(r)
+	}
+	return sb.String()
+}
+
+// stripRoleMetadata trims any trailing portal/req-id/location metadata after
+// the first pipe character in a role title. Scraped roles like
+// "Senior PM | Apple | Remote" contaminate cover-letter prompts; truncating
+// at "|" keeps only the canonical role.
+func stripRoleMetadata(role string) string {
+	return strings.TrimSpace(strings.SplitN(role, "|", 2)[0])
 }
 
 func correctMissingCompany(apiKey, description, title string) string {
@@ -881,6 +1023,328 @@ Job Description:
 		}
 	}
 	return ""
+}
+
+// genericCompanyTokens are values that legitimately look like a company string
+// but almost always come from job-board page titles or navigation chrome rather
+// than a real employer. When any of these is returned as the company, it should
+// be treated as if the company is missing so the downstream fallback chain runs.
+//
+// Intentionally LIMITED to navigation chrome — major brands like LinkedIn,
+// Google, Workday, etc. are removed because they are also real employers, and
+// blocking them here causes false negatives for legitimate clips.
+var genericCompanyTokens = []string{
+	"jobs", "careers", "career", "apply", "apply now", "apply here",
+	"job search", "job posting", "job postings", "job details",
+	"job board", "job listings", "hiring", "we're hiring", "join us",
+	"join our team", "open roles", "open positions", "current openings",
+	"work with us", "career opportunities", "job opportunities",
+	"all jobs", "search jobs", "find jobs", "view job",
+}
+
+// isGenericCompany returns true when the supplied company name is empty, looks
+// like a URL or path fragment, is dominated by punctuation/digits, or matches a
+// junk token from genericCompanyTokens. Mirrors isGenericRole for the company
+// dimension so the /clip handler can drop noise before it reaches storage.
+func isGenericCompany(name string) bool {
+	c := strings.TrimSpace(name)
+	if c == "" {
+		return true
+	}
+	if strings.ContainsAny(c, "/\\") {
+		return true
+	}
+	cLower := strings.ToLower(c)
+	if strings.HasPrefix(cLower, "http://") || strings.HasPrefix(cLower, "https://") || strings.HasPrefix(cLower, "www.") {
+		return true
+	}
+	if strings.Count(cLower, ".") > 0 && !strings.Contains(cLower, " ") {
+		// Looks like a bare domain stem (e.g. "td.com") rather than a clean
+		// brand name. A legitimate company with a dot (e.g. "Booking.com")
+		// would still contain at least one space or be obviously brand-shaped
+		// — the scraper rarely produces that as a false positive here.
+		return true
+	}
+	if len(c) < 2 {
+		return true
+	}
+	for _, tok := range genericCompanyTokens {
+		if cLower == tok {
+			return true
+		}
+	}
+	return false
+}
+
+// extractCompanyHints pulls capitalized brand-like candidates from the opening
+// of a job description. A majority of JDs name the employer in the first
+// sentence ("About TD Bank...", "Acme is hiring...", "Join Stripe's growing
+// team..."), so this gives a strong free signal before any LLM call. Returns
+// up to 3 candidates, most-confident first; empty when the description doesn't
+// open with anything obviously brand-shaped.
+func extractCompanyHints(description string) []string {
+	d := strings.TrimSpace(description)
+	if d == "" {
+		return nil
+	}
+	// Limit scan to the first sentence or the first ~200 chars, whichever is
+	// shorter. Sentence terminators are ., !, ?, or a newline.
+	head := d
+	if len(head) > 200 {
+		head = head[:200]
+	}
+	for i, r := range head {
+		if r == '.' || r == '!' || r == '?' || r == '\n' {
+			head = head[:i]
+			break
+		}
+	}
+	words := strings.Fields(head)
+	if len(words) > 30 {
+		words = words[:30]
+	}
+
+	// Filler words that should not start or appear inside a captured brand
+	// phrase even when capitalized (sentence-start or quirky styling).
+	filler := map[string]bool{
+		"a": true, "an": true, "the": true, "we": true, "our": true,
+		"is": true, "are": true, "and": true, "or": true, "at": true,
+		"in": true, "to": true, "of": true, "for": true, "with": true,
+		"as": true, "by": true, "on": true, "from": true, "this": true,
+		"that": true, "about": true, "join": true, "work": true,
+		"role": true, "job": true, "position": true, "hiring": true,
+	}
+
+	isCapTok := func(w string) bool {
+		w = strings.Trim(w, ",;:()[]\"'`")
+		if w == "" {
+			return false
+		}
+		first := rune(w[0])
+		if !(first >= 'A' && first <= 'Z') {
+			return false
+		}
+		if filler[strings.ToLower(w)] {
+			return false
+		}
+		return true
+	}
+
+	cleanTok := func(w string) string {
+		return strings.Trim(w, ",;:()[]\"'`.")
+	}
+
+	var hints []string
+	seen := map[string]bool{}
+	i := 0
+	for i < len(words) {
+		if !isCapTok(words[i]) {
+			i++
+			continue
+		}
+		// Greedy capture of contiguous capitalized tokens, allowing a single
+		// lowercase glue word like "of" or "&" between two cap tokens.
+		j := i
+		var run []string
+		for j < len(words) {
+			if isCapTok(words[j]) {
+				run = append(run, cleanTok(words[j]))
+				j++
+				continue
+			}
+			if j+1 < len(words) && (words[j] == "&" || filler[strings.ToLower(words[j])]) && isCapTok(words[j+1]) {
+				run = append(run, words[j], cleanTok(words[j+1]))
+				j += 2
+				continue
+			}
+			break
+		}
+		if len(run) > 0 {
+			cand := strings.TrimSpace(strings.Join(run, " "))
+			cand = strings.Trim(cand, " &")
+			key := strings.ToLower(cand)
+			if len(cand) >= 2 && len(cand) < 60 && !seen[key] && !isGenericCompany(cand) {
+				hints = append(hints, cand)
+				seen[key] = true
+			}
+		}
+		if j == i {
+			i++
+		} else {
+			i = j
+		}
+		if len(hints) >= 3 {
+			break
+		}
+	}
+	return hints
+}
+
+// extractCompanyFromHost derives a brand candidate from a job-posting URL's
+// hostname. Strips common subdomains (careers., jobs., apply., www.) and any
+// known applicant-tracking-system suffix so that
+// "careers.tdbank.com/job/123" → "tdbank", which the caller can capitalize or
+// pass to an LLM for one-shot cleanup. Returns empty when the link is missing
+// or only resolves to an ATS host.
+func extractCompanyFromHost(link string) string {
+	if link == "" {
+		return ""
+	}
+	u, err := url.Parse(link)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	host := strings.ToLower(u.Host)
+	// Strip a port if present.
+	if idx := strings.Index(host, ":"); idx >= 0 {
+		host = host[:idx]
+	}
+	// Strip common job-portal subdomains.
+	for _, prefix := range []string{"www.", "careers.", "career.", "jobs.", "job.", "apply.", "hiring.", "talent.", "people.", "boards.", "board."} {
+		host = strings.TrimPrefix(host, prefix)
+	}
+	// If the host is now a multi-employer job board (linkedin.com,
+	// indeed.com) or an ATS that hosts roles for many brands
+	// (greenhouse.io, lever.co), the path identifies the actual employer,
+	// not the hostname. Return empty so the caller falls back to LLM
+	// extraction from the description. NOTE: this list is for hostnames
+	// only — the same names are still valid as employer values when they
+	// appear in the description (LinkedIn, Workday, Google all hire).
+	atsHosts := map[string]bool{
+		"greenhouse.io": true, "grnh.se": true, "lever.co": true,
+		"myworkdayjobs.com": true, "ashbyhq.com": true,
+		"icims.com": true, "smartrecruiters.com": true, "bamboohr.com": true,
+		"linkedin.com": true, "indeed.com": true, "glassdoor.com": true,
+		"ziprecruiter.com": true,
+	}
+	if atsHosts[host] {
+		return ""
+	}
+	// Drop the TLD ("tdbank.com" → "tdbank"). Multi-part TLDs like "co.uk"
+	// would leave "tdbank.co" but that's still a reasonable LLM input.
+	if idx := strings.LastIndex(host, "."); idx > 0 {
+		host = host[:idx]
+	}
+	// "tdbank" is the stem; let the caller decide whether to titlecase it or
+	// pipe it through correctMissingCompany for a brand-name cleanup.
+	stem := strings.TrimSpace(host)
+	if stem == "" || len(stem) < 2 || len(stem) > 40 {
+		return ""
+	}
+	return stem
+}
+
+// brandFromHostStem capitalizes a hostname stem ("tdbank" → "Tdbank") for a
+// readable display fallback. Kept deliberately simple — when an LLM is
+// available, correctMissingCompany produces a cleaner result; this is the
+// no-network fallback so the inbox never shows a bare lowercase stem.
+func brandFromHostStem(stem string) string {
+	if stem == "" {
+		return ""
+	}
+	// Split on hyphens so "td-bank" → "Td Bank"; the LLM cleanup pass will
+	// usually replace this with the canonical brand if one is reachable.
+	parts := strings.Split(stem, "-")
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(p[:1]) + p[1:]
+	}
+	return strings.Join(parts, " ")
+}
+
+// companyAppearsInContext checks that the candidate company is referenced
+// either by the description body or by the first-sentence hint list, using a
+// case-insensitive token-containment match. Used after extraction to flag
+// extractions that nothing in the source supports (often "Jobs", "Careers",
+// or other page-chrome leaks) for user review.
+func companyAppearsInContext(company, description string, hints []string) bool {
+	c := strings.TrimSpace(company)
+	if c == "" {
+		return false
+	}
+	cLower := strings.ToLower(c)
+	// Strip suffixes like ", Inc." / " LLC" so the match isn't defeated by a
+	// punctuation tail that the description doesn't replicate verbatim.
+	for _, suffix := range []string{", inc.", ", inc", " inc.", " inc", ", llc", " llc", ", ltd.", " ltd.", " ltd", ", corp.", " corp.", " corp"} {
+		cLower = strings.TrimSuffix(cLower, suffix)
+	}
+	cLower = strings.TrimSpace(cLower)
+	if cLower == "" {
+		return false
+	}
+	if strings.Contains(strings.ToLower(description), cLower) {
+		return true
+	}
+	for _, h := range hints {
+		if strings.EqualFold(strings.TrimSpace(h), strings.TrimSpace(company)) {
+			return true
+		}
+		if strings.Contains(strings.ToLower(h), cLower) || strings.Contains(cLower, strings.ToLower(h)) {
+			return true
+		}
+	}
+	return false
+}
+
+// extractJobDetailsLLM re-derives clean company, role, and location values from
+// a scraped job description in a single LLM call, using the scraped values as
+// hints. It returns ok=false when the API key or description is missing, or when
+// the response cannot be parsed — callers should fall back to per-field
+// heuristics in that case. This single pass replaces the separate
+// correctMissingCompany/correctGenericRole calls in the common case.
+func extractJobDetailsLLM(apiKey, scrapedCompany, scrapedRole, scrapedLocation, description string, hints []string) (company, role, location string, ok bool) {
+	if apiKey == "" || strings.TrimSpace(description) == "" {
+		return "", "", "", false
+	}
+
+	hintLine := "none"
+	if len(hints) > 0 {
+		hintLine = strings.Join(hints, " | ")
+	}
+
+	prompt := fmt.Sprintf(`You are an expert recruiter parsing agent. Read the following job description and scraped details and return the cleanest possible Company Name, Job Title (Role), and Job Location.
+
+Scraped Company: %s
+Scraped Role: %s
+Scraped Location: %s
+
+Likely company candidates from the description's first sentence (high signal — prefer these when the body is ambiguous): %s
+
+Job Description:
+%s
+
+Guidance for the "company" field:
+- The company is the actual hiring EMPLOYER. Major tech brands (Google, Apple, LinkedIn, Microsoft, Workday, etc.) ARE valid employers when they are doing the hiring — do not refuse to return them.
+- Do NOT return navigation chrome as the company. Bad values include: "Jobs", "Careers", "Apply", "Apply Now", "Job Search", "Job Posting", "Hiring", "Open Roles", a bare URL, or a bare hostname (e.g. "tdbank.com").
+- Prefer the Scraped Company when it is a clean brand name, then the first-sentence hints, then your reading of the description body. Only return an empty string for company when ALL signals look like chrome.
+
+Output ONLY a valid JSON object matching this schema, with no markdown, no comments, and no other text:
+{
+  "company": "Clean Company Name (or empty string only as a last resort)",
+  "role": "Clean Job Title / Role",
+  "location": "Clean Location"
+}`, scrapedCompany, scrapedRole, scrapedLocation, hintLine, description)
+
+	result, err := callGeminiGo(apiKey, prompt, true)
+	if err != nil {
+		return "", "", "", false
+	}
+
+	var parsed struct {
+		Company  string `json:"company"`
+		Role     string `json:"role"`
+		Location string `json:"location"`
+	}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		return "", "", "", false
+	}
+
+	return cleanText(strings.TrimSpace(parsed.Company)),
+		cleanText(strings.TrimSpace(parsed.Role)),
+		cleanText(strings.TrimSpace(parsed.Location)),
+		true
 }
 
 func startFyneGUI() {
@@ -1062,10 +1526,121 @@ func loadProfileData() {
 	state.Profile = &prof
 }
 
+// sanitizeProfile strips CR/control characters from every string field of the
+// profile in place. cleanText only removes invisible characters, so the visible
+// text is unchanged; this guarantees nothing dirty is persisted regardless of
+// whether the data came from the form, the wizard, or resume parsing.
+func sanitizeProfile(p *Profile) {
+	p.PersonalInfo.Name = cleanText(p.PersonalInfo.Name)
+	p.PersonalInfo.Email = cleanText(p.PersonalInfo.Email)
+	p.PersonalInfo.Phone = cleanText(p.PersonalInfo.Phone)
+	p.PersonalInfo.Location = cleanText(p.PersonalInfo.Location)
+	p.PersonalInfo.Linkedin = cleanText(p.PersonalInfo.Linkedin)
+	p.PersonalInfo.Website = cleanText(p.PersonalInfo.Website)
+
+	for i := range p.TargetRoles {
+		p.TargetRoles[i] = cleanText(p.TargetRoles[i])
+	}
+	for i := range p.Education {
+		e := &p.Education[i]
+		e.Institution = cleanText(e.Institution)
+		e.Degree = cleanText(e.Degree)
+		e.Major = cleanText(e.Major)
+		e.GraduationDate = cleanText(e.GraduationDate)
+		e.Location = cleanText(e.Location)
+		e.GPA = cleanText(e.GPA)
+		e.Details = cleanText(e.Details)
+	}
+	for i := range p.Experience {
+		ex := &p.Experience[i]
+		ex.Company = cleanText(ex.Company)
+		ex.Role = cleanText(ex.Role)
+		ex.Location = cleanText(ex.Location)
+		ex.StartDate = cleanText(ex.StartDate)
+		ex.EndDate = cleanText(ex.EndDate)
+		for j := range ex.Bullets {
+			ex.Bullets[j] = cleanText(ex.Bullets[j])
+		}
+	}
+	for i := range p.Projects {
+		pr := &p.Projects[i]
+		pr.Name = cleanText(pr.Name)
+		pr.Description = cleanText(pr.Description)
+		pr.Details = cleanText(pr.Details)
+		for j := range pr.Technologies {
+			pr.Technologies[j] = cleanText(pr.Technologies[j])
+		}
+	}
+	for key, vals := range p.Skills {
+		for i := range vals {
+			vals[i] = cleanText(vals[i])
+		}
+		p.Skills[key] = vals
+	}
+	for i := range p.AdditionalSections {
+		s := &p.AdditionalSections[i]
+		s.Title = cleanText(s.Title)
+		for j := range s.Items {
+			s.Items[j] = cleanText(s.Items[j])
+		}
+	}
+}
+
+// validateTailoredProfile ensures a tailored profile JSON has not dropped or
+// renamed top-level keys, shrunk core sections, or mutated skill categories
+// relative to the base profile. Returns nil when safe to use, or an error
+// describing what changed so callers can fall back to the base profile.
+func validateTailoredProfile(baseJSON, tailoredJSON []byte) error {
+	var base, tailored map[string]interface{}
+	if err := json.Unmarshal(baseJSON, &base); err != nil {
+		return fmt.Errorf("base profile invalid JSON: %v", err)
+	}
+	if err := json.Unmarshal(tailoredJSON, &tailored); err != nil {
+		return fmt.Errorf("tailored profile invalid JSON: %v", err)
+	}
+
+	for key := range base {
+		if _, ok := tailored[key]; !ok {
+			return fmt.Errorf("tailored profile dropped top-level key %q", key)
+		}
+	}
+
+	countSlice := func(m map[string]interface{}, key string) int {
+		v, ok := m[key]
+		if !ok || v == nil {
+			return 0
+		}
+		s, ok := v.([]interface{})
+		if !ok {
+			return -1
+		}
+		return len(s)
+	}
+	for _, key := range []string{"experience", "education", "projects", "additional_sections"} {
+		bc := countSlice(base, key)
+		tc := countSlice(tailored, key)
+		if bc > 0 && tc < bc {
+			return fmt.Errorf("tailored profile shrunk %q from %d to %d entries", key, bc, tc)
+		}
+	}
+
+	if baseSkills, ok := base["skills"].(map[string]interface{}); ok {
+		tailoredSkills, _ := tailored["skills"].(map[string]interface{})
+		for cat := range baseSkills {
+			if _, ok := tailoredSkills[cat]; !ok {
+				return fmt.Errorf("tailored profile dropped skills category %q", cat)
+			}
+		}
+	}
+
+	return nil
+}
+
 func saveProfileData() {
 	if state.Profile == nil {
 		return
 	}
+	sanitizeProfile(state.Profile)
 	jsonData, err := json.MarshalIndent(state.Profile, "", "  ")
 	if err != nil {
 		dialog.ShowError(err, state.Window)
@@ -1092,21 +1667,22 @@ func addApplicationGo(company, role, location, link, status, resume, coverLetter
 		status = "Applied"
 	}
 	newApp := JobApplication{
-		Company:     company,
-		Role:        role,
-		Location:    location,
+		Company:     cleanText(company),
+		Role:        cleanText(role),
+		Location:    cleanText(location),
 		Date:        dateStr,
-		Link:        link,
+		Link:        cleanText(link),
 		Status:      status,
 		Resume:      resume,
 		CoverLetter: coverLetter,
-		Notes:       notes,
+		Notes:       cleanText(notes),
 	}
 	state.Applications = append(state.Applications, newApp)
 	return saveTrackerDataGo()
 }
 
 func updateApplicationGo(company, role, newStatus, notes string) error {
+	notes = cleanText(notes)
 	found := false
 	for i := range state.Applications {
 		if strings.EqualFold(strings.TrimSpace(state.Applications[i].Company), strings.TrimSpace(company)) &&
@@ -1214,6 +1790,22 @@ func updateTrackerSelectionUI() {
 		}
 		isUpdatingTrackerDropdown = false
 
+		// The link check is a cheap string test, so compute it up front rather
+		// than in the goroutine below (which exists for blocking disk stats).
+		// Enable the Open Job URL button if ANY selected row has a valid link
+		// (the click handler iterates all selected rows).
+		hasLink := false
+		for _, idx := range indices {
+			if idx < 0 || idx >= len(state.Applications) {
+				continue
+			}
+			l := strings.ToLower(state.Applications[idx].Link)
+			if state.Applications[idx].Link != "" && (strings.HasPrefix(l, "http") || strings.HasPrefix(l, "file")) {
+				hasLink = true
+				break
+			}
+		}
+
 		// Perform file stats check in a background goroutine to unblock UI thread
 		go func() {
 			hasResume := false
@@ -1244,6 +1836,7 @@ func updateTrackerSelectionUI() {
 				if len(currentIndices) == 0 {
 					trackerOpenResumeBtn.Disable()
 					trackerOpenCoverLetterBtn.Disable()
+					trackerOpenLinkBtn.Disable()
 					return
 				}
 
@@ -1258,6 +1851,12 @@ func updateTrackerSelectionUI() {
 				} else {
 					trackerOpenCoverLetterBtn.Disable()
 				}
+
+				if hasLink {
+					trackerOpenLinkBtn.Enable()
+				} else {
+					trackerOpenLinkBtn.Disable()
+				}
 			})
 		}()
 	} else {
@@ -1269,6 +1868,7 @@ func updateTrackerSelectionUI() {
 		isUpdatingTrackerDropdown = false
 		trackerOpenResumeBtn.Disable()
 		trackerOpenCoverLetterBtn.Disable()
+		trackerOpenLinkBtn.Disable()
 	}
 }
 
@@ -1572,7 +2172,11 @@ Return ONLY valid JSON. No markdown, no explanation.`, kw, loc)
 					openBtn := widget.NewButtonWithIcon("View", theme.HelpIcon(), func() {
 						openLink(r.Link)
 					})
-					trackTailorBtn := widget.NewButtonWithIcon("Track & Tailor", theme.DocumentCreateIcon(), func() {
+					trackTailorBtnLabel := "Track & Tailor"
+					if !resumeTailoringEnabled {
+						trackTailorBtnLabel = "Track & Apply"
+					}
+					trackTailorBtn := widget.NewButtonWithIcon(trackTailorBtnLabel, theme.DocumentCreateIcon(), func() {
 						runTrackAndTailorAutomation(r.Company, r.Role, r.Location, r.Link, r.Description)
 					})
 					trackTailorBtn.Importance = widget.HighImportance
@@ -1659,7 +2263,8 @@ Return ONLY valid JSON. No markdown, no explanation.`, kw, loc)
 		widget.NewLabelWithStyle("No clipped jobs yet. Use the bookmarklet on any job board to clip listings here.",
 			fyne.TextAlignLeading, fyne.TextStyle{Italic: true}),
 	)
-	clipContainer := container.New(&fixedHeightLayout{height: 220}, state.ClipInboxBox)
+	clipScroll := container.NewVScroll(state.ClipInboxBox)
+	clipContainer := container.New(&fixedHeightLayout{height: 520}, clipScroll)
 	clearClipBtn := widget.NewButtonWithIcon("Clear Inbox", theme.DeleteIcon(), func() {
 		_ = os.Remove("references/clipped-jobs.json")
 		state.ClipInboxBox.Objects = []fyne.CanvasObject{
@@ -1676,8 +2281,10 @@ Return ONLY valid JSON. No markdown, no explanation.`, kw, loc)
 		state.ClipInboxBox.Refresh()
 	})
 
+	// TODO(2.0): restore the subheading "Jobs clipped from your browser via the
+	// bookmarklet appear here for review" when the discovery engine ships.
 	clipCardContent := container.NewBorder(
-		container.NewHBox(widget.NewLabel("Jobs clipped from your browser via the bookmarklet appear here for review"), layout.NewSpacer(), clearClipBtn),
+		container.NewHBox(layout.NewSpacer(), clearClipBtn),
 		nil, nil, nil,
 		container.NewHScroll(clipContainer),
 	)
@@ -1768,9 +2375,10 @@ func buildProfileTab() fyne.CanvasObject {
 	state.EduContainer = container.NewVBox()
 	state.ExpContainer = container.NewVBox()
 	state.ProjContainer = container.NewVBox()
+	state.AddlSectionsContainer = container.NewVBox()
 
 	importBtn := widget.NewButtonWithIcon("Import PDF/DOCX Resume", theme.DocumentIcon(), func() {
-		showCustomFilePicker(state.Window, "Import PDF/DOCX Resume", []string{".pdf", ".docx", ".doc", ".txt", ".md"}, func(filePath string) {
+		showCustomFilePicker(state.Window, "Import PDF/DOCX Resume", []string{".pdf", ".docx", ".txt", ".md"}, func(filePath string) {
 			progress := dialog.NewProgressInfinite("Parsing Resume", "Reading and structuring using Gemini AI...", state.Window)
 			progress.Show()
 
@@ -1830,8 +2438,18 @@ Structure:
   "skills": {
     "technical": ["Python"],
     "product_management": []
-  }
+  },
+  "additional_sections": [
+    { "title": "Section Title (e.g. Publications)", "items": ["entry 1", "entry 2"] }
+  ]
 }
+
+Section detection rules (open to, but never presume, common résumé sections):
+- Identify EVERY distinct section actually present in the résumé.
+- Map standard sections to their typed fields (personal_info, target_roles, education, experience, projects, skills).
+- For any other section the résumé actually contains — e.g. Publications, Research, Certifications, Licenses, Awards, Honors, Volunteer Experience, Languages, Patents, Speaking, Memberships — emit it under "additional_sections" as { "title", "items" }, preserving the author's original section title and wording.
+- Do NOT invent sections that are not present. Do NOT force empty sections.
+- If the résumé has none of these extra sections, output "additional_sections": [].
 
 Resume Text:
 %s`, outText)
@@ -1849,7 +2467,7 @@ Resume Text:
 					return
 				}
 
-				dialog.ShowInformation("Parse Complete", "Successfully parsed and structured resume using Gemini AI!", state.Window)
+				offerWorkspaceSetup(filePath)
 				reloadAllViews()
 				fillProfileForm()
 			}()
@@ -1903,6 +2521,9 @@ Resume Text:
 		widget.NewSeparator(),
 		container.NewHBox(widget.NewLabelWithStyle("Projects Section", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), addProjBtn),
 		state.ProjContainer,
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle("Additional Sections (auto-detected from your résumé)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		state.AddlSectionsContainer,
 	)
 
 	scroll := container.NewVScroll(profileContent)
@@ -1927,6 +2548,7 @@ func fillProfileForm() {
 	renderEducationForm()
 	renderExperienceForm()
 	renderProjectForm()
+	renderAdditionalSectionsForm()
 }
 
 func renderExperienceForm() {
@@ -2033,6 +2655,28 @@ func renderProjectForm() {
 		state.ProjContainer.Add(card)
 	}
 	state.ProjContainer.Refresh()
+}
+
+// renderAdditionalSectionsForm shows intuited résumé sections (Publications,
+// Certifications, Awards, etc.) as read-only cards so users can confirm what
+// was parsed. These round-trip through the Profile struct so saves and tailoring
+// preserve them automatically. If none were parsed, render a placeholder note.
+func renderAdditionalSectionsForm() {
+	state.AddlSectionsContainer.Objects = nil
+	if state.Profile == nil || len(state.Profile.AdditionalSections) == 0 {
+		hint := widget.NewLabel("None detected. Sections like Publications, Certifications, or Awards will appear here if your résumé contains them.")
+		hint.Wrapping = fyne.TextWrapWord
+		state.AddlSectionsContainer.Add(hint)
+		state.AddlSectionsContainer.Refresh()
+		return
+	}
+	for idx, section := range state.Profile.AdditionalSections {
+		items := widget.NewLabel(strings.Join(section.Items, "\n"))
+		items.Wrapping = fyne.TextWrapWord
+		card := widget.NewCard(fmt.Sprintf("%s (#%d, %d items)", section.Title, idx+1, len(section.Items)), "preserved verbatim during tailoring", items)
+		state.AddlSectionsContainer.Add(card)
+	}
+	state.AddlSectionsContainer.Refresh()
 }
 
 func gatherProfileFromForm() {
@@ -2472,6 +3116,7 @@ var (
 	trackerStatusSelect       *widget.Select
 	trackerOpenResumeBtn      *widget.Button
 	trackerOpenCoverLetterBtn *widget.Button
+	trackerOpenLinkBtn        *widget.Button
 	isUpdatingTrackerDropdown bool
 )
 
@@ -2535,6 +3180,54 @@ func buildTrackerTab() fyne.CanvasObject {
 	})
 	trackerOpenCoverLetterBtn.Disable()
 
+	// Opens the job posting URL of the first selected row in the browser.
+	trackerOpenLinkBtn = widget.NewButtonWithIcon("Open Job URL", theme.SearchIcon(), func() {
+		indices := getSelectedTrackerIndices()
+		if len(indices) == 0 {
+			return
+		}
+		// Collect valid, deduped http/file links from every selected row.
+		seen := make(map[string]bool)
+		var links []string
+		for _, idx := range indices {
+			if idx < 0 || idx >= len(state.Applications) {
+				continue
+			}
+			link := strings.TrimSpace(state.Applications[idx].Link)
+			lower := strings.ToLower(link)
+			if link == "" || (!strings.HasPrefix(lower, "http") && !strings.HasPrefix(lower, "file")) {
+				continue
+			}
+			if seen[link] {
+				continue
+			}
+			seen[link] = true
+			links = append(links, link)
+		}
+		if len(links) == 0 {
+			return
+		}
+		open := func() {
+			for _, link := range links {
+				openLink(link)
+			}
+		}
+		// Confirm before opening many tabs at once — guards against an
+		// accidental "select all" sending dozens of pages to the browser.
+		const confirmThreshold = 10
+		if len(links) > confirmThreshold {
+			msg := fmt.Sprintf("Open %d job URLs in your browser?", len(links))
+			dialog.ShowConfirm("Open Multiple URLs", msg, func(ok bool) {
+				if ok {
+					open()
+				}
+			}, state.Window)
+			return
+		}
+		open()
+	})
+	trackerOpenLinkBtn.Disable()
+
 	// Table widget setup for spreadsheet-like grid layout
 	state.TrackerTable = widget.NewTable(
 		func() (int, int) {
@@ -2585,16 +3278,18 @@ func buildTrackerTab() fyne.CanvasObject {
 						tc.status.selected = app.Status
 						tc.status.text.Text = app.Status
 
-						compName := app.Company
-						roleName := app.Role
+						// statusCell.Tapped already updates state.Applications in
+						// memory and calls refreshUI(), so onChanged only needs to
+						// persist to disk. Doing this in the background keeps the
+						// dropdown responsive (the old path re-read the file and
+						// rebuilt every view on each change).
 						tc.status.onChanged = func(selected string) {
-							if selected != "" && selected != app.Status {
-								err := updateApplicationGo(compName, roleName, selected, "")
-								if err != nil {
-									dialog.ShowError(err, state.Window)
-								} else {
-									reloadAllViews()
-								}
+							if selected != "" {
+								go func() {
+									if err := saveTrackerDataGo(); err != nil {
+										fyne.Do(func() { dialog.ShowError(err, state.Window) })
+									}
+								}()
 							}
 						}
 						tc.status.Refresh()
@@ -2812,6 +3507,35 @@ func buildTrackerTab() fyne.CanvasObject {
 				runTailorSelected(selectedIndices, doResume, doCover)
 			}, state.Window)
 	})
+	if !resumeTailoringEnabled {
+		tailorSelectedBtn.Hide()
+	}
+
+	// When resume tailoring is disabled, expose a focused "Generate Cover
+	// Letters" button so users can still bulk-draft cover letters for selected
+	// applications. Internally this reuses runTailorSelected with doResume=false.
+	bulkCoverLettersBtn := widget.NewButtonWithIcon("Generate Cover Letters", theme.MailComposeIcon(), func() {
+		var selectedIndices []int
+		for rowIdx, selected := range trackerSelectedRows {
+			if selected && rowIdx < len(state.Applications) {
+				selectedIndices = append(selectedIndices, rowIdx)
+			}
+		}
+		if len(selectedIndices) == 0 {
+			dialog.ShowInformation("Selection Required", "Please select/check at least one application from the table.", state.Window)
+			return
+		}
+		dialog.ShowConfirm("Generate Cover Letters",
+			fmt.Sprintf("Draft and compile cover letter PDFs for %d selected application(s)?", len(selectedIndices)),
+			func(ok bool) {
+				if ok {
+					runTailorSelected(selectedIndices, false, true)
+				}
+			}, state.Window)
+	})
+	if resumeTailoringEnabled {
+		bulkCoverLettersBtn.Hide()
+	}
 
 	runTailorSelected = func(selectedIndices []int, doResume, doCover bool) {
 		progress := dialog.NewProgressInfinite("Bulk Tailoring Assets", fmt.Sprintf("Processing %d selected applications sequentially...", len(selectedIndices)), state.Window)
@@ -2865,7 +3589,7 @@ func buildTrackerTab() fyne.CanvasObject {
 
 				// 1. Tailor Resume
 				if doResume {
-					tailorPrompt := fmt.Sprintf(`You are an expert resume writer. Tailor the applicant's experience bullet points and skills in the base profile JSON to align with the target job description.
+					tailorPrompt := fmt.Sprintf(`You are an expert resume writer. Rewrite ONLY the applicant's experience bullet points in the base profile JSON to align with the target job description. All other fields must be preserved verbatim.
 
 Base Profile JSON:
 %s
@@ -2874,11 +3598,11 @@ Target Job Description:
 %s
 
 Mandates:
-1. For each experience, rewrite relevant bullet points to emphasize accomplishments that align with the job requirements.
-2. YOU MUST strictly preserve all historical metrics (percentages, dollar values, size of teams) and truthfulness.
-3. Elevate and rank the most critical keywords in the skills section.
-4. Keep the exact same JSON structure. Do not add or remove jobs.
-5. Output ONLY valid JSON matching the profile schema. No explanations, no markdown blocks.`, string(baseProfileBytes), desc)
+1. Rewrite ONLY the experience bullet points. Use the STAR framework (Situation, Task, Action, Result) and begin each bullet with a strong active past-tense verb.
+2. Naturally incorporate relevant keywords from the target job description into the rewritten bullets.
+3. STRICTLY preserve every quantitative metric (percentages, dollar amounts, team sizes, time periods, dates). Never fabricate, omit, or alter any number.
+4. Preserve VERBATIM: personal_info, target_roles, education, projects, skills, and every entry under additional_sections (publications, certifications, awards, etc.). Do not add, remove, reorder, or rename any field. Do not invent skills the applicant did not list. Do not create new sections.
+5. Output ONLY valid JSON with the EXACT same set of top-level and nested keys as the input. No explanations, no markdown blocks.`, string(baseProfileBytes), desc)
 
 					tailoredJson, err := callGeminiGo(state.ApiKey, tailorPrompt, true)
 					if err != nil {
@@ -2886,7 +3610,12 @@ Mandates:
 						continue
 					}
 
-					err = writeSecureFile("references/user-profile-tailored.json", []byte(tailoredJson))
+					tailoredBytes := []byte(tailoredJson)
+					if verr := validateTailoredProfile(baseProfileBytes, tailoredBytes); verr != nil {
+						fmt.Printf("Tailored profile guard tripped for %s @ %s (%v) — falling back to base profile.\n", role, comp, verr)
+						tailoredBytes = baseProfileBytes
+					}
+					err = writeSecureFile("references/user-profile-tailored.json", tailoredBytes)
 					if err != nil {
 						errorsList = append(errorsList, fmt.Sprintf("%s - %s: failed to write tailored JSON: %v", comp, role, err))
 						continue
@@ -2907,6 +3636,7 @@ Mandates:
 						fmt.Println("Warning: Could not load or generate generic cover letter template:", genErr)
 					}
 
+					clRole := stripRoleMetadata(role)
 					coverPrompt := fmt.Sprintf(`Write a professional 4-paragraph cover letter for %s for the role of "%s" at "%s".
 
 Important: Base the tone, style, and structure on the following generic template:
@@ -2926,7 +3656,7 @@ Strict Mandates:
 1. Do NOT mention where the job listing was found or reference referral sources (such as LinkedIn, Indeed, etc.).
 2. At the end of the letter, output only the sign-off 'Sincerely,' followed by the applicant's name. Do NOT output any other details (such as address, phone number, email, date, etc.) below the name or signature.
 
-Output ONLY the cover letter text, no conversational intro or outro.`, candName, role, comp, genericTemplate, role, comp, desc, string(baseProfileBytes))
+Output ONLY the cover letter text, no conversational intro or outro.`, candName, clRole, comp, genericTemplate, clRole, comp, desc, string(baseProfileBytes))
 
 					coverLetterDraftText, err := callGeminiGo(state.ApiKey, coverPrompt, false)
 					if err != nil {
@@ -2982,14 +3712,16 @@ Output ONLY the cover letter text, no conversational intro or outro.`, candName,
 		updateBtn,
 		deleteBtn,
 		tailorSelectedBtn,
+		bulkCoverLettersBtn,
 		widget.NewSeparator(),
 		trackerOpenResumeBtn,
 		trackerOpenCoverLetterBtn,
+		trackerOpenLinkBtn,
 		layout.NewSpacer(),
 	)
 
 	tableContainer := container.New(&customTableLayout{}, state.TrackerTable)
-	tableCard := widget.NewCard("Job Tracker", "Select any row cell to open resume, cover letter, or edit details from the toolbar.", tableContainer)
+	tableCard := widget.NewCard("Job Tracker", "", tableContainer)
 	cardContainer := container.NewBorder(nil, nil, nil, nil, tableCard)
 
 	return container.NewBorder(controlBar, nil, nil, nil, cardContainer)
@@ -3056,13 +3788,13 @@ func openAddJobModal(job *JobApplication, focusColumn int) {
 				// Update all fields of the selected application in-place
 				for i := range state.Applications {
 					if state.Applications[i].Company == job.Company && state.Applications[i].Role == job.Role {
-						state.Applications[i].Company = compEnt.Text
-						state.Applications[i].Role = roleEnt.Text
-						state.Applications[i].Location = locEnt.Text
-						state.Applications[i].Date = dateEnt.Text
-						state.Applications[i].Link = linkEnt.Text
+						state.Applications[i].Company = cleanText(compEnt.Text)
+						state.Applications[i].Role = cleanText(roleEnt.Text)
+						state.Applications[i].Location = cleanText(locEnt.Text)
+						state.Applications[i].Date = cleanText(dateEnt.Text)
+						state.Applications[i].Link = cleanText(linkEnt.Text)
 						state.Applications[i].Status = statusSelect.Selected
-						state.Applications[i].Notes = notesEnt.Text
+						state.Applications[i].Notes = cleanText(notesEnt.Text)
 						break
 					}
 				}
@@ -3281,7 +4013,7 @@ func tailorProfileAsync(jobDescription string, callback func(string, error)) {
 			return
 		}
 
-		prompt := fmt.Sprintf(`You are an expert resume writer. Tailor the applicant's experience bullet points and skills in the base profile JSON to align with the target job description.
+		prompt := fmt.Sprintf(`You are an expert resume writer. Rewrite ONLY the applicant's experience bullet points in the base profile JSON to align with the target job description. All other fields must be preserved verbatim.
 
 Base Profile JSON:
 %s
@@ -3290,11 +4022,11 @@ Target Job Description:
 %s
 
 Mandates:
-1. For each experience, rewrite relevant bullet points to emphasize accomplishments that align with the job requirements.
-2. YOU MUST strictly preserve all historical metrics (percentages, dollar values, size of teams) and truthfulness.
-3. Elevate and rank the most critical keywords in the skills section.
-4. Keep the exact same JSON structure. Do not add or remove jobs.
-5. Output ONLY valid JSON matching the profile schema. No explanations, no markdown blocks.`, string(baseProfileBytes), jobDescription)
+1. Rewrite ONLY the experience bullet points. Use the STAR framework (Situation, Task, Action, Result) and begin each bullet with a strong active past-tense verb.
+2. Naturally incorporate relevant keywords from the target job description into the rewritten bullets.
+3. STRICTLY preserve every quantitative metric (percentages, dollar amounts, team sizes, time periods, dates). Never fabricate, omit, or alter any number.
+4. Preserve VERBATIM: personal_info, target_roles, education, projects, skills, and every entry under additional_sections (publications, certifications, awards, etc.). Do not add, remove, reorder, or rename any field. Do not invent skills the applicant did not list. Do not create new sections.
+5. Output ONLY valid JSON with the EXACT same set of top-level and nested keys as the input. No explanations, no markdown blocks.`, string(baseProfileBytes), jobDescription)
 
 		tailoredJson, err := callGeminiGo(state.ApiKey, prompt, true)
 		if err != nil {
@@ -3302,7 +4034,12 @@ Mandates:
 			return
 		}
 
-		err = writeSecureFile("references/user-profile-tailored.json", []byte(tailoredJson))
+		tailoredBytes := []byte(tailoredJson)
+		if verr := validateTailoredProfile(baseProfileBytes, tailoredBytes); verr != nil {
+			fmt.Printf("Tailored profile guard tripped (%v) — falling back to base profile.\n", verr)
+			tailoredBytes = baseProfileBytes
+		}
+		err = writeSecureFile("references/user-profile-tailored.json", tailoredBytes)
 		if err != nil {
 			fyne.Do(func() { callback("", err) })
 			return
@@ -3492,13 +4229,27 @@ func buildSettingsTab() fyne.CanvasObject {
 		showOnboardingWizard()
 	})
 
+	// Save Folder field uses the same Quick-Jump / semantic folder picker as
+	// the rest of the app so users don't have to type filesystem paths by hand.
+	// The underlying Entry is kept (read-only) so the existing save logic that
+	// reads state.SettingsSaveFolder.Text continues to work unchanged.
+	state.SettingsSaveFolder.Disable()
+	browseFolderBtn := widget.NewButtonWithIcon("Browse / Create…", theme.FolderOpenIcon(), func() {
+		showCustomFolderPicker(state.Window, "Choose Save Folder", func(picked string) {
+			state.SettingsSaveFolder.Enable()
+			state.SettingsSaveFolder.SetText(picked)
+			state.SettingsSaveFolder.Disable()
+		})
+	})
+	saveFolderRow := container.NewBorder(nil, nil, nil, browseFolderBtn, state.SettingsSaveFolder)
+
 	// Email / IMAP credential fields are temporarily hidden from the settings
 	// form while the email-sync feature is disabled. The underlying widgets and
 	// persisted values are retained so the feature can be re-enabled later.
 	form := container.New(layout.NewFormLayout(),
 		widget.NewLabel("Gemini API Key"), state.SettingsApiKey,
 		widget.NewLabel("Gemini API Model"), state.SettingsApiModel,
-		widget.NewLabel("Save Folder"), state.SettingsSaveFolder,
+		widget.NewLabel("Save Folder"), saveFolderRow,
 	)
 
 	githubBtn := widget.NewButtonWithIcon("GitHub: /bot-bbio", theme.HelpIcon(), func() {
@@ -3537,17 +4288,21 @@ func onboardingGuideText() string {
 		"* **Step 3: Collect Job Leads**\n" +
 		"  Clip listings from job boards (LinkedIn, Indeed, etc.) directly into your **Job Leads** inbox using our browser tools. Review them and add the ones you like to your tracker.\n" +
 		"* **Step 4: Track Your Applications**\n" +
-		"  Use the **Job Tracker** to manage every application's status, open saved documents, and keep your search organized from wishlist to offer."
+		"  Use the **Job Tracker** to manage every application's status, open saved documents, and keep your search organized from wishlist to offer.\n\n" +
+		"### ✅ Best Practices\n" +
+		"* **Recommended Model**\n" +
+		"  Use **gemini-3.1-flash-lite** as your default model. It offers the highest rate limits and quotas plus the fastest response times, which matters most during bulk operations.\n" +
+		"* **Mass Application Workflows**\n" +
+		"  * *Clipper Workflow*: Clip job postings straight into your **Job Leads** inbox as you browse, then review and add the strongest matches to your tracker in one pass.\n" +
+		"  * *CSV Workflow*: Build a CSV file with job URLs in the first column, load them all at once with the **Bulk Import** button in the Job Tracker, then update statuses as your applications progress."
 }
 
 // 7. HELP & DOCUMENTATION VIEW
-func buildHelpTab() fyne.CanvasObject {
-	// Create markdown widgets for each documentation section
-	onboardingRichText := widget.NewRichTextFromMarkdown(onboardingGuideText())
-	onboardingRichText.Wrapping = fyne.TextWrapWord
-
-	// Bookmarklet configuration
-	bookmarkletJs := fmt.Sprintf(`javascript:(function(){
+// generateBookmarkletJS returns the clipper bookmarklet JavaScript formatted
+// with the active clip server port and auth token. Shared by the Help tab and
+// the setup wizard so both stay in sync.
+func generateBookmarkletJS() string {
+	return fmt.Sprintf(`javascript:(function(){
   var h=window.location.hostname,p=window.location.href,c='',r='',l='',d='';
   try{
     if(h.includes('linkedin.com')){
@@ -3673,6 +4428,15 @@ func buildHelpTab() fyne.CanvasObject {
       if(!w){alert('\u274C Clip failed: Popup was blocked!\n\nTo allow job clipping on this site:\n1. Click the blocked popup icon in your browser address bar.\n2. Select \"Always allow popups and redirects from \" + window.location.origin + \".\n3. Click Done and try clipping again.\n\nAlso make sure LeGaJ is running and open.');}
     });
 })();`, activePort, clipAuthToken, activePort, clipAuthToken)
+}
+
+func buildHelpTab() fyne.CanvasObject {
+	// Create markdown widgets for each documentation section
+	onboardingRichText := widget.NewRichTextFromMarkdown(onboardingGuideText())
+	onboardingRichText.Wrapping = fyne.TextWrapWord
+
+	// Bookmarklet configuration
+	bookmarkletJs := generateBookmarkletJS()
 
 	bookmarkletEntry := widget.NewEntry()
 	bookmarkletEntry.SetText(bookmarkletJs)
@@ -3726,7 +4490,7 @@ func buildHelpTab() fyne.CanvasObject {
 		"#### 📂 File & Folder Structure\n" +
 		"* **\\x60references/user-profile.json\\x60**: Holds your editable base profile.\n" +
 		"* **\\x60references/job-tracker.json\\x60**: Contains your tracked job applications.\n" +
-		"* **\\x60outputs/\\x60**: Folder where tailored PDFs, Anki decks, and cheatsheets are compiled.\n\n" +
+		"* **\\x60outputs/\\x60**: Folder where generated PDFs are compiled.\n\n" +
 		"#### 💡 Common Issues & Fixes\n" +
 		"* **Bookmarklet not responding?** Make sure LeGaJ is open and running. Check browser address bar for blocked pop-ups.\n" +
 		"* **HTTPS/Mixed Content error?** Modern browsers restrict local HTTP connections from HTTPS web pages. Use the unpacked Chrome/Edge extension.\n" +
@@ -3745,13 +4509,14 @@ func buildHelpTab() fyne.CanvasObject {
 	securityRichText := widget.NewRichTextFromMarkdown(securityMd)
 	securityRichText.Wrapping = fyne.TextWrapWord
 
-	// Accordion layout
+	// Accordion layout. Each section's body is wrapped in NewPadded so the
+	// markdown doesn't crowd the accordion frame on either side (Bug 11).
 	accordion := widget.NewAccordion(
-		widget.NewAccordionItem("1. Step-by-Step Onboarding Guide", onboardingRichText),
-		widget.NewAccordionItem("2. Browser Clipper Bookmarklet", bookmarkletBox),
-		widget.NewAccordionItem("3. Chrome/Edge Extension Setup", extensionRichText),
-		widget.NewAccordionItem("4. Troubleshooting & File Locations", troubleshootRichText),
-		widget.NewAccordionItem("5. Security & Ethics Disclosure", securityRichText),
+		widget.NewAccordionItem("1. Step-by-Step Onboarding Guide", container.NewPadded(onboardingRichText)),
+		widget.NewAccordionItem("2. Browser Clipper Bookmarklet", container.NewPadded(bookmarkletBox)),
+		widget.NewAccordionItem("3. Chrome/Edge Extension Setup", container.NewPadded(extensionRichText)),
+		widget.NewAccordionItem("4. Troubleshooting & File Locations", container.NewPadded(troubleshootRichText)),
+		widget.NewAccordionItem("5. Security & Ethics Disclosure", container.NewPadded(securityRichText)),
 	)
 	accordion.MultiOpen = true
 	accordion.Open(0)
@@ -3784,12 +4549,12 @@ func buildHelpTab() fyne.CanvasObject {
 			warningLabel,
 		),
 		widget.NewSeparator(),
-		accordion,
+		container.NewPadded(accordion),
 		widget.NewSeparator(),
 		creditsRow,
 	)
 
-	return container.NewScroll(content)
+	return container.NewScroll(container.NewPadded(content))
 }
 
 // ensureGenericCoverLetter acts as a backend-only skill to generate and cache a generic cover letter template
@@ -3917,6 +4682,332 @@ func getWindowsDrives() []string {
 }
 
 // showCustomFilePicker opens a custom folder/file selector dialog window styled like the File Manager tab.
+// offerWorkspaceSetup runs after a successful résumé parse. When the user has
+// not yet chosen a real Save Folder, it suggests creating a LeGaJ Workspace at
+// ~/Documents/LeGaJ Workspace and copying the source résumé there for safe
+// keeping. When the workspace is already configured, it just shows a brief
+// success notice. The actual work runs on the main thread via fyne.Do so the
+// dialog hierarchy is consistent with the rest of the import flow.
+func offerWorkspaceSetup(sourceResumePath string) {
+	needsSetup := state.SaveFolder == "" || state.SaveFolder == "." || state.SaveFolder == "outputs"
+	fyne.Do(func() {
+		if !needsSetup {
+			dialog.ShowInformation("Parse Complete", "Successfully parsed and structured résumé using Gemini AI!", state.Window)
+			return
+		}
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			dialog.ShowInformation("Parse Complete", "Successfully parsed and structured résumé using Gemini AI!\n\n(Could not locate your home folder to suggest a workspace — set one manually in Settings.)", state.Window)
+			return
+		}
+		suggested := filepath.Join(home, "Documents", "LeGaJ Workspace")
+		msg := fmt.Sprintf("Résumé parsed successfully.\n\nCreate a LeGaJ Workspace at:\n  %s\n\nA copy of your résumé will be saved there, and all generated résumés and cover letters will be stored in this folder.\n\nCreate workspace and save a copy now? (Recommended)", suggested)
+		dialog.ShowConfirm("Set Up LeGaJ Workspace", msg, func(ok bool) {
+			if !ok {
+				return
+			}
+			if err := os.MkdirAll(suggested, 0755); err != nil {
+				dialog.ShowError(fmt.Errorf("could not create workspace folder: %v", err), state.Window)
+				return
+			}
+			if copyErr := copyFileTo(sourceResumePath, suggested); copyErr != nil {
+				// Non-fatal: workspace was created; surface the copy failure
+				// but keep the workspace configured.
+				dialog.ShowError(fmt.Errorf("workspace created, but copying résumé failed: %v", copyErr), state.Window)
+			}
+			state.SaveFolder = suggested
+			if saveErr := saveConfigurations(); saveErr != nil {
+				dialog.ShowError(fmt.Errorf("workspace created, but saving settings failed: %v", saveErr), state.Window)
+				return
+			}
+			dialog.ShowInformation("Workspace Ready", fmt.Sprintf("LeGaJ Workspace is set to:\n  %s\n\nYou can change this in Settings.", suggested), state.Window)
+		}, state.Window)
+	})
+}
+
+// copyFileTo copies src into destDir, keeping the original filename. Returns
+// an error if src cannot be opened, destDir cannot be written to, or the copy
+// itself fails.
+func copyFileTo(src, destDir string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	dest := filepath.Join(destDir, filepath.Base(src))
+	out, err := os.Create(dest)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return nil
+}
+
+// knownFolder is a one-click shortcut surfaced at the top of the file picker.
+// Path is empty when the folder is not present on the current machine — those
+// entries are filtered out before rendering.
+type knownFolder struct {
+	Label string
+	Path  string
+}
+
+// resolveKnownFolders enumerates the shortcuts the picker offers in its
+// "Quick Jump" row. Order matters: most-likely targets first. Folders that do
+// not exist on the current machine (e.g. OneDrive on a non-OneDrive box) are
+// dropped so we never surface a dead shortcut.
+func resolveKnownFolders() []knownFolder {
+	home, _ := os.UserHomeDir()
+	candidates := []knownFolder{
+		{Label: "Home", Path: home},
+		{Label: "Desktop", Path: filepath.Join(home, "Desktop")},
+		{Label: "Documents", Path: filepath.Join(home, "Documents")},
+		{Label: "Downloads", Path: filepath.Join(home, "Downloads")},
+		{Label: "OneDrive", Path: filepath.Join(home, "OneDrive")},
+		{Label: "OneDrive Documents", Path: filepath.Join(home, "OneDrive", "Documents")},
+		{Label: "OneDrive Desktop", Path: filepath.Join(home, "OneDrive", "Desktop")},
+	}
+	// Append LeGaJ workspace if it has been configured to a real folder
+	// (i.e. not the default "outputs" / "." sentinel paths).
+	if state.SaveFolder != "" && state.SaveFolder != "outputs" && state.SaveFolder != "." {
+		if info, err := os.Stat(state.SaveFolder); err == nil && info.IsDir() {
+			candidates = append(candidates, knownFolder{Label: "LeGaJ Workspace", Path: state.SaveFolder})
+		}
+	}
+
+	var out []knownFolder
+	seen := make(map[string]bool)
+	for _, k := range candidates {
+		if k.Path == "" || seen[k.Path] {
+			continue
+		}
+		if info, err := os.Stat(k.Path); err != nil || !info.IsDir() {
+			continue
+		}
+		seen[k.Path] = true
+		out = append(out, k)
+	}
+	return out
+}
+
+// matchKnownFolder maps a search keyword to a known-folder path. Returns the
+// resolved path and true on match. Matching is prefix-based and
+// case-insensitive ("desk" → Desktop, "doc" → Documents, "down" → Downloads,
+// "one" → OneDrive, "home" / "user" → Home, "work" / "legaj" → Workspace).
+func matchKnownFolder(query string) (string, bool) {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return "", false
+	}
+	folders := resolveKnownFolders()
+	for _, f := range folders {
+		label := strings.ToLower(f.Label)
+		if strings.HasPrefix(label, q) || strings.Contains(label, q) {
+			return f.Path, true
+		}
+	}
+	// Synonyms for common asks.
+	synonyms := map[string]string{
+		"user":   "Home",
+		"work":   "LeGaJ Workspace",
+		"legaj":  "LeGaJ Workspace",
+		"cloud":  "OneDrive",
+	}
+	if target, ok := synonyms[q]; ok {
+		for _, f := range folders {
+			if f.Label == target {
+				return f.Path, true
+			}
+		}
+	}
+	return "", false
+}
+
+// showCustomFolderPicker is the folder-selection sibling of showCustomFilePicker.
+// It reuses the same Quick Jump shortcuts and semantic path-bar typing so the
+// experience matches across "pick a file" and "pick a folder" flows. The user
+// confirms a directory with the prominent "Select This Folder" button — files
+// in the listing are hidden because they are not selectable here.
+//
+// A "Create LeGaJ Workspace" affordance is offered when the workspace folder
+// does not yet exist; this lets the user provision the recommended folder
+// directly from the picker instead of having to switch to Explorer.
+func showCustomFolderPicker(parentWindow fyne.Window, title string, onSelect func(string)) {
+	pickerWin := state.App.NewWindow(title)
+	pickerWin.Resize(fyne.NewSize(580, 460))
+
+	currentDir := state.SaveFolder
+	if currentDir == "" || currentDir == "outputs" || currentDir == "." {
+		if home, err := os.UserHomeDir(); err == nil {
+			currentDir = home
+		} else {
+			currentDir = "."
+		}
+	}
+	currentDir = filepath.Clean(currentDir)
+
+	pathEntry := widget.NewEntry()
+	pathEntry.SetText(currentDir)
+
+	explorerBox := container.NewVBox()
+
+	var refreshPicker func()
+	refreshPicker = func() {
+		if currentDir == "Drives" {
+			pathEntry.SetText("My Computer (Drives)")
+			explorerBox.Objects = nil
+			for _, dr := range getWindowsDrives() {
+				drName := dr
+				row := container.NewHBox(widget.NewIcon(theme.FolderIcon()), widget.NewLabel(drName), layout.NewSpacer())
+				btn := widget.NewButtonWithIcon("Open", theme.FolderIcon(), func() {
+					currentDir = drName
+					refreshPicker()
+				})
+				row.Add(btn)
+				explorerBox.Add(row)
+			}
+			explorerBox.Refresh()
+			return
+		}
+		currentDir = filepath.Clean(currentDir)
+		pathEntry.SetText(currentDir)
+
+		entries, err := os.ReadDir(currentDir)
+		if err != nil {
+			explorerBox.Objects = []fyne.CanvasObject{widget.NewLabel(fmt.Sprintf("Error reading dir: %v", err))}
+			explorerBox.Refresh()
+			return
+		}
+
+		explorerBox.Objects = nil
+		shown := 0
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), ".") || !entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			displayName := name
+			if len(displayName) > 50 {
+				displayName = displayName[:47] + "..."
+			}
+			row := container.NewHBox(widget.NewIcon(theme.FolderIcon()), widget.NewLabel(displayName), layout.NewSpacer())
+			openBtn := widget.NewButtonWithIcon("Open", theme.FolderIcon(), func() {
+				currentDir = filepath.Join(currentDir, name)
+				refreshPicker()
+			})
+			row.Add(openBtn)
+			explorerBox.Add(row)
+			shown++
+		}
+		if shown == 0 {
+			explorerBox.Add(widget.NewLabel("(no subfolders here — use 'Select This Folder' to pick the current location)"))
+		}
+		explorerBox.Refresh()
+	}
+
+	pathEntry.OnSubmitted = func(text string) {
+		text = strings.TrimSpace(text)
+		if text == "My Computer (Drives)" || strings.ToLower(text) == "drives" {
+			currentDir = "Drives"
+			refreshPicker()
+			return
+		}
+		if match, ok := matchKnownFolder(text); ok {
+			currentDir = match
+			refreshPicker()
+			return
+		}
+		cleanPath := filepath.Clean(text)
+		if info, err := os.Stat(cleanPath); err == nil && info.IsDir() {
+			currentDir = cleanPath
+			refreshPicker()
+		} else {
+			dialog.ShowError(fmt.Errorf("Invalid directory or shortcut: %s\n\nTry a path, or a keyword like 'desktop', 'documents', 'downloads', 'home'.", text), pickerWin)
+			pathEntry.SetText(currentDir)
+		}
+	}
+
+	backBtn := widget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() {
+		if currentDir == "Drives" {
+			return
+		}
+		parent := filepath.Dir(currentDir)
+		if parent == currentDir {
+			if len(getWindowsDrives()) > 0 {
+				currentDir = "Drives"
+			}
+			refreshPicker()
+		} else {
+			currentDir = parent
+			refreshPicker()
+		}
+	})
+	refreshBtn := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), func() { refreshPicker() })
+
+	pathRow := container.NewBorder(nil, nil, container.NewHBox(backBtn, refreshBtn), nil, pathEntry)
+
+	// Quick Jump shortcuts mirror the file picker so users can hop between
+	// common locations without manual navigation.
+	shortcutsRow := container.NewHBox()
+	for _, f := range resolveKnownFolders() {
+		target := f.Path
+		btn := widget.NewButtonWithIcon(f.Label, theme.FolderIcon(), func() {
+			currentDir = target
+			refreshPicker()
+		})
+		shortcutsRow.Add(btn)
+	}
+	if drives := getWindowsDrives(); len(drives) > 0 {
+		btn := widget.NewButtonWithIcon("Drives", theme.ComputerIcon(), func() {
+			currentDir = "Drives"
+			refreshPicker()
+		})
+		shortcutsRow.Add(btn)
+	}
+
+	hint := widget.NewLabelWithStyle("Tip: type a keyword (desktop, documents, downloads, home) into the path bar to jump directly.", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+
+	selectThisBtn := widget.NewButtonWithIcon("Select This Folder", theme.ConfirmIcon(), func() {
+		if currentDir == "Drives" {
+			dialog.ShowInformation("Pick a Folder", "Open a drive first, then choose a folder inside it.", pickerWin)
+			return
+		}
+		onSelect(currentDir)
+		pickerWin.Close()
+	})
+	selectThisBtn.Importance = widget.HighImportance
+
+	createWorkspaceBtn := widget.NewButtonWithIcon("Create LeGaJ Workspace Here", theme.ContentAddIcon(), func() {
+		if currentDir == "Drives" {
+			dialog.ShowError(fmt.Errorf("open a folder first"), pickerWin)
+			return
+		}
+		ws := filepath.Join(currentDir, "LeGaJ Workspace")
+		if err := os.MkdirAll(ws, 0755); err != nil {
+			dialog.ShowError(fmt.Errorf("could not create workspace folder: %v", err), pickerWin)
+			return
+		}
+		currentDir = ws
+		refreshPicker()
+	})
+
+	actionRow := container.NewHBox(selectThisBtn, createWorkspaceBtn, layout.NewSpacer())
+
+	toolbar := container.NewVBox(
+		pathRow,
+		container.NewHScroll(shortcutsRow),
+		hint,
+		actionRow,
+	)
+
+	scroll := container.NewVScroll(explorerBox)
+	pickerWin.SetContent(container.NewBorder(toolbar, nil, nil, nil, scroll))
+	refreshPicker()
+	pickerWin.Show()
+}
+
 func showCustomFilePicker(parentWindow fyne.Window, title string, allowedExts []string, onSelect func(string)) {
 	pickerWin := state.App.NewWindow(title)
 	pickerWin.Resize(fyne.NewSize(550, 420))
@@ -4053,12 +5144,20 @@ func showCustomFilePicker(parentWindow fyne.Window, title string, allowedExts []
 			refreshPicker()
 			return
 		}
+		// Semantic shortcut: typing a keyword like "desktop" / "documents"
+		// jumps to the matching well-known folder without requiring the
+		// full filesystem path.
+		if match, ok := matchKnownFolder(text); ok {
+			currentDir = match
+			refreshPicker()
+			return
+		}
 		cleanPath := filepath.Clean(text)
 		if info, err := os.Stat(cleanPath); err == nil && info.IsDir() {
 			currentDir = cleanPath
 			refreshPicker()
 		} else {
-			dialog.ShowError(fmt.Errorf("Invalid directory path: %s", text), pickerWin)
+			dialog.ShowError(fmt.Errorf("Invalid directory or shortcut: %s\n\nTry a path, or a keyword like 'desktop', 'documents', 'downloads', 'home'.", text), pickerWin)
 			pathEntry.SetText(currentDir)
 		}
 	}
@@ -4083,12 +5182,39 @@ func showCustomFilePicker(parentWindow fyne.Window, title string, allowedExts []
 		refreshPicker()
 	})
 
-	toolbar := container.NewBorder(
+	pathRow := container.NewBorder(
 		nil,
 		nil,
 		container.NewHBox(backBtn, refreshBtn),
 		nil,
 		pathEntry,
+	)
+
+	// Quick Jump shortcuts: one-click access to common destinations so users
+	// don't have to navigate the whole filesystem to reach Desktop/Documents.
+	shortcutsRow := container.NewHBox()
+	for _, f := range resolveKnownFolders() {
+		target := f.Path
+		btn := widget.NewButtonWithIcon(f.Label, theme.FolderIcon(), func() {
+			currentDir = target
+			refreshPicker()
+		})
+		shortcutsRow.Add(btn)
+	}
+	if drives := getWindowsDrives(); len(drives) > 0 {
+		btn := widget.NewButtonWithIcon("Drives", theme.ComputerIcon(), func() {
+			currentDir = "Drives"
+			refreshPicker()
+		})
+		shortcutsRow.Add(btn)
+	}
+
+	hint := widget.NewLabelWithStyle("Tip: type a keyword (desktop, documents, downloads, home) into the path bar to jump directly.", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+
+	toolbar := container.NewVBox(
+		pathRow,
+		container.NewHScroll(shortcutsRow),
+		hint,
 	)
 
 	scroll := container.NewVScroll(explorerBox)
@@ -4143,13 +5269,9 @@ func showOnboardingWizard() {
 	saveFolderLabel := widget.NewLabel(state.SaveFolder)
 	saveFolderLabel.Wrapping = fyne.TextWrapOff
 	selectFolderBtn := widget.NewButtonWithIcon("Choose Save Folder", theme.FolderOpenIcon(), func() {
-		od := dialog.NewFolderOpen(func(list fyne.ListableURI, err error) {
-			if err != nil || list == nil {
-				return
-			}
-			saveFolderLabel.SetText(list.Path())
-		}, wizardWindow)
-		od.Show()
+		showCustomFolderPicker(wizardWindow, "Choose Save Folder", func(picked string) {
+			saveFolderLabel.SetText(picked)
+		})
 	})
 
 	progressLabelConn := widget.NewLabel("Connections not verified yet.")
@@ -4252,17 +5374,22 @@ func showOnboardingWizard() {
 	)
 
 	// Step 4: Resume Tailoring Preferences (Added Step)
+	const (
+		strategyLabelNone     = "Base Résumé (No Tailoring)"
+		strategyLabelIndustry = "Role-Targeted (Tailor Once)"
+		strategyLabelJob      = "Per-Posting (ATS-Optimized) — Recommended"
+	)
 	tailoringStrategySelect := widget.NewSelect([]string{
-		"Not at all",
-		"For every industry/role as a whole",
-		"By specific job descriptions",
+		strategyLabelNone,
+		strategyLabelIndustry,
+		strategyLabelJob,
 	}, func(selected string) {
 		switch selected {
-		case "Not at all":
+		case strategyLabelNone:
 			state.TailoringStrategy = "none"
-		case "For every industry/role as a whole":
+		case strategyLabelIndustry:
 			state.TailoringStrategy = "industry"
-		case "By specific job descriptions":
+		case strategyLabelJob:
 			state.TailoringStrategy = "job"
 		}
 	})
@@ -4271,24 +5398,24 @@ func showOnboardingWizard() {
 	}
 	switch state.TailoringStrategy {
 	case "none":
-		tailoringStrategySelect.SetSelected("Not at all")
+		tailoringStrategySelect.SetSelected(strategyLabelNone)
 	case "industry":
-		tailoringStrategySelect.SetSelected("For every industry/role as a whole")
+		tailoringStrategySelect.SetSelected(strategyLabelIndustry)
 	default:
-		tailoringStrategySelect.SetSelected("By specific job descriptions")
+		tailoringStrategySelect.SetSelected(strategyLabelJob)
 	}
 
 	step4 := container.NewVBox(
 		widget.NewLabelWithStyle("Step 4: Resume Tailoring Preferences", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-		widget.NewLabel("Choose how LeGaJ should tailor your resume for applications:"),
+		widget.NewLabel("Choose how LeGaJ should tailor your résumé for applications:"),
 		widget.NewSeparator(),
 		container.New(layout.NewFormLayout(),
 			widget.NewLabel("Tailoring Strategy"), tailoringStrategySelect,
 		),
 		widget.NewLabel("Options explained:"),
-		widget.NewLabel("- Not at all: Keep your base resume exactly as is."),
-		widget.NewLabel("- For every industry/role: Tailor it once for your target role in general."),
-		widget.NewLabel("- By specific job descriptions: Dynamically tailor your resume for each job description."),
+		widget.NewLabel("- Base Résumé (No Tailoring): Submit your master résumé unchanged for every application."),
+		widget.NewLabel("- Role-Targeted (Tailor Once): Optimize your résumé a single time for your primary target role, then reuse it."),
+		widget.NewLabel("- Per-Posting (ATS-Optimized): Dynamically rewrite bullet points against each job description's keywords for maximum ATS match."),
 	)
 
 	// Step 5: Cover Letter Template Setup
@@ -4393,46 +5520,36 @@ func showOnboardingWizard() {
 		clStatusLabel,
 	)
 
-	// Step 6: Verification (Test Search)
-	testSearchLabel := widget.NewLabel("Verification not run yet.")
-	testSearchLabel.Wrapping = fyne.TextWrapWord
-	testSearchScroll := container.NewVScroll(testSearchLabel)
-	testSearchScroll.SetMinSize(fyne.NewSize(500, 150))
+	// Step 6: Browser Job Clipper Setup
+	wizardBookmarkletJs := generateBookmarkletJS()
+	absExtensionPath, _ := filepath.Abs("extension")
+	wizardClipperMd := "### 📎 Setup Browser Job Clipper\n" +
+		"LeGaJ allows you to clip job listings directly from LinkedIn, Indeed, Greenhouse, Lever, Workday, Ashby, and iCIMS using browser tools.\n\n" +
+		"#### Option A: Bookmarklet Tool (Quickest)\n" +
+		"1. Click the **Copy Bookmarklet Code** button below.\n" +
+		"2. Ensure your bookmarks bar is visible (`Ctrl+Shift+B` or `Cmd+Shift+B`).\n" +
+		"3. Right-click the bookmarks bar, select **Add page** or **Add bookmark**.\n" +
+		"4. Name it **Clip to LeGaJ** and paste the copied code into the **URL / Address** field.\n\n" +
+		"---\n\n" +
+		"#### Option B: Chrome/Edge Extension\n" +
+		"1. Open `chrome://extensions` or `edge://extensions` in your browser.\n" +
+		"2. Enable the **Developer mode** toggle (top-right).\n" +
+		"3. Click **Load unpacked** and select the extension directory:\n" +
+		"   `" + absExtensionPath + "`"
 
-	runTestSearchBtn := widget.NewButton("Run Grounding test search", func() {
-		testSearchLabel.SetText("Running grounding search test query via Google Grounding...")
-		go func() {
-			testQuery := fmt.Sprintf(`Search Google briefly for 1 job listing matching "%s" in "%s". Return only a JSON array with company, role, location, link, description.`, roleEntry.Text, locEntry.Text)
-			res, err := callGeminiWithSearchGo(apiKeyEntry.Text, testQuery)
-			fyne.Do(func() {
-				if err != nil {
-					testSearchLabel.SetText(fmt.Sprintf("⚠️ Grounding search failed: %v.\nRunning fallback verification check to verify API key...", err))
-					go func() {
-						fallbackRes, fallbackErr := callGeminiGo(apiKeyEntry.Text, "Say Hi", false)
-						fyne.Do(func() {
-							if fallbackErr != nil {
-								testSearchLabel.SetText(fmt.Sprintf("✗ Both grounding search and fallback checks failed.\nGrounding error: %v\nFallback error: %v\n\nPlease check your API key in Step 1.", err, fallbackErr))
-								nextBtn.Disable()
-							} else {
-								testSearchLabel.SetText(fmt.Sprintf("✓ API Key is valid (Grounding search failed/limited).\nStandard response: %s\n\nYou can finish setup now.", fallbackRes))
-								nextBtn.Enable()
-							}
-						})
-					}()
-				} else {
-					testSearchLabel.SetText(fmt.Sprintf("✓ Grounding verification successful!\nRaw output:\n%s", res))
-					nextBtn.Enable()
-				}
-			})
-		}()
+	wizardClipperRichText := widget.NewRichTextFromMarkdown(wizardClipperMd)
+	wizardClipperRichText.Wrapping = fyne.TextWrapWord
+
+	wizardCopyBtn := widget.NewButtonWithIcon("Copy Bookmarklet Code", theme.ContentCopyIcon(), func() {
+		wizardWindow.Clipboard().SetContent(wizardBookmarkletJs)
+		dialog.ShowInformation("Copied!", "Bookmarklet code copied to clipboard.", wizardWindow)
 	})
+	wizardCopyBtn.Importance = widget.HighImportance
 
 	step6 := container.NewVBox(
-		widget.NewLabelWithStyle("Step 6: Search Grounding Verification", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-		widget.NewLabel("Verify that Google Search Grounding is fully active and returns listings:"),
+		wizardClipperRichText,
 		widget.NewSeparator(),
-		runTestSearchBtn,
-		testSearchScroll,
+		container.NewHBox(wizardCopyBtn, layout.NewSpacer()),
 	)
 
 	stepContainer := container.NewMax(step1)
@@ -4467,8 +5584,8 @@ func showOnboardingWizard() {
 			skipBtn.SetText("Skip Wizard")
 		} else if currentStep == 6 {
 			backBtn.Enable()
+			nextBtn.Enable() // No verification gate; clipper setup is informational
 			nextBtn.SetText("Finish Setup")
-			nextBtn.Disable() // Disabled until grounding test runs successfully
 			skipBtn.SetText("Skip Step")
 		}
 	}
@@ -4476,6 +5593,10 @@ func showOnboardingWizard() {
 	// showStep switches the visible wizard panel to the given 1-based step.
 	showStep := func(n int) {
 		var panel fyne.CanvasObject
+		// Skip past Step 4 (tailoring strategy) when the feature is disabled.
+		if !resumeTailoringEnabled && n == 4 {
+			n = 5
+		}
 		switch n {
 		case 1:
 			panel = step1
@@ -4501,7 +5622,7 @@ func showOnboardingWizard() {
 		nav := &wizardNavigator{currentStep: currentStep, totalSteps: 6}
 		nextStep, shouldClose := nav.skip()
 		if shouldClose {
-			dialog.ShowInformation("Setup Finished", "Profile and connectivity setup complete (grounding verification skipped).", wizardWindow)
+			dialog.ShowInformation("Setup Finished", "Profile and connectivity setup complete. You can configure the browser clipper anytime from the Help tab.", wizardWindow)
 			reloadAllViews()
 			wizardWindow.Close()
 			return
@@ -4659,6 +5780,18 @@ Resume Text:
 
 			saveProfileData()
 
+			// Step 4 (tailoring strategy) is hidden while resume tailoring is
+			// disabled — jump straight to Step 5 (cover letter setup).
+			if !resumeTailoringEnabled {
+				state.TailoringStrategy = "none"
+				saveConfigurations()
+				currentStep = 5
+				stepContainer.Objects = []fyne.CanvasObject{step5_cl}
+				stepContainer.Refresh()
+				updateButtons()
+				return
+			}
+
 			currentStep = 4
 			stepContainer.Objects = []fyne.CanvasObject{step4}
 			stepContainer.Refresh()
@@ -4697,7 +5830,11 @@ Resume Text:
 				updateButtons()
 			}
 		} else if currentStep == 6 {
-			dialog.ShowInformation("Setup Finished", "Profile and connectivity verification complete!", wizardWindow)
+			doneMsg := "Setup complete! You're ready to start tracking and tailoring applications."
+			if !resumeTailoringEnabled {
+				doneMsg = "Setup complete! You're ready to start tracking applications."
+			}
+			dialog.ShowInformation("Setup Finished", doneMsg, wizardWindow)
 			reloadAllViews()
 			wizardWindow.Close()
 		}
@@ -4731,6 +5868,15 @@ Resume Text:
 			stepContainer.Refresh()
 			updateButtons()
 		}
+
+		// Back from step 5 lands on step 3 when tailoring is disabled
+		// (step 4 is skipped in the forward direction).
+		if !resumeTailoringEnabled && currentStep == 4 {
+			currentStep = 3
+			stepContainer.Objects = []fyne.CanvasObject{step3}
+			stepContainer.Refresh()
+			updateButtons()
+		}
 	}
 
 	wizardWindow.SetContent(container.NewBorder(
@@ -4754,7 +5900,18 @@ func runTrackAndTailorAutomation(company, role, location, link, desc string) {
 	role = titleSanitizerRegex.ReplaceAllString(role, "")
 	role = strings.TrimSpace(role)
 
-	progress := dialog.NewProgressInfinite("Pipeline Automating", "Tracking row, tailoring resume, drafting cover letter, compiling PDFs...", state.Window)
+	// Resume tailoring is gated by resumeTailoringEnabled. When disabled, the
+	// pipeline skips resume tailoring AND resume PDF compilation entirely —
+	// the user's base resume is already what they'd attach, so generating a
+	// duplicate copy serves no purpose. The pipeline still tracks the row and
+	// drafts the cover letter.
+	progressMsg := "Tracking row, drafting cover letter, compiling cover letter PDF..."
+	tailoringStrategy := "none"
+	if resumeTailoringEnabled {
+		progressMsg = "Tracking row, tailoring resume, drafting cover letter, compiling PDFs..."
+		tailoringStrategy = state.TailoringStrategy
+	}
+	progress := dialog.NewProgressInfinite("Pipeline Automating", progressMsg, state.Window)
 	progress.Show()
 
 	go func() {
@@ -4772,11 +5929,19 @@ func runTrackAndTailorAutomation(company, role, location, link, desc string) {
 		}
 
 		// 1. Add to excel tracker
-		resumePdfName := fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(company, " ", "_"))
+		resumeNamePattern := "%s_Resume_Tailored.pdf"
+		notesText := "Auto-tailored and tracked."
+		if !resumeTailoringEnabled {
+			// Reference the user's base resume file name directly so the
+			// tracker row still points at something openable, even though
+			// the pipeline does not compile a new resume PDF in this mode.
+			resumeNamePattern = "%s_Resume.pdf"
+			notesText = "Auto-tracked. Cover letter generated; attach your base resume."
+		}
+		resumePdfName := fmt.Sprintf(resumeNamePattern, strings.ReplaceAll(company, " ", "_"))
 		coverLetterPdfName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(company, " ", "_"))
 
-		_, err := RunManageApplications("add", company, role, location, link, resumePdfName, coverLetterPdfName, "Auto-tailored and tracked.")
-		if err != nil {
+		if err := addApplicationGo(company, role, location, link, "Applied", resumePdfName, coverLetterPdfName, notesText); err != nil {
 			fyne.Do(func() {
 				progress.Hide()
 				dialog.ShowError(err, state.Window)
@@ -4784,7 +5949,8 @@ func runTrackAndTailorAutomation(company, role, location, link, desc string) {
 			return
 		}
 
-		// 2. Tailor resume JSON
+		// Load the base profile once for both the (optional) tailoring step
+		// and the cover-letter prompt below.
 		baseProfileBytes, err := os.ReadFile("references/user-profile.json")
 		if err != nil {
 			fyne.Do(func() {
@@ -4794,24 +5960,30 @@ func runTrackAndTailorAutomation(company, role, location, link, desc string) {
 			return
 		}
 
-		if state.TailoringStrategy == "none" {
-			// Not at all: Copy references/user-profile.json directly to references/user-profile-tailored.json
-			err = writeSecureFile("references/user-profile-tailored.json", baseProfileBytes)
-			if err != nil {
-				fyne.Do(func() {
-					progress.Hide()
-					dialog.ShowError(err, state.Window)
-				})
-				return
-			}
-		} else {
-			var tailorPrompt string
-			if state.TailoringStrategy == "industry" {
+		// Steps 2 + 3 (tailor JSON, compile resume PDF) are skipped wholesale
+		// when resume tailoring is disabled — generating a duplicate of the
+		// base resume PDF on every clip produced clutter with no value.
+		var resumeOutputPath string
+		if resumeTailoringEnabled {
+			// 2. Tailor resume JSON
+			if tailoringStrategy == "none" {
+				// Copy base profile directly to the tailored slot.
+				err = writeSecureFile("references/user-profile-tailored.json", baseProfileBytes)
+				if err != nil {
+					fyne.Do(func() {
+						progress.Hide()
+						dialog.ShowError(err, state.Window)
+					})
+					return
+				}
+			} else {
+				var tailorPrompt string
+				if tailoringStrategy == "industry" {
 				targetRole := role
 				if len(state.Profile.TargetRoles) > 0 && state.Profile.TargetRoles[0] != "" {
 					targetRole = state.Profile.TargetRoles[0]
 				}
-				tailorPrompt = fmt.Sprintf(`You are an expert resume writer. Tailor the applicant's experience bullet points and skills in the base profile JSON to align with the target job role/industry as a whole.
+				tailorPrompt = fmt.Sprintf(`You are an expert resume writer. Rewrite ONLY the applicant's experience bullet points in the base profile JSON to align with the target job role/industry as a whole. All other fields must be preserved verbatim.
 
 Base Profile JSON:
 %s
@@ -4820,13 +5992,13 @@ Target Job Role/Industry:
 %s
 
 Mandates:
-1. For each experience, rewrite relevant bullet points to emphasize accomplishments that align with the target job role.
-2. YOU MUST strictly preserve all historical metrics (percentages, dollar values, size of teams) and truthfulness.
-3. Elevate and rank the most critical keywords in the skills section.
-4. Keep the exact same JSON structure. Do not add or remove jobs.
-5. Output ONLY valid JSON matching the profile schema. No explanations, no markdown blocks.`, string(baseProfileBytes), targetRole)
+1. Rewrite ONLY the experience bullet points. Use the STAR framework (Situation, Task, Action, Result) and begin each bullet with a strong active past-tense verb.
+2. Naturally incorporate relevant keywords for the target job role/industry into the rewritten bullets.
+3. STRICTLY preserve every quantitative metric (percentages, dollar amounts, team sizes, time periods, dates). Never fabricate, omit, or alter any number.
+4. Preserve VERBATIM: personal_info, target_roles, education, projects, skills, and every entry under additional_sections (publications, certifications, awards, etc.). Do not add, remove, reorder, or rename any field. Do not invent skills the applicant did not list. Do not create new sections.
+5. Output ONLY valid JSON with the EXACT same set of top-level and nested keys as the input. No explanations, no markdown blocks.`, string(baseProfileBytes), targetRole)
 			} else { // "job" or default
-				tailorPrompt = fmt.Sprintf(`You are an expert resume writer. Tailor the applicant's experience bullet points and skills in the base profile JSON to align with the target job description.
+				tailorPrompt = fmt.Sprintf(`You are an expert resume writer. Rewrite ONLY the applicant's experience bullet points in the base profile JSON to align with the target job description. All other fields must be preserved verbatim.
 
 Base Profile JSON:
 %s
@@ -4835,11 +6007,11 @@ Target Job Description:
 %s
 
 Mandates:
-1. For each experience, rewrite relevant bullet points to emphasize accomplishments that align with the job requirements.
-2. YOU MUST strictly preserve all historical metrics (percentages, dollar values, size of teams) and truthfulness.
-3. Elevate and rank the most critical keywords in the skills section.
-4. Keep the exact same JSON structure. Do not add or remove jobs.
-5. Output ONLY valid JSON matching the profile schema. No explanations, no markdown blocks.`, string(baseProfileBytes), desc)
+1. Rewrite ONLY the experience bullet points. Use the STAR framework (Situation, Task, Action, Result) and begin each bullet with a strong active past-tense verb.
+2. Naturally incorporate relevant keywords from the target job description into the rewritten bullets.
+3. STRICTLY preserve every quantitative metric (percentages, dollar amounts, team sizes, time periods, dates). Never fabricate, omit, or alter any number.
+4. Preserve VERBATIM: personal_info, target_roles, education, projects, skills, and every entry under additional_sections (publications, certifications, awards, etc.). Do not add, remove, reorder, or rename any field. Do not invent skills the applicant did not list. Do not create new sections.
+5. Output ONLY valid JSON with the EXACT same set of top-level and nested keys as the input. No explanations, no markdown blocks.`, string(baseProfileBytes), desc)
 			}
 
 			tailoredJson, err := callGeminiGo(state.ApiKey, tailorPrompt, true)
@@ -4851,8 +6023,13 @@ Mandates:
 				return
 			}
 
+			tailoredBytes := []byte(tailoredJson)
+			if verr := validateTailoredProfile(baseProfileBytes, tailoredBytes); verr != nil {
+				fmt.Printf("Tailored profile guard tripped for %s @ %s (%v) — falling back to base profile.\n", role, company, verr)
+				tailoredBytes = baseProfileBytes
+			}
 			// Write tailored profile
-			err = writeSecureFile("references/user-profile-tailored.json", []byte(tailoredJson))
+			err = writeSecureFile("references/user-profile-tailored.json", tailoredBytes)
 			if err != nil {
 				fyne.Do(func() {
 					progress.Hide()
@@ -4862,15 +6039,16 @@ Mandates:
 			}
 		}
 
-		// 3. Compile resume PDF to save folder
-		resumeOutputPath := filepath.Join(state.SaveFolder, resumePdfName)
-		_, err = RunGenerateResume("references/user-profile-tailored.json", resumeOutputPath)
-		if err != nil {
-			fyne.Do(func() {
-				progress.Hide()
-				dialog.ShowError(err, state.Window)
-			})
-			return
+			// 3. Compile resume PDF to save folder
+			resumeOutputPath = filepath.Join(state.SaveFolder, resumePdfName)
+			_, err = RunGenerateResume("references/user-profile-tailored.json", resumeOutputPath)
+			if err != nil {
+				fyne.Do(func() {
+					progress.Hide()
+					dialog.ShowError(err, state.Window)
+				})
+				return
+			}
 		}
 
 		// 4. Draft Cover Letter aligning with the style guide
@@ -4905,7 +6083,7 @@ Strict Mandates:
 1. Do NOT mention where the job listing was found or reference referral sources (such as LinkedIn, Indeed, etc.).
 2. At the end of the letter, output only the sign-off 'Sincerely,' followed by the applicant's name. Do NOT output any other details (such as address, phone number, email, date, etc.) below the name or signature.
 
-Output ONLY the cover letter text, no conversational intro or outro.`, candName, role, company, genericTemplate, role, company, desc, string(baseProfileBytes))
+Output ONLY the cover letter text, no conversational intro or outro.`, candName, stripRoleMetadata(role), company, genericTemplate, stripRoleMetadata(role), company, desc, string(baseProfileBytes))
 
 		coverLetterDraftText, err := callGeminiGo(state.ApiKey, coverPrompt, false)
 		if err != nil {
@@ -4941,7 +6119,13 @@ Output ONLY the cover letter text, no conversational intro or outro.`, candName,
 
 		fyne.Do(func() {
 			progress.Hide()
-			dialog.ShowInformation("Pipeline Complete", fmt.Sprintf("Successfully tracked job, tailored resume, and compiled PDFs!\n\nSaved Resume: %s\nSaved Cover Letter: %s", resumeOutputPath, coverOutputPath), state.Window)
+			var msg string
+			if resumeTailoringEnabled {
+				msg = fmt.Sprintf("Successfully tracked job, tailored resume, and compiled PDFs!\n\nSaved Resume: %s\nSaved Cover Letter: %s", resumeOutputPath, coverOutputPath)
+			} else {
+				msg = fmt.Sprintf("Successfully tracked job and drafted cover letter!\n\nSaved Cover Letter: %s\n\nAttach your base resume directly when applying.", coverOutputPath)
+			}
+			dialog.ShowInformation("Pipeline Complete", msg, state.Window)
 			reloadAllViews()
 		})
 	}()
@@ -5155,12 +6339,17 @@ func buildFileManagerTab() fyne.CanvasObject {
 			refreshFileManager()
 			return
 		}
+		if match, ok := matchKnownFolder(text); ok {
+			fmCurrentDir = match
+			refreshFileManager()
+			return
+		}
 		cleanPath := filepath.Clean(text)
 		if info, err := os.Stat(cleanPath); err == nil && info.IsDir() {
 			fmCurrentDir = cleanPath
 			refreshFileManager()
 		} else {
-			dialog.ShowError(fmt.Errorf("Invalid directory path: %s", text), state.Window)
+			dialog.ShowError(fmt.Errorf("Invalid directory or shortcut: %s\n\nTry a path, or a keyword like 'desktop', 'documents', 'downloads', 'home'.", text), state.Window)
 			fmPathEntry.SetText(fmCurrentDir)
 		}
 	}
@@ -5185,12 +6374,39 @@ func buildFileManagerTab() fyne.CanvasObject {
 		refreshFileManager()
 	})
 
-	toolbar := container.NewBorder(
+	pathRow := container.NewBorder(
 		nil,
 		nil,
 		container.NewHBox(backBtn, refreshBtn),
 		nil,
 		fmPathEntry,
+	)
+
+	// Quick Jump shortcuts mirror the file/folder pickers so users don't have
+	// to type filesystem paths to reach Desktop/Documents/Downloads/etc.
+	shortcutsRow := container.NewHBox()
+	for _, f := range resolveKnownFolders() {
+		target := f.Path
+		btn := widget.NewButtonWithIcon(f.Label, theme.FolderIcon(), func() {
+			fmCurrentDir = target
+			refreshFileManager()
+		})
+		shortcutsRow.Add(btn)
+	}
+	if drives := getWindowsDrives(); len(drives) > 0 {
+		btn := widget.NewButtonWithIcon("Drives", theme.ComputerIcon(), func() {
+			fmCurrentDir = "Drives"
+			refreshFileManager()
+		})
+		shortcutsRow.Add(btn)
+	}
+
+	hint := widget.NewLabelWithStyle("Tip: type a keyword (desktop, documents, downloads, home) into the path bar to jump directly.", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+
+	toolbar := container.NewVBox(
+		pathRow,
+		container.NewHScroll(shortcutsRow),
+		hint,
 	)
 
 	fmExplorerBox = container.NewVBox()
@@ -5573,6 +6789,77 @@ func startClipServer() {
 			return
 		}
 
+		// Strip CR/control characters from scraped input before any processing
+		// so stored values and text views render cleanly.
+		payload.Company = cleanText(payload.Company)
+		payload.Role = cleanText(payload.Role)
+		payload.Location = cleanText(payload.Location)
+		payload.Link = cleanText(payload.Link)
+		payload.Description = cleanText(payload.Description)
+
+		// Snapshot the raw scraped values so we can flag low-confidence extractions
+		// for user review after all correction passes have run (Bugs 8 + 10).
+		scrapedCompanyRaw := payload.Company
+		scrapedRoleRaw := payload.Role
+
+		// Layer 0: pull capitalized brand candidates from the first sentence
+		// of the description. A majority of JDs name the employer in the
+		// opening sentence ("About TD Bank...", "Acme is hiring..."), so this
+		// is high-signal context for both the LLM call and the post-extraction
+		// validation pass below.
+		companyHints := extractCompanyHints(payload.Description)
+
+		// Trust-the-scrape fast path: when the bookmarklet DOM selectors
+		// produced a clean-looking company value (non-empty, not in the
+		// generic chrome list, reasonable length, no URL/host shape), keep
+		// it. This is the LinkedIn small-company common case: the
+		// `.job-details-jobs-unified-top-card__company-name` selector
+		// usually returns the correct employer, and the LLM's rewrite is
+		// what introduces error. The LLM pass only runs when the scrape
+		// failed or produced junk.
+		runLLMExtraction := true
+		if !isGenericCompany(payload.Company) {
+			c := strings.TrimSpace(payload.Company)
+			if len(c) >= 2 && len(c) <= 60 && !strings.ContainsAny(c, "/\\") {
+				runLLMExtraction = false
+			}
+		}
+
+		// Layer 1: LLM verification pass with a tightened prompt that includes
+		// the hint list and explicit negative examples ("never return Jobs /
+		// Careers / Apply / hostname / etc."). Non-empty results override the
+		// scraped values; on failure we fall through to the per-field
+		// heuristics below, so this never blocks a clip. Skipped entirely
+		// when the scraped Company is already clean (trust-the-scrape).
+		if runLLMExtraction {
+			if llmCompany, llmRole, llmLocation, ok := extractJobDetailsLLM(state.ApiKey, payload.Company, payload.Role, payload.Location, payload.Description, companyHints); ok {
+				if llmCompany != "" {
+					payload.Company = llmCompany
+				}
+				if llmRole != "" {
+					payload.Role = llmRole
+				}
+				if llmLocation != "" {
+					payload.Location = llmLocation
+				}
+			}
+		}
+
+		// Layer 2: drop junk company values that survived the LLM pass
+		// (page-chrome leaks like "Jobs" / "Careers" / hostnames). Treats
+		// matches as empty so the per-field fallback chain reruns.
+		if isGenericCompany(payload.Company) {
+			payload.Company = ""
+		}
+
+		if payload.Company == "" {
+			// Prefer a first-sentence hint when one is available — these are
+			// usually the cleanest brand name in the entire payload.
+			if len(companyHints) > 0 {
+				payload.Company = companyHints[0]
+			}
+		}
+
 		if payload.Company == "" {
 			payload.Company = extractCompanyFromTitle(payload.Role)
 			if payload.Company == "" && payload.Description != "" {
@@ -5581,12 +6868,32 @@ func startClipServer() {
 					payload.Company = corrected
 				}
 			}
+			// Layer 3: URL hostname stem as a last-ditch deterministic
+			// signal. Skips ATS hosts (greenhouse.io / lever.co / etc.) so
+			// only employer-owned career sites contribute. When an API key
+			// is available, the stem is piped through correctMissingCompany
+			// for a brand-name cleanup; otherwise titlecase fallback.
+			if payload.Company == "" {
+				if stem := extractCompanyFromHost(payload.Link); stem != "" {
+					if state.ApiKey != "" && payload.Description != "" {
+						if cleaned := correctMissingCompany(state.ApiKey, payload.Description, stem); cleaned != "" && !isGenericCompany(cleaned) {
+							payload.Company = cleaned
+						}
+					}
+					if payload.Company == "" {
+						payload.Company = brandFromHostStem(stem)
+					}
+				}
+			}
 			if payload.Company == "" {
 				payload.Company = "Unknown Company"
 			}
 		}
 		payload.Company = titleSanitizerRegex.ReplaceAllString(payload.Company, "")
 		payload.Company = strings.TrimSpace(payload.Company)
+		if isGenericCompany(payload.Company) {
+			payload.Company = "Unknown Company"
+		}
 
 		if payload.Role == "" {
 			payload.Role = "(Role not detected — update in tracker)"
@@ -5602,13 +6909,43 @@ func startClipServer() {
 			}
 		}
 
+		// Flag low-confidence extractions for user review (Bugs 8 + 10). The
+		// clip is still saved so it never blocks the user; the inbox surfaces
+		// the review marker, and the failures log records what fell back.
+		needsReview := false
+		var reviewReasons []string
+		if payload.Company == "Unknown Company" {
+			needsReview = true
+			reviewReasons = append(reviewReasons, "company unresolved")
+		} else if len(payload.Description) >= 200 && !companyAppearsInContext(payload.Company, payload.Description+"\n"+payload.Role, companyHints) {
+			// Layer 4: when the description is long enough to be authoritative
+			// (>= 200 chars), the final company should be referenced somewhere
+			// in the description body, the role/title, or echoed by the
+			// first-sentence hints. If none of those hold, the extraction is
+			// likely a page-chrome leak that slipped past the earlier filters
+			// — flag for user review. Short descriptions are not validated
+			// since absence of evidence isn't evidence of absence.
+			needsReview = true
+			reviewReasons = append(reviewReasons, "company not referenced in description")
+		}
+		if payload.Role == "(Role not detected — update in tracker)" || isGenericRole(payload.Role) {
+			needsReview = true
+			reviewReasons = append(reviewReasons, "role unresolved or generic")
+		}
+		reviewReason := strings.Join(reviewReasons, "; ")
+		if needsReview {
+			logClipFailure(scrapedCompanyRaw, scrapedRoleRaw, payload.Company, payload.Role, payload.Link, reviewReason)
+		}
+
 		// Save clipped job to local storage file references/clipped-jobs.json
 		saveClippedJob(ClippedJob{
-			Company:     payload.Company,
-			Role:        payload.Role,
-			Location:    payload.Location,
-			Link:        payload.Link,
-			Description: payload.Description,
+			Company:      payload.Company,
+			Role:         payload.Role,
+			Location:     payload.Location,
+			Link:         payload.Link,
+			Description:  payload.Description,
+			NeedsReview:  needsReview,
+			ReviewReason: reviewReason,
 		})
 
 		// Safety Check: Avoid Fyne GUI operations in non-GUI / headless runs

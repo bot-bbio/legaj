@@ -57,7 +57,8 @@ def load_apps(file_path):
     migrate_if_needed(file_path)
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
+        return data if isinstance(data, list) else []
     except Exception as e:
         print(f"Error loading applications from JSON: {e}")
         return []

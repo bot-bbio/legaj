@@ -2,7 +2,7 @@ To Whom it May Concern,
 
 My name is [Full Name] and I write to you regarding the [Target Role] role at [Target Company]. My background in [Fields of Experience], paired with a focus on [Specialized Skill/Focus], aligns perfectly with [Target Company]’s mission to [Target Company Mission/Value]. I am eager to transition into a high-impact environment where I can [Eager Transition/Impact Goal].
 
-In my current role as a [Current Role] at [Current Company], I manage [Current Responsibilities], consistently [Key Achievement/Metric]. I have focused on driving growth through [Action/Focus Area], a direct parallel to the [Target Area/Skill] [Target Company] seeks. Previously, at [Previous Company 1], I led [Previous Responsibilities 1], gaining deep familiarity with the [Industry Standard Processes] and the industry-standard tools—such as [Software/Tools like Salesforce, CRM, or Monday.com]—used today.
+In my current role as a [Current Role] at [Current Company], I manage [Current Responsibilities], consistently [Key Achievement/Metric]. I have focused on driving growth through [Action/Focus Area], a direct parallel to the [Target Area/Skill] [Target Company] seeks. Previously, at [Previous Company 1], I led [Previous Responsibilities 1], gaining deep familiarity with the [Industry Standard Processes] and the industry-standard tools used today.
 
 My experience as a [Previous Role 2] at [Previous Company 2] demonstrated my ability to lead through significant transformation. Overseeing a [Quantifiable Asset/Portfolio Value] portfolio, I overhauled our [Pipelines/Infrastructure] during a critical period. This self-directed leadership in a high-pressure environment reflects the entrepreneurial mindset necessary to [Desired Mindset Action/Goal]. I am comfortable bridging the gap between [technical/operational requirements] and [user/client adoption] to ensure high-performing features deliver real value.
 
@@ -11,6 +11,3 @@ I am confident that my blend of [Key Skill 1], [Key Skill 2], and [Key Skill 3] 
 Sincerely,
 
 [Full Name]
-[Phone Number]
-[Email Address]
-[LinkedIn Profile URL]

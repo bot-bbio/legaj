@@ -246,7 +246,23 @@ def generate_elements(profile, base_font_size, leading, spacer_height, printable
                 elements.append(Paragraph(f"&bull;&nbsp;&nbsp;{details}", bullet_style))
             elements.append(Spacer(1, spacer_height))
 
-    # 5. Skills Section (Rendered beautifully at the bottom)
+    # 5. Additional Sections (intuited from résumé: Publications, Certifications,
+    # Awards, etc.). Rendered verbatim, preserving the author's original titles.
+    additional_sections = profile.get("additional_sections", []) or []
+    for section in additional_sections:
+        title = (section.get("title") or "").strip()
+        items = section.get("items", []) or []
+        if not title or not items:
+            continue
+        draw_section_line(title)
+        for item in items:
+            text = (item or "").strip()
+            if not text:
+                continue
+            elements.append(Paragraph(f"&bull;&nbsp;&nbsp;{text}", bullet_style))
+        elements.append(Spacer(1, spacer_height))
+
+    # 6. Skills Section (Rendered beautifully at the bottom)
     skills = profile.get("skills", {})
     if skills:
         draw_section_line("Skills")

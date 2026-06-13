@@ -8,6 +8,92 @@ LeGaJ (Let's Get a Job) is an offline-first job search suite. It pairs a **Go + 
 
 ---
 
+## Getting Started
+
+This guide covers the full workflow from a fresh install to actively applying for jobs. Follow the steps in order on first use.
+
+---
+
+### Step 1 — Get a Gemini API Key
+
+LeGaJ uses Google's Gemini API to parse your resume, extract job details from clipped postings, and draft cover letters. The free tier is sufficient for normal job searching.
+
+1. Go to [aistudio.google.com](https://aistudio.google.com) and sign in with a Google account.
+2. Create a new project when prompted. The name does not matter.
+3. Navigate to **Get API key** and generate a key for your project. Copy it somewhere safe — you will paste it into LeGaJ during setup.
+4. When configuring the model inside LeGaJ, use **`gemini-3.1-flash-lite`**. This model has the most generous free-tier rate limits and is fast enough that you will not notice any delay during normal use.
+
+---
+
+### Step 2 — Install LeGaJ
+
+Download the latest Windows installer from the [Releases page](https://github.com/bot-bbio/legaj/releases). Run the `.exe` — it bundles all required runtimes, so no separate Python or Go installation is needed. Once the installer finishes, launch LeGaJ from the Start Menu or desktop shortcut.
+
+---
+
+### Step 3 — Complete the Onboarding Wizard
+
+The setup wizard starts automatically the first time you run LeGaJ. Work through each step:
+
+- **API Key** — Paste the Gemini API key you generated in Step 1 and set the model to `gemini-3.1-flash-lite`.
+- **Resume Upload** — Select your existing resume file (PDF or DOCX). LeGaJ parses it locally and builds your base profile, which it uses to generate all future cover letters and resume PDFs.
+- **Output Folder** — Choose a folder on your machine where LeGaJ will save all generated cover letters and PDFs. Pick somewhere easy to find, such as a dedicated `Job Applications` folder on your desktop. This folder becomes your central archive — every cover letter LeGaJ generates will land here, named by company and role, so you can attach the right file when you go to apply.
+
+If you need to re-run the wizard at any time, open it from the **Settings** tab.
+
+---
+
+### Step 4 — Review and Complete Your Base Profile
+
+After the wizard finishes, navigate to the **Base Profile** tab. If the tab appears empty, close and reopen LeGaJ — the parsed profile data loads on startup. Review each section (contact details, experience, education, skills) and fill in anything the parser missed or got wrong. The quality of your base profile directly affects the quality of every cover letter LeGaJ generates, so it is worth spending a few minutes here before you start clipping jobs.
+
+---
+
+### Step 5 — Install the Browser Clipper
+
+The clipper is a small bookmarklet that sends any job posting page to LeGaJ with one click. It is the core of the intake workflow.
+
+1. Open the **Help** tab in LeGaJ and click **Copy Bookmarklet Code**.
+2. Make your browser's bookmarks bar visible (`Ctrl+Shift+B` on Windows).
+3. Right-click the bookmarks bar, select **Add bookmark**, give it a short name like **Clip to LeGaJ**, and paste the copied code as the URL field.
+4. Keep it on the bookmarks bar so it is always one click away while you browse.
+
+The clipper works best on LinkedIn, where it reliably extracts the job title, company, location, and description. It also works on Indeed, Greenhouse, Lever, Workday, Ashby, and iCIMS, though extraction accuracy varies by site. When the API key is configured, LeGaJ uses the AI model to clean up any noisy or incomplete data the clipper scrapes.
+
+---
+
+### Step 6 — Clip Jobs and Add Them to the Tracker
+
+With the clipper installed and your profile ready, browse for jobs as normal. When you find a role you want to apply for, click the **Clip to LeGaJ** bookmark. The posting is sent to your **Job Hunt** tab inbox in the background.
+
+When you are ready to process your inbox:
+
+1. Open the **Job Hunt** tab — all clipped postings appear here as leads.
+2. Select the roles you want to pursue and click **Track and Apply**. This adds them to the Job Tracker and triggers cover letter generation in the background. LeGaJ compiles a tailored cover letter PDF for each selected role and saves it to your output folder.
+
+---
+
+### Step 7 — Apply
+
+Open the **Job Tracker** tab. Select one or more jobs and click **Open Job URL** in the toolbar — this opens the original posting in your browser so you can go straight to the application form. Your cover letter PDF for that role is already waiting in the output folder you configured in Step 3. Attach it and submit.
+
+---
+
+### Step 8 — Manage the Tracker and Inbox
+
+Keep the tracker and clipper inbox maintained as you go:
+
+- **Clear the Job Leads inbox** — Once clipped jobs have been processed (added to the tracker or dismissed), remove them from the inbox. A crowded inbox slows down the Job Hunt tab, so clearing it regularly keeps things responsive.
+- **File Manager** — Use the **File Manager** tab to browse, rename, or delete generated PDFs if you need to tidy up your output folder from within the app.
+
+---
+
+### Step 9 — Report Bugs
+
+LeGaJ is in early alpha. If you run into something broken or unexpected, please open an issue on the [GitHub Issues page](https://github.com/bot-bbio/legaj/issues). The more detail the better — include the exact steps to reproduce the problem, what you expected to happen, what actually happened, and any error messages or screenshots if applicable.
+
+---
+
 ## Key Features
 
 - **Onboarding Setup Wizard** — Step-by-step GUI setup for Gemini API configuration, workspace paths, and base resume import on first launch.

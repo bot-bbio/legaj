@@ -702,6 +702,14 @@ var clipListener net.Listener
 
 var trackerSelectedRows = make(map[int]bool)
 
+// clipSelectedRows tracks which Job Leads rows are checked for bulk migration,
+// keyed by the clip's index in loadClippedJobs() order. clipInboxJobCount is the
+// number of real clip rows currently rendered in state.ClipInboxBox (excludes
+// the header, separator, and empty-state placeholder); it lets us strip the
+// placeholder before appending the first real row.
+var clipSelectedRows = make(map[int]bool)
+var clipInboxJobCount int
+
 type ClippedJob struct {
 	Company      string `json:"company"`
 	Role         string `json:"role"`
@@ -792,75 +800,125 @@ Job Description:
 	return "(Role not detected)"
 }
 
+// clipInboxHeader builds the bold column-header row for the Job Leads inbox.
+// Column 0 is a blank spacer aligning with the per-row selection checkbox.
+func clipInboxHeader() *fyne.Container {
+	return container.New(&clipperRowLayout{},
+		widget.NewLabel(""),
+		widget.NewLabelWithStyle("Company", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("Role", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("Location", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("Source", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("Actions", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+	)
+}
+
+// resetClipInboxHeader replaces the inbox contents with just the header row and a
+// separator, and resets the rendered-job counter to zero.
+func resetClipInboxHeader() {
+	if state.ClipInboxBox == nil {
+		return
+	}
+	state.ClipInboxBox.Objects = []fyne.CanvasObject{
+		clipInboxHeader(),
+		widget.NewSeparator(),
+	}
+	clipInboxJobCount = 0
+}
+
+// showClipInboxPlaceholder resets the inbox to header + separator and appends the
+// given empty-state message. Because the count is zero afterwards, the next
+// addClippedJobToInboxUI call strips this placeholder before adding a real row —
+// fixing the bug where "Inbox cleared." lingered as a ghost row.
+func showClipInboxPlaceholder(msg string) {
+	if state.ClipInboxBox == nil {
+		return
+	}
+	resetClipInboxHeader()
+	state.ClipInboxBox.Add(widget.NewLabelWithStyle(msg, fyne.TextAlignLeading, fyne.TextStyle{Italic: true}))
+}
+
 func addClippedJobToInboxUI(job ClippedJob) {
+	if state.ClipInboxBox == nil {
+		return
+	}
+
+	idx := clipInboxJobCount // index in load order; keys clipSelectedRows
 	c := job.Company
 	ro := job.Role
 	lo := job.Location
 	li := job.Link
-	de := job.Description
 	bd := sourceBadge(li)
 	needsReview := job.NeedsReview
-	reviewReason := job.ReviewReason
 
-	// Wrap Track & Tailor / Add Tracker Only with a confirm dialog when the
-	// clipper flagged the extraction as low-confidence (Bugs 8 + 10).
-	confirmThen := func(action func()) func() {
-		return func() {
-			if !needsReview {
-				action()
-				return
-			}
-			msg := fmt.Sprintf("This clip was flagged for review (%s). The company/role may be incorrect — verify before tracking.\n\nProceed anyway?", reviewReason)
-			dialog.ShowConfirm("Verify Job Details", msg, func(ok bool) {
-				if ok {
-					action()
-				}
-			}, state.Window)
-		}
-	}
-
-	openBtn := widget.NewButtonWithIcon("View", theme.HelpIcon(), func() {
+	openBtn := widget.NewButtonWithIcon("View", theme.VisibilityIcon(), func() {
 		openLink(li)
 	})
-	trackBtnLabel := "Track & Tailor"
-	if !resumeTailoringEnabled {
-		trackBtnLabel = "Track & Apply"
-	}
-	trackBtn := widget.NewButtonWithIcon(trackBtnLabel, theme.DocumentCreateIcon(), confirmThen(func() {
-		runTrackAndTailorAutomation(c, ro, lo, li, de)
-	}))
-	trackBtn.Importance = widget.HighImportance
-	addOnlyBtn := widget.NewButtonWithIcon("Add Tracker Only", theme.ContentAddIcon(), confirmThen(func() {
-		resumeName := fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(c, " ", "_"))
-		coverName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(c, " ", "_"))
-		_ = addApplicationGo(c, ro, lo, li, "Applied", resumeName, coverName, "Clipped from browser.")
-		reloadAllViews()
-	}))
 
+	check := widget.NewCheck("", func(checked bool) {
+		clipSelectedRows[idx] = checked
+	})
+	check.SetChecked(clipSelectedRows[idx])
+
+	// Already-tracked clips can't be migrated again: disable the checkbox. Tracked
+	// state is shown with a "✓" prefix on the company (mirroring the "⚠" review
+	// marker) rather than a label crammed into the fixed-width Actions column,
+	// which previously overflowed past the View button.
 	existing := findApplicationByLink(li)
 	if existing == nil {
 		existing = findApplicationByCompanyAndRole(c, ro)
 	}
-	if existing != nil {
-		trackBtn.SetText("Tracked (" + existing.Status + ")")
-		trackBtn.Disable()
-		addOnlyBtn.Disable()
+	tracked := existing != nil
+	if tracked {
+		check.SetChecked(false)
+		check.Disable()
+		delete(clipSelectedRows, idx)
 	}
 
 	companyLabel := widget.NewLabel(c)
-	if needsReview {
+	switch {
+	case tracked:
+		companyLabel = widget.NewLabel("✓ " + c)
+	case needsReview:
 		companyLabel = widget.NewLabel("⚠ " + c)
 		companyLabel.TextStyle = fyne.TextStyle{Bold: true}
 	}
 
 	row := container.New(&clipperRowLayout{},
+		check,
 		companyLabel,
 		widget.NewLabel(ro),
 		widget.NewLabel(lo),
 		widget.NewLabel(bd),
-		container.NewHBox(openBtn, trackBtn, addOnlyBtn),
+		container.NewHBox(openBtn),
 	)
+
+	// Strip the empty-state placeholder before adding the first real row.
+	if clipInboxJobCount == 0 && len(state.ClipInboxBox.Objects) > 2 {
+		state.ClipInboxBox.Objects = state.ClipInboxBox.Objects[:2]
+	}
 	state.ClipInboxBox.Add(row)
+	clipInboxJobCount++
+}
+
+// migrateClippedJobsToTracker adds the given clipped jobs to the tracker, skipping
+// any that are already tracked (matched by link or company+role). It returns the
+// number added and skipped. Pure data layer — no UI — so it is unit-testable.
+func migrateClippedJobsToTracker(jobs []ClippedJob) (added, skipped int) {
+	for _, j := range jobs {
+		if findApplicationByLink(j.Link) != nil || findApplicationByCompanyAndRole(j.Company, j.Role) != nil {
+			skipped++
+			continue
+		}
+		resumeName := fmt.Sprintf("%s_Resume_Tailored.pdf", strings.ReplaceAll(j.Company, " ", "_"))
+		coverName := fmt.Sprintf("%s_Cover_Letter.pdf", strings.ReplaceAll(j.Company, " ", "_"))
+		if addApplicationGo(j.Company, j.Role, j.Location, j.Link, "Applied", resumeName, coverName, "Clipped from browser.") == nil {
+			added++
+		} else {
+			skipped++
+		}
+	}
+	return added, skipped
 }
 
 func loadClippedJobsToInbox() {
@@ -868,22 +926,20 @@ func loadClippedJobsToInbox() {
 		return
 	}
 
+	// Note: clipSelectedRows is intentionally NOT reset here. Clips are only ever
+	// appended (handler) or fully cleared (Clear Inbox), so load-order indices
+	// stay stable across a re-render. Re-rendering after Select All / migration
+	// must preserve the user's checkbox state. Explicit resets live in the Clear
+	// Inbox / Clear Selection / post-migration paths.
+
 	jobs := loadClippedJobs()
 	if len(jobs) == 0 {
+		showClipInboxPlaceholder("No clipped jobs yet. Use the bookmarklet on any job board to clip listings here.")
+		state.ClipInboxBox.Refresh()
 		return
 	}
 
-	state.ClipInboxBox.Objects = []fyne.CanvasObject{
-		container.New(&clipperRowLayout{},
-			widget.NewLabelWithStyle("Company", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			widget.NewLabelWithStyle("Role", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			widget.NewLabelWithStyle("Location", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			widget.NewLabelWithStyle("Source", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			widget.NewLabelWithStyle("Actions", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-		),
-		widget.NewSeparator(),
-	}
-
+	resetClipInboxHeader()
 	for _, job := range jobs {
 		addClippedJobToInboxUI(job)
 	}
@@ -1744,7 +1800,20 @@ func loadTrackerData() {
 	state.Applications = apps
 }
 
+// clearTrackerSelection resets all tracker selection state. trackerSelectedRows
+// is keyed by row index, so after the Applications slice changes (add, import,
+// migrate, delete) stale entries would otherwise map onto unrelated rows — the
+// "allows selecting everything" bug. Centralizing the reset here fixes every
+// mutation path at once.
+func clearTrackerSelection() {
+	for k := range trackerSelectedRows {
+		delete(trackerSelectedRows, k)
+	}
+	state.SelectedAppIdx = -1
+}
+
 func reloadAllViews() {
+	clearTrackerSelection()
 	go func() {
 		loadProfileData()
 		loadTrackerData()
@@ -2251,40 +2320,87 @@ Return ONLY valid JSON. No markdown, no explanation.`, kw, loc)
 	searchTab := widget.NewCard("Job Discovery Engine", "", searchCardContent)
 
 	// ── Job Leads Card (populated by the browser bookmarklet) ──
-	state.ClipInboxBox = container.NewVBox(
-		container.New(&clipperRowLayout{},
-			widget.NewLabelWithStyle("Company", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			widget.NewLabelWithStyle("Role", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			widget.NewLabelWithStyle("Location", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			widget.NewLabelWithStyle("Source", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			widget.NewLabelWithStyle("Actions", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-		),
-		widget.NewSeparator(),
-		widget.NewLabelWithStyle("No clipped jobs yet. Use the bookmarklet on any job board to clip listings here.",
-			fyne.TextAlignLeading, fyne.TextStyle{Italic: true}),
-	)
+	state.ClipInboxBox = container.NewVBox()
+	showClipInboxPlaceholder("No clipped jobs yet. Use the bookmarklet on any job board to clip listings here.")
 	clipScroll := container.NewVScroll(state.ClipInboxBox)
 	clipContainer := container.New(&fixedHeightLayout{height: 520}, clipScroll)
+
 	clearClipBtn := widget.NewButtonWithIcon("Clear Inbox", theme.DeleteIcon(), func() {
 		_ = os.Remove("references/clipped-jobs.json")
-		state.ClipInboxBox.Objects = []fyne.CanvasObject{
-			container.New(&clipperRowLayout{},
-				widget.NewLabelWithStyle("Company", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-				widget.NewLabelWithStyle("Role", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-				widget.NewLabelWithStyle("Location", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-				widget.NewLabelWithStyle("Source", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-				widget.NewLabelWithStyle("Actions", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-			),
-			widget.NewSeparator(),
-			widget.NewLabelWithStyle("Inbox cleared.", fyne.TextAlignLeading, fyne.TextStyle{Italic: true}),
-		}
+		clipSelectedRows = make(map[int]bool)
+		showClipInboxPlaceholder("Inbox cleared.")
 		state.ClipInboxBox.Refresh()
+	})
+
+	// Bulk migration: add every checked lead to the tracker in one action. Clips
+	// are not removed — they re-render as disabled "Tracked (...)" rows, keeping
+	// them available as the tailoring description cache.
+	addSelectedBtn := widget.NewButtonWithIcon("Add Selected to Tracker", theme.ContentAddIcon(), func() {
+		jobs := loadClippedJobs()
+		var selected []ClippedJob
+		var flagged []string
+		for idx, checked := range clipSelectedRows {
+			if checked && idx >= 0 && idx < len(jobs) {
+				selected = append(selected, jobs[idx])
+				if jobs[idx].NeedsReview {
+					flagged = append(flagged, jobs[idx].Company)
+				}
+			}
+		}
+		if len(selected) == 0 {
+			dialog.ShowInformation("Selection Required", "Check at least one clipped job to add to the tracker.", state.Window)
+			return
+		}
+
+		doMigrate := func() {
+			added, skipped := migrateClippedJobsToTracker(selected)
+			clipSelectedRows = make(map[int]bool)
+			reloadAllViews()
+			loadClippedJobsToInbox() // re-render so migrated rows show as "Tracked"
+			dialog.ShowInformation("Added to Tracker",
+				fmt.Sprintf("%d job(s) added, %d skipped (already tracked).", added, skipped), state.Window)
+		}
+
+		if len(flagged) > 0 {
+			msg := fmt.Sprintf("%d selected clip(s) were flagged for review (company/role may be incorrect): %s.\n\nAdd them to the tracker anyway?",
+				len(flagged), strings.Join(flagged, ", "))
+			dialog.ShowConfirm("Verify Job Details", msg, func(ok bool) {
+				if ok {
+					doMigrate()
+				}
+			}, state.Window)
+			return
+		}
+		doMigrate()
+	})
+	addSelectedBtn.Importance = widget.HighImportance
+
+	selectAllBtn := widget.NewButton("Select All", func() {
+		jobs := loadClippedJobs()
+		for idx, j := range jobs {
+			// Only select clips that aren't already tracked.
+			if findApplicationByLink(j.Link) == nil && findApplicationByCompanyAndRole(j.Company, j.Role) == nil {
+				clipSelectedRows[idx] = true
+			}
+		}
+		loadClippedJobsToInbox()
+	})
+	clearSelectionBtn := widget.NewButton("Clear Selection", func() {
+		clipSelectedRows = make(map[int]bool)
+		loadClippedJobsToInbox()
 	})
 
 	// TODO(2.0): restore the subheading "Jobs clipped from your browser via the
 	// bookmarklet appear here for review" when the discovery engine ships.
+	clipToolbar := container.NewHBox(
+		addSelectedBtn,
+		selectAllBtn,
+		clearSelectionBtn,
+		layout.NewSpacer(),
+		clearClipBtn,
+	)
 	clipCardContent := container.NewBorder(
-		container.NewHBox(layout.NewSpacer(), clearClipBtn),
+		clipToolbar,
 		nil, nil, nil,
 		container.NewHScroll(clipContainer),
 	)
@@ -2378,21 +2494,25 @@ func buildProfileTab() fyne.CanvasObject {
 	state.AddlSectionsContainer = container.NewVBox()
 
 	importBtn := widget.NewButtonWithIcon("Import PDF/DOCX Resume", theme.DocumentIcon(), func() {
-		showCustomFilePicker(state.Window, "Import PDF/DOCX Resume", []string{".pdf", ".docx", ".txt", ".md"}, func(filePath string) {
+		showCustomFilePicker(state.Window, "Import PDF/DOCX Resume", []string{".pdf", ".docx", ".txt", ".md"}, false, func(filePath string) {
 			progress := dialog.NewProgressInfinite("Parsing Resume", "Reading and structuring using Gemini AI...", state.Window)
 			progress.Show()
 
 			go func() {
 				outText, err := RunParseResume(filePath)
 				if err != nil {
-					progress.Hide()
-					dialog.ShowError(err, state.Window)
+					fyne.Do(func() {
+						progress.Hide()
+						dialog.ShowError(err, state.Window)
+					})
 					return
 				}
 
 				if state.ApiKey == "" {
-					progress.Hide()
-					dialog.ShowError(fmt.Errorf("Gemini API Key is missing. Please set it in Settings first."), state.Window)
+					fyne.Do(func() {
+						progress.Hide()
+						dialog.ShowError(fmt.Errorf("Gemini API Key is missing. Please set it in Settings first."), state.Window)
+					})
 					return
 				}
 
@@ -2455,21 +2575,36 @@ Resume Text:
 %s`, outText)
 
 				parsedJsonStr, err := callGeminiGo(state.ApiKey, parsePrompt, true)
-				progress.Hide()
 				if err != nil {
-					dialog.ShowError(err, state.Window)
+					fyne.Do(func() {
+						progress.Hide()
+						dialog.ShowError(err, state.Window)
+					})
 					return
 				}
 
-				err = writeSecureFile("references/user-profile.json", []byte(parsedJsonStr))
-				if err != nil {
-					dialog.ShowError(err, state.Window)
+				if err := writeSecureFile("references/user-profile.json", []byte(parsedJsonStr)); err != nil {
+					fyne.Do(func() {
+						progress.Hide()
+						dialog.ShowError(err, state.Window)
+					})
 					return
 				}
+
+				// Reload the in-memory profile from the file we just wrote, then
+				// repopulate the entire form on the UI thread. fillProfileForm MUST
+				// run on the main goroutine: calling it here off-thread silently
+				// dropped the personal-info Entry.SetText updates (name/email/phone/
+				// location) while the section containers still re-rendered — which is
+				// exactly why basic personal info never changed on a new résumé.
+				loadProfileData()
+				fyne.Do(func() {
+					progress.Hide()
+					fillProfileForm()
+					refreshUI()
+				})
 
 				offerWorkspaceSetup(filePath)
-				reloadAllViews()
-				fillProfileForm()
 			}()
 		})
 	})
@@ -2912,8 +3047,11 @@ func (sc *statusCell) Tapped(ev *fyne.PointEvent) {
 				state.Applications[sc.cellID.Row-1].Status = s
 			}
 
-			// Optimistically refresh stats, selectors and list on main thread
-			refreshUI()
+			// The cell already repainted itself above (sc.text + sc.Refresh), and
+			// the disk write runs in the background via onChanged, so only the
+			// dashboard counts need updating. Avoid the full refreshUI() here — its
+			// whole-table Refresh was the source of the per-change sluggishness.
+			updateDashboardStats()
 
 			if sc.onChanged != nil {
 				sc.onChanged(s)
@@ -3030,39 +3168,47 @@ func (si *scrollInterceptor) MinSize() fyne.Size { return fyne.NewSize(0, 0) }
 
 type clipperRowLayout struct{}
 
-// clipperActionsWidth is the fixed width reserved for the row's action buttons
-// ("Open", "Track & Tailor", "Add Tracker Only"). It must be wide enough to hold
-// all three side by side without clipping the last button. Applied uniformly to
-// both the header and data rows so their columns stay aligned.
-const clipperActionsWidth = float32(440)
+// clipperCheckWidth is the fixed width of the leading selection-checkbox column.
+const clipperCheckWidth = float32(40)
 
-// clipperRowMinWidth is the minimum overall row width: the actions column plus a
-// 140px floor for each of the four data columns.
-const clipperRowMinWidth = clipperActionsWidth + 4*140
+// clipperActionsWidth is the fixed width reserved for the row's action button.
+// Only "View" remains (bulk add/tailor moved to the toolbar and the Tracker), so
+// this is far narrower than before. Applied uniformly to header and data rows so
+// their columns stay aligned.
+const clipperActionsWidth = float32(120)
+
+// clipperRowMinWidth is the minimum overall row width: the checkbox + actions
+// columns plus a 140px floor for each of the four data columns.
+const clipperRowMinWidth = clipperCheckWidth + clipperActionsWidth + 4*140
 
 func (l *clipperRowLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
 	return fyne.NewSize(clipperRowMinWidth, 32)
 }
 
+// Layout positions six children: [checkbox] [company] [role] [location] [source]
+// [actions]. The checkbox and actions columns are fixed width; the four data
+// columns share the remainder equally.
 func (l *clipperRowLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
-	if len(objects) < 5 {
+	if len(objects) < 6 {
 		return
 	}
 	w := size.Width
 	if w < clipperRowMinWidth {
 		w = clipperRowMinWidth
 	}
-	actionsWidth := clipperActionsWidth
-	colWidth := (w - actionsWidth) / 4
+	colWidth := (w - clipperCheckWidth - clipperActionsWidth) / 4
 
 	x := float32(0)
-	for i := 0; i < 4; i++ {
+	objects[0].Move(fyne.NewPos(x, 0))
+	objects[0].Resize(fyne.NewSize(clipperCheckWidth, size.Height))
+	x += clipperCheckWidth
+	for i := 1; i <= 4; i++ {
 		objects[i].Move(fyne.NewPos(x, 0))
 		objects[i].Resize(fyne.NewSize(colWidth, size.Height))
 		x += colWidth
 	}
-	objects[4].Move(fyne.NewPos(x, 0))
-	objects[4].Resize(fyne.NewSize(actionsWidth, size.Height))
+	objects[5].Move(fyne.NewPos(x, 0))
+	objects[5].Resize(fyne.NewSize(clipperActionsWidth, size.Height))
 }
 
 type fixedHeightLayout struct {
@@ -3405,7 +3551,7 @@ func buildTrackerTab() fyne.CanvasObject {
 
 	// Relocated Bulk Import Button
 	bulkImportBtn := widget.NewButtonWithIcon("Bulk Import", theme.FolderOpenIcon(), func() {
-		showCustomFilePicker(state.Window, "Select CSV File", []string{".csv", ".txt"}, func(path string) {
+		showCustomFilePicker(state.Window, "Select CSV File", []string{".csv", ".txt"}, false, func(path string) {
 			go func() {
 				data, readErr := os.ReadFile(path)
 				if readErr != nil {
@@ -4235,7 +4381,7 @@ func buildSettingsTab() fyne.CanvasObject {
 	// reads state.SettingsSaveFolder.Text continues to work unchanged.
 	state.SettingsSaveFolder.Disable()
 	browseFolderBtn := widget.NewButtonWithIcon("Browse / Create…", theme.FolderOpenIcon(), func() {
-		showCustomFolderPicker(state.Window, "Choose Save Folder", func(picked string) {
+		showCustomFolderPicker(state.Window, "Choose Save Folder", false, func(picked string) {
 			state.SettingsSaveFolder.Enable()
 			state.SettingsSaveFolder.SetText(picked)
 			state.SettingsSaveFolder.Disable()
@@ -4834,7 +4980,7 @@ func matchKnownFolder(query string) (string, bool) {
 // A "Create LeGaJ Workspace" affordance is offered when the workspace folder
 // does not yet exist; this lets the user provision the recommended folder
 // directly from the picker instead of having to switch to Explorer.
-func showCustomFolderPicker(parentWindow fyne.Window, title string, onSelect func(string)) {
+func showCustomFolderPicker(parentWindow fyne.Window, title string, showTip bool, onSelect func(string)) {
 	pickerWin := state.App.NewWindow(title)
 	pickerWin.Resize(fyne.NewSize(580, 460))
 
@@ -4967,8 +5113,6 @@ func showCustomFolderPicker(parentWindow fyne.Window, title string, onSelect fun
 		shortcutsRow.Add(btn)
 	}
 
-	hint := widget.NewLabelWithStyle("Tip: type a keyword (desktop, documents, downloads, home) into the path bar to jump directly.", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
-
 	selectThisBtn := widget.NewButtonWithIcon("Select This Folder", theme.ConfirmIcon(), func() {
 		if currentDir == "Drives" {
 			dialog.ShowInformation("Pick a Folder", "Open a drive first, then choose a folder inside it.", pickerWin)
@@ -4998,9 +5142,11 @@ func showCustomFolderPicker(parentWindow fyne.Window, title string, onSelect fun
 	toolbar := container.NewVBox(
 		pathRow,
 		container.NewHScroll(shortcutsRow),
-		hint,
-		actionRow,
 	)
+	if showTip {
+		toolbar.Add(widget.NewLabelWithStyle("Tip: type a keyword (desktop, documents, downloads, home) into the path bar to jump directly.", fyne.TextAlignLeading, fyne.TextStyle{Italic: true}))
+	}
+	toolbar.Add(actionRow)
 
 	scroll := container.NewVScroll(explorerBox)
 	pickerWin.SetContent(container.NewBorder(toolbar, nil, nil, nil, scroll))
@@ -5008,7 +5154,7 @@ func showCustomFolderPicker(parentWindow fyne.Window, title string, onSelect fun
 	pickerWin.Show()
 }
 
-func showCustomFilePicker(parentWindow fyne.Window, title string, allowedExts []string, onSelect func(string)) {
+func showCustomFilePicker(parentWindow fyne.Window, title string, allowedExts []string, showTip bool, onSelect func(string)) {
 	pickerWin := state.App.NewWindow(title)
 	pickerWin.Resize(fyne.NewSize(550, 420))
 
@@ -5209,13 +5355,13 @@ func showCustomFilePicker(parentWindow fyne.Window, title string, allowedExts []
 		shortcutsRow.Add(btn)
 	}
 
-	hint := widget.NewLabelWithStyle("Tip: type a keyword (desktop, documents, downloads, home) into the path bar to jump directly.", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
-
 	toolbar := container.NewVBox(
 		pathRow,
 		container.NewHScroll(shortcutsRow),
-		hint,
 	)
+	if showTip {
+		toolbar.Add(widget.NewLabelWithStyle("Tip: type a keyword (desktop, documents, downloads, home) into the path bar to jump directly.", fyne.TextAlignLeading, fyne.TextStyle{Italic: true}))
+	}
 
 	scroll := container.NewVScroll(explorerBox)
 	pickerWin.SetContent(container.NewBorder(toolbar, nil, nil, nil, scroll))
@@ -5261,7 +5407,7 @@ func showOnboardingWizard() {
 	resumePathLabel := widget.NewLabel("No resume file selected")
 	resumePathLabel.Wrapping = fyne.TextWrapOff
 	selectResumeBtn := widget.NewButtonWithIcon("Choose Resume File", theme.DocumentIcon(), func() {
-		showCustomFilePicker(wizardWindow, "Select Resume File", []string{".pdf", ".docx", ".txt", ".md"}, func(path string) {
+		showCustomFilePicker(wizardWindow, "Select Resume File", []string{".pdf", ".docx", ".txt", ".md"}, true, func(path string) {
 			resumePathLabel.SetText(path)
 		})
 	})
@@ -5269,7 +5415,7 @@ func showOnboardingWizard() {
 	saveFolderLabel := widget.NewLabel(state.SaveFolder)
 	saveFolderLabel.Wrapping = fyne.TextWrapOff
 	selectFolderBtn := widget.NewButtonWithIcon("Choose Save Folder", theme.FolderOpenIcon(), func() {
-		showCustomFolderPicker(wizardWindow, "Choose Save Folder", func(picked string) {
+		showCustomFolderPicker(wizardWindow, "Choose Save Folder", true, func(picked string) {
 			saveFolderLabel.SetText(picked)
 		})
 	})
@@ -5436,7 +5582,7 @@ func showOnboardingWizard() {
 	var step5_cl *fyne.Container
 
 	selectClFileBtn := widget.NewButtonWithIcon("Choose Cover Letter File (.docx, .pdf, .txt, .md)", theme.DocumentIcon(), func() {
-		showCustomFilePicker(wizardWindow, "Select Cover Letter File", []string{".pdf", ".docx", ".txt", ".md"}, func(path string) {
+		showCustomFilePicker(wizardWindow, "Select Cover Letter File", []string{".pdf", ".docx", ".txt", ".md"}, true, func(path string) {
 			clStatusLabel.SetText("Reading file: " + filepath.Base(path) + "...")
 			go func() {
 				text, err := RunParseResume(path)
@@ -6401,12 +6547,13 @@ func buildFileManagerTab() fyne.CanvasObject {
 		shortcutsRow.Add(btn)
 	}
 
-	hint := widget.NewLabelWithStyle("Tip: type a keyword (desktop, documents, downloads, home) into the path bar to jump directly.", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
-
+	// The path-bar keyword tip is intentionally omitted here — the Quick Jump
+	// shortcut buttons above already cover Desktop/Documents/Downloads/etc., so
+	// the standalone hint looked redundant in the File Manager. It is retained in
+	// the file/folder pickers used by the first-run setup wizard.
 	toolbar := container.NewVBox(
 		pathRow,
 		container.NewHScroll(shortcutsRow),
-		hint,
 	)
 
 	fmExplorerBox = container.NewVBox()
@@ -6966,25 +7113,16 @@ func startClipServer() {
 			if state.ClipInboxBox == nil {
 				return
 			}
-			if len(state.ClipInboxBox.Objects) <= 2 {
-				state.ClipInboxBox.Objects = []fyne.CanvasObject{
-					container.New(layout.NewGridLayout(5),
-						widget.NewLabelWithStyle("Company", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-						widget.NewLabelWithStyle("Role", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-						widget.NewLabelWithStyle("Location", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-						widget.NewLabelWithStyle("Source", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-						widget.NewLabelWithStyle("Actions", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-					),
-					widget.NewSeparator(),
-				}
-			}
-
+			// addClippedJobToInboxUI self-heals the empty-state placeholder, so no
+			// manual header rebuild is needed here.
 			addClippedJobToInboxUI(ClippedJob{
-				Company:     payload.Company,
-				Role:        payload.Role,
-				Location:    payload.Location,
-				Link:        payload.Link,
-				Description: payload.Description,
+				Company:      payload.Company,
+				Role:         payload.Role,
+				Location:     payload.Location,
+				Link:         payload.Link,
+				Description:  payload.Description,
+				NeedsReview:  needsReview,
+				ReviewReason: reviewReason,
 			})
 			state.ClipInboxBox.Refresh()
 		})

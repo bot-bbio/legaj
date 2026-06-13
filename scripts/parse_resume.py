@@ -1,5 +1,16 @@
 import os
 import sys
+import logging
+
+from _encoding import force_utf8_io
+
+# Resumes routinely contain non-Latin-1 glyphs (bullets, em-dashes, smart
+# quotes, accented names) that crash on Windows' default cp1252 stdout.
+force_utf8_io()
+
+# pypdf logs "Ignoring wrong pointing object" warnings for many real-world
+# PDFs; they are non-fatal and only add noise to our stderr output.
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 def _die(msg):
     print(msg, file=sys.stderr)

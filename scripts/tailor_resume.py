@@ -1,6 +1,12 @@
 import json
 import sys
 
+from _encoding import force_utf8_io
+
+# Profiles carry resume text with non-Latin-1 glyphs that crash Windows' cp1252
+# stdout; emit UTF-8 instead.
+force_utf8_io()
+
 def compare_profiles(base_path, tailored_path):
     try:
         with open(base_path, 'r', encoding='utf-8') as f:

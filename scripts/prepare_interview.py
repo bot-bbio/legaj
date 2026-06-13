@@ -4,6 +4,12 @@ import os
 import html
 import secrets
 
+from _encoding import force_utf8_io
+
+# Prep content (company/role/answers) may contain non-Latin-1 glyphs that crash
+# Windows' cp1252 stdout; emit UTF-8 instead.
+force_utf8_io()
+
 def generate_anki_deck(cards_data, output_path, deck_name):
     try:
         import genanki

@@ -19,6 +19,13 @@ directly — the dispatcher is only used by packaged builds.
 import runpy
 import sys
 
+from _encoding import force_utf8_io
+
+# Reconfigure stdout/stderr to UTF-8 once for the whole process. runpy runs each
+# tool in this same process, so this covers every dispatched tool — even one
+# that has not been individually updated — in frozen builds.
+force_utf8_io()
+
 # Map dispatch token -> module name (modules live alongside this file).
 TOOLS = {
     "parse_resume": "parse_resume",

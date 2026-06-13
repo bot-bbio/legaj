@@ -5,6 +5,12 @@ import urllib.parse
 import requests
 from bs4 import BeautifulSoup
 
+from _encoding import force_utf8_io
+
+# Search keywords/locations may contain non-Latin-1 glyphs that crash Windows'
+# cp1252 stdout; emit UTF-8 instead.
+force_utf8_io()
+
 def search_adzuna(keywords, location, country='us'):
     # Using Adzuna free API for demo purposes
     # If the user has api credentials, they can set them. Otherwise we do a public fallback.

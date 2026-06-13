@@ -6,6 +6,12 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
+from _encoding import force_utf8_io
+
+# Status/error messages may echo profile text with non-Latin-1 glyphs that
+# crash Windows' cp1252 stdout; emit UTF-8 instead.
+force_utf8_io()
+
 def generate_elements(profile, base_font_size, leading, spacer_height, printable_width):
     styles = getSampleStyleSheet()
     

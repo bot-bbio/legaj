@@ -9,6 +9,12 @@ from reportlab.lib.units import inch
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 
+from _encoding import force_utf8_io
+
+# Status/error messages may echo profile text with non-Latin-1 glyphs that
+# crash Windows' cp1252 stdout; emit UTF-8 instead.
+force_utf8_io()
+
 def create_cover_letter_pdf(profile_path, draft_text_path, output_path):
     try:
         with open(profile_path, 'r', encoding='utf-8') as f:

@@ -3,6 +3,12 @@ import os
 import datetime
 import json
 
+from _encoding import force_utf8_io
+
+# Company names, roles, and notes may contain non-Latin-1 glyphs that crash
+# Windows' cp1252 stdout; emit UTF-8 instead.
+force_utf8_io()
+
 def migrate_if_needed(json_path):
     # Determine xlsx path from json path
     base, ext = os.path.splitext(json_path)

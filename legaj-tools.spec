@@ -19,6 +19,7 @@ from PyInstaller.utils.hooks import collect_all
 
 # Tool modules invoked dynamically by the dispatcher.
 hiddenimports = [
+    "_encoding",
     "parse_resume",
     "tailor_resume",
     "generate_resume_pdf",

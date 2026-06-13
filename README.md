@@ -47,33 +47,15 @@ Go Fyne GUI
 
 ## Installation and Setup
 
-### Prerequisites
+### Prerequisites (source builds only)
 
-1. **Python 3.12+** — Must be installed and on your system PATH.
-2. **Go 1.25+** — Required to compile from source.
+- **Python 3.12+** and **Go 1.25+** — only required if building from source. The Windows installer bundles both runtimes.
 
-### Windows — One-Click Setup (Recommended)
+### Windows
 
-Double-click [setup_and_run.bat](setup_and_run.bat). The script will:
+Download the latest installer from the [Releases page](https://github.com/bot-bbio/legaj/releases). Run the `.exe` installer — it bundles everything, no separate Python or Go installation required. Launch LeGaJ from the Start Menu or desktop shortcut after install.
 
-1. Detect your Python environment.
-2. Upgrade `pip` and install all required libraries from `requirements.txt`.
-3. Launch the LeGaJ GUI.
-
-### Windows — Manual Terminal Setup
-
-1. Install Python dependencies:
-   ```powershell
-   pip install -r requirements.txt
-   ```
-2. Run the setup wizard on first launch:
-   ```powershell
-   ./legaj.exe wizard
-   ```
-3. Launch the GUI:
-   ```powershell
-   ./legaj.exe
-   ```
+> **Building from source on Windows:** requires Python 3.12+ and Go 1.25+. See the macOS section below for the general source build pattern.
 
 ### macOS — Quick Install (Recommended)
 

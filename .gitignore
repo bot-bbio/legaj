@@ -23,6 +23,9 @@ frontend/dist/*
 # Generated from Go by `wails generate module` on every verify/build.
 frontend/wailsjs/
 
+# Clipper spike output: captures can contain personal data (plan item 2).
+spike/bookmarklet/out/
+
 # Code-signing material (NEVER commit certificates or keys)
 *.pfx
 *.cer

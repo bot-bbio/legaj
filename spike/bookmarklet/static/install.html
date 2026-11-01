@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>LeGaJ clipper spike</title>
+    <link rel="stylesheet" href="/static/spike.css" />
+  </head>
+  <body>
+    <main class="wide">
+      <h1>LeGaJ clipper spike <small>plan item 2</small></h1>
+
+      <h2>1. Install both test bookmarklets</h2>
+      <p>Show the bookmarks bar (Ctrl+Shift+B), then drag each button onto it.</p>
+      <p class="bookmarklets">
+        <a class="bm" href="{{.PM}}">LeGaJ spike · postMessage</a>
+        <a class="bm" href="{{.Frag}}">LeGaJ spike · fragment</a>
+      </p>
+
+      <h2>2. Test each site</h2>
+      <ol>
+        <li>Open a real job posting (LinkedIn, Indeed, Workday, Greenhouse, Lever, Ashby), in Edge and in Chrome.</li>
+        <li>Click <b>postMessage</b>. Note any popup-blocked message, Local Network Access prompt or console error.</li>
+        <li>Click <b>fragment</b> on the same page and note the same things.</li>
+        <li>In the popup, click <b>Save capture</b> once per site so it can become a test fixture.</li>
+      </ol>
+      <p>Results are recorded automatically below. Only note what the server can't see: prompts, blocked popups, console errors.</p>
+
+      <h2>3. Results so far</h2>
+      <p><button id="refresh" type="button">Refresh</button></p>
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th><th>Browser</th><th>Site</th><th>Method</th><th>Status</th><th>JSON-LD</th><th>JobPosting</th><th>Size</th><th>ms</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </main>
+    <script src="/static/install.js"></script>
+  </body>
+</html>

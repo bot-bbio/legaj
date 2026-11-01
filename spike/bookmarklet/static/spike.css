@@ -1,0 +1,81 @@
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  margin: 0;
+  background: #f7f8fa;
+  color: #1c2430;
+}
+main {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 1.25rem;
+}
+main.wide {
+  max-width: 64rem;
+}
+h1 small {
+  font-size: 0.6em;
+  color: #5d6878;
+  font-weight: normal;
+}
+.status {
+  padding: 0.6rem 0.8rem;
+  border-radius: 6px;
+  background: #eef1f5;
+}
+.status.good {
+  background: #e3f4e8;
+}
+.status.bad {
+  background: #fbe6e4;
+}
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.3rem 1rem;
+}
+dt {
+  color: #5d6878;
+}
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+button,
+.bm {
+  font: inherit;
+  padding: 0.5rem 0.9rem;
+  border-radius: 6px;
+  border: 1px solid #1f5fbf;
+  background: #1f5fbf;
+  color: #fff;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  margin-right: 0.5rem;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.note {
+  color: #5d6878;
+  font-size: 0.9em;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9em;
+}
+th,
+td {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid #e1e5eb;
+}
+tr.good td:nth-child(5) {
+  color: #18794e;
+}
+tr.bad td:nth-child(5) {
+  color: #b42318;
+  font-weight: 600;
+}

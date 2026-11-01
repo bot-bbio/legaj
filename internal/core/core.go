@@ -16,6 +16,7 @@ import (
 	"github.com/bot-bbio/legaj/internal/apperr"
 	"github.com/bot-bbio/legaj/internal/events"
 	"github.com/bot-bbio/legaj/internal/logx"
+	"github.com/bot-bbio/legaj/internal/profile"
 	"github.com/bot-bbio/legaj/internal/secrets"
 	"github.com/bot-bbio/legaj/internal/settings"
 	"github.com/bot-bbio/legaj/internal/store"
@@ -58,6 +59,7 @@ type Core struct {
 type Services struct {
 	DB       *store.DB
 	Settings *settings.Service
+	Profile  *profile.Service
 }
 
 // ErrNotReady is returned by Ready before the database is open.
@@ -140,6 +142,7 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 	svc := &Services{
 		DB:       db,
 		Settings: settings.New(db, c.Bus, c.opts.Autostart, c.opts.Exe),
+		Profile:  profile.NewService(db, c.Bus, c.Now),
 	}
 	c.mu.Lock()
 	c.svc = svc

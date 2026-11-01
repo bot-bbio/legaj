@@ -12,6 +12,7 @@ ignore (
 )
 
 require (
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/wailsapp/wails/v2 v2.17.1
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/sys v0.49.0

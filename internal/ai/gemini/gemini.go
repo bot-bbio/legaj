@@ -100,6 +100,11 @@ var (
 	enumValue = regexp.MustCompile(`^[A-Z_]{1,40}$`)
 )
 
+// ValidModel reports whether name is safe to use as a model ID.
+func ValidModel(name string) bool {
+	return modelName.MatchString(name)
+}
+
 // Generate sends req, retrying 429 and 5xx with exponential backoff.
 func (c *Client) Generate(ctx context.Context, req ai.Request) (ai.Response, error) {
 	model := req.Model

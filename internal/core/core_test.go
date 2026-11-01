@@ -11,6 +11,7 @@ import (
 	"github.com/bot-bbio/legaj/internal/core"
 	"github.com/bot-bbio/legaj/internal/events"
 	"github.com/bot-bbio/legaj/internal/logx"
+	"github.com/bot-bbio/legaj/internal/secrets"
 	"github.com/bot-bbio/legaj/internal/store"
 	"github.com/bot-bbio/legaj/internal/testenv"
 )
@@ -19,8 +20,55 @@ func TestMain(m *testing.M) { testenv.Main(m) }
 
 var ctx = context.Background()
 
+// noAutostart stands in for the registry; tests never touch HKCU.
+type noAutostart struct{}
+
+func (noAutostart) Enable(string) error { return nil }
+func (noAutostart) Disable() error      { return nil }
+
+// opts never reaches real user state: memory secrets, no registry.
 func opts(dir string, now time.Time) core.Options {
-	return core.Options{Dir: dir, Now: func() time.Time { return now }, Emitter: &events.Recorder{}}
+	return core.Options{
+		Dir: dir, Now: func() time.Time { return now }, Emitter: &events.Recorder{},
+		Secrets: secrets.NewMemory(), Autostart: noAutostart{},
+		Exe: func() (string, error) { return `C:\LeGaJ\legaj.exe`, nil },
+	}
+}
+
+func TestR4_SavedKeyRegisteredWithLogRedactorAtBoot(t *testing.T) {
+	const key = "AIzaSyD-SENTINEL-KEY-0123456789abcdWXYZ"
+	o := opts(testenv.Isolate(t), time.Now())
+	if err := o.Secrets.Set(key); err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := core.Boot(ctx, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Log.Info("leak " + key)
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.Dir, logx.LogDir, "legaj.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), key) {
+		t.Fatal("the saved key reached the log file")
+	}
+}
+
+func TestR37_SettingsServiceAvailableWhenReady(t *testing.T) {
+	c, _, err := core.Boot(ctx, opts(testenv.Isolate(t), time.Now()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	svc, err := c.Ready()
+	if err != nil || svc.Settings == nil {
+		t.Fatalf("Ready = %v, %v", svc, err)
+	}
 }
 
 func TestR2_BootFreshFolderIsReadyAndBacksUp(t *testing.T) {

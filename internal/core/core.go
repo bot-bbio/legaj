@@ -9,16 +9,19 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/bot-bbio/legaj/internal/apperr"
 	"github.com/bot-bbio/legaj/internal/events"
 	"github.com/bot-bbio/legaj/internal/logx"
+	"github.com/bot-bbio/legaj/internal/secrets"
+	"github.com/bot-bbio/legaj/internal/settings"
 	"github.com/bot-bbio/legaj/internal/store"
 )
 
-// Options configures Boot.
+// Options configures Boot. Zero values select the real implementations.
 type Options struct {
 	// Dir is the data folder (apphome.Dir()).
 	Dir string
@@ -26,6 +29,12 @@ type Options struct {
 	Now func() time.Time
 	// Emitter delivers change events to the frontend.
 	Emitter events.Emitter
+	// Secrets stores the API key; default Windows Credential Manager.
+	Secrets secrets.Store
+	// Autostart manages the HKCU Run entry; default the registry.
+	Autostart settings.Autostart
+	// Exe returns this program's path; default os.Executable.
+	Exe func() (string, error)
 }
 
 // Core is the running backend.
@@ -35,18 +44,43 @@ type Core struct {
 	Log      *slog.Logger
 	Redactor *logx.Redactor
 	Bus      *events.Bus
+	// Secrets works before the database is ready (it doesn't use it).
+	Secrets *secrets.Manager
 
+	opts    Options
 	mu      sync.Mutex
-	db      *store.DB // nil until the startup state is ready
+	svc     *Services // nil until the startup state is ready
 	logFile io.Closer
 }
 
-// DB returns the open database, or nil while the startup state isn't ready.
-// Safe from any goroutine: Wails runs bound methods concurrently.
-func (c *Core) DB() *store.DB {
+// Services are the parts of the backend that need the database. They
+// become available together, once the startup state is ready.
+type Services struct {
+	DB       *store.DB
+	Settings *settings.Service
+}
+
+// ErrNotReady is returned by Ready before the database is open.
+var ErrNotReady = apperr.New(apperr.CodeConflict, "LeGaJ is still starting. Try again in a moment.")
+
+// Ready returns the services, or ErrNotReady. Safe from any goroutine:
+// Wails runs bound methods concurrently.
+func (c *Core) Ready() (*Services, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.db
+	if c.svc == nil {
+		return nil, ErrNotReady
+	}
+	return c.svc, nil
+}
+
+// DB returns the open database, or nil while the startup state isn't ready.
+func (c *Core) DB() *store.DB {
+	s, err := c.Ready()
+	if err != nil {
+		return nil
+	}
+	return s.DB
 }
 
 // Boot opens the log and the database. err is non-nil only when even the
@@ -56,12 +90,30 @@ func Boot(ctx context.Context, opts Options) (*Core, store.Startup, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
+	if opts.Secrets == nil {
+		opts.Secrets = secrets.NewKeyring()
+	}
+	if opts.Autostart == nil {
+		opts.Autostart = settings.RegistryAutostart{}
+	}
+	if opts.Exe == nil {
+		opts.Exe = os.Executable
+	}
 	redactor := logx.NewRedactor()
 	log, logFile, err := logx.NewFile(opts.Dir, redactor, slog.LevelInfo)
 	if err != nil {
 		return nil, store.Startup{}, apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't open its data folder.")
 	}
-	c := &Core{Dir: opts.Dir, Now: opts.Now, Log: log, Redactor: redactor, Bus: events.NewBus(opts.Emitter), logFile: logFile}
+	c := &Core{
+		Dir: opts.Dir, Now: opts.Now, Log: log, Redactor: redactor,
+		Bus:     events.NewBus(opts.Emitter),
+		Secrets: secrets.NewManager(opts.Secrets, redactor),
+		opts:    opts, logFile: logFile,
+	}
+	// Register a saved key with the log redactor right away (R4, R34).
+	if _, err := c.Secrets.Status(); err != nil {
+		c.Log.Warn("could not read the API key status", "err", err)
+	}
 	st, err := c.open(ctx)
 	if err != nil {
 		return c, st, err
@@ -85,8 +137,12 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 		// on the next start.
 		c.Log.Error("daily backup failed", "err", err)
 	}
+	svc := &Services{
+		DB:       db,
+		Settings: settings.New(db, c.Bus, c.opts.Autostart, c.opts.Exe),
+	}
 	c.mu.Lock()
-	c.db = db
+	c.svc = svc
 	c.mu.Unlock()
 	c.Log.Info("database ready")
 	return st, nil
@@ -95,10 +151,7 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 // Restore replaces the database with a backup the user chose from the
 // startup restore offer, then opens it. It's refused while a database is open.
 func (c *Core) Restore(ctx context.Context, backupName string) (store.Startup, error) {
-	c.mu.Lock()
-	open := c.db != nil
-	c.mu.Unlock()
-	if open {
+	if _, err := c.Ready(); err == nil {
 		return store.Startup{}, apperr.New(apperr.CodeConflict, "A backup can only be restored when LeGaJ starts with a damaged database.")
 	}
 	if err := store.Restore(c.Dir, backupName, c.Now); err != nil {
@@ -115,12 +168,12 @@ func (c *Core) Close() error {
 		return nil
 	}
 	c.mu.Lock()
-	db := c.db
-	c.db = nil
+	svc := c.svc
+	c.svc = nil
 	c.mu.Unlock()
 	var errs []error
-	if db != nil {
-		errs = append(errs, db.Close())
+	if svc != nil {
+		errs = append(errs, svc.DB.Close())
 	}
 	if c.logFile != nil {
 		errs = append(errs, c.logFile.Close())

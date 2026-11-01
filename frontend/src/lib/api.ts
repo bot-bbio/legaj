@@ -4,7 +4,8 @@
  * bindings (C13), minus the generated helper methods.
  */
 import * as App from '../../wailsjs/go/main/App';
-import type { main } from '../../wailsjs/go/models';
+import * as SettingsAPI from '../../wailsjs/go/main/SettingsAPI';
+import type { main, settings } from '../../wailsjs/go/models';
 
 /** The data fields of a generated model class, without its methods. */
 export type Plain<T> = {
@@ -13,10 +14,18 @@ export type Plain<T> = {
 
 export type StartupView = Plain<main.StartupView>;
 export type BackupView = Plain<main.BackupView>;
+export type Settings = Plain<settings.Settings>;
+export type SettingsView = Plain<main.SettingsView>;
+export type Materials = 'letter' | 'answers' | 'both';
 
 export const api = {
   startup: (): Promise<StartupView> => App.Startup(),
   restoreBackup: (name: string): Promise<StartupView> => App.RestoreBackup(name),
   quit: (): Promise<void> => App.Quit(),
   version: (): Promise<string> => App.Version(),
+
+  getSettings: (): Promise<SettingsView> => SettingsAPI.GetSettings(),
+  saveSettings: (s: Settings): Promise<SettingsView> => SettingsAPI.SaveSettings(s),
+  saveApiKey: (key: string): Promise<void> => SettingsAPI.SaveAPIKey(key),
+  removeApiKey: (): Promise<void> => SettingsAPI.RemoveAPIKey(),
 };

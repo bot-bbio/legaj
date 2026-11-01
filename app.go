@@ -146,6 +146,31 @@ func (a *App) RestoreBackup(name string) (StartupView, error) {
 	return v, nil
 }
 
+// coreOnly returns the booted core, for calls that don't need the database.
+func (a *App) coreOnly() (*core.Core, error) {
+	<-a.booted
+	a.mu.Lock()
+	c := a.core
+	a.mu.Unlock()
+	if c == nil {
+		return nil, core.ErrNotReady
+	}
+	return c, nil
+}
+
+// services returns the core and its database-backed services.
+func (a *App) services() (*core.Core, *core.Services, error) {
+	c, err := a.coreOnly()
+	if err != nil {
+		return nil, nil, err
+	}
+	svc, err := c.Ready()
+	if err != nil {
+		return nil, nil, err
+	}
+	return c, svc, nil
+}
+
 // Quit closes LeGaJ (the "Quit" choice on the restore screen).
 func (a *App) Quit() {
 	runtime.Quit(a.ctx)

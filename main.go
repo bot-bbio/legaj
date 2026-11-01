@@ -55,5 +55,8 @@ func run() error {
 // the single list: the R4 test reflects over it to prove no method returns
 // the API key.
 func bindings(app *App) []any {
-	return []any{app}
+	return []any{
+		app,
+		&SettingsAPI{app: app},
+	}
 }

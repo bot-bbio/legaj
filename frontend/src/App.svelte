@@ -1,16 +1,32 @@
 <script lang="ts">
   import Nav from './components/Nav.svelte';
-  import { DEFAULT_SECTION, sectionLabel, type SectionId } from './lib/nav';
-
-  let active = $state<SectionId>(DEFAULT_SECTION);
+  import StartupGate from './components/StartupGate.svelte';
+  import { navigate, route } from './lib/stores/route';
+  import FollowUps from './views/FollowUps.svelte';
+  import Interviews from './views/Interviews.svelte';
+  import Pipeline from './views/Pipeline.svelte';
+  import Profile from './views/Profile.svelte';
+  import Settings from './views/Settings.svelte';
 </script>
 
-<div class="shell">
-  <Nav {active} onselect={(id) => (active = id)} />
-  <main>
-    <h1>{sectionLabel(active)}</h1>
-  </main>
-</div>
+<StartupGate>
+  <div class="shell">
+    <Nav active={$route} onselect={navigate} />
+    <main>
+      {#if $route === 'profile'}
+        <Profile />
+      {:else if $route === 'pipeline'}
+        <Pipeline />
+      {:else if $route === 'followups'}
+        <FollowUps />
+      {:else if $route === 'interviews'}
+        <Interviews />
+      {:else}
+        <Settings />
+      {/if}
+    </main>
+  </div>
+</StartupGate>
 
 <style>
   .shell {
@@ -22,7 +38,7 @@
     padding: 1.5rem 2rem;
     overflow: auto;
   }
-  h1 {
+  main :global(h1) {
     margin: 0 0 1rem;
     font-size: 1.5rem;
   }

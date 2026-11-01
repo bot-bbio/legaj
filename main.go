@@ -41,11 +41,19 @@ func run() error {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		OnStartup: app.startup,
+		OnStartup:  app.startup,
+		OnShutdown: app.shutdown,
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId:               instance.AppID,
 			OnSecondInstanceLaunch: app.onSecondInstanceLaunch,
 		},
-		Bind: []interface{}{app},
+		Bind: bindings(app),
 	})
+}
+
+// bindings lists every object whose methods the frontend can call. Keep it
+// the single list: the R4 test reflects over it to prove no method returns
+// the API key.
+func bindings(app *App) []any {
+	return []any{app}
 }

@@ -16,8 +16,8 @@
 *.app/
 *.dmg
 
-# Frontend
-frontend/node_modules/
+# Frontend (node_modules at any depth: tool caches can land in subfolders)
+node_modules/
 frontend/dist/*
 !frontend/dist/.gitkeep
 # Generated from Go by `wails generate module` on every verify/build.

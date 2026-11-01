@@ -4,14 +4,24 @@
 *.dll
 *.so
 *.dylib
-legaj
+/legaj
 
-# Packaging build artifacts
-dist/
-build/
-packaging/staging/
+# Build output. Narrow on purpose: build/windows/ (icon, manifest, version
+# info) and frontend/dist/.gitkeep must stay tracked so a clean checkout builds.
+/dist/
+/build/bin/
+/build/legaj-tools/
+/packaging/dist/
+/packaging/staging/
 *.app/
 *.dmg
+
+# Frontend
+frontend/node_modules/
+frontend/dist/*
+!frontend/dist/.gitkeep
+# Generated from Go by `wails generate module` on every verify/build.
+frontend/wailsjs/
 
 # Code-signing material (NEVER commit certificates or keys)
 *.pfx
@@ -88,3 +98,12 @@ error*.PNG
 
 # Runtime data logs
 references/*.log
+
+# Workspace harness & planning (local only, by workspace mandate)
+.agent/
+.workflow/
+conductor/
+STRATEGY.md
+WORKFLOW.md
+bootstrap.ps1
+mach.exe

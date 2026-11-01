@@ -6,6 +6,13 @@
 
 LeGaJ (Let's Get a Job) is an offline-first job search suite. It pairs a **Go + Fyne desktop GUI** with a **Python document backend** for parsing resume files, compiling single-page PDF resumes and cover letters, and tracking job applications locally. All personal data stays on your machine.
 
+> **LeGaJ 2 is being rebuilt on this branch.** It's a single Go + [Wails](https://wails.io) desktop app with a Svelte/TypeScript UI and no Python. The rest of this README still describes V1, which is preserved at the `v1-final` tag, until the V2 docs land.
+>
+> **Building V2 from source (Windows):**
+> - **Prerequisites:** Go 1.26+, Node.js 24+, a MinGW-w64 `gcc` on `PATH` (for the race detector), and the Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1`).
+> - **Run the full check:** `powershell -NoProfile -File scripts/verify.ps1` generates the bindings, builds the frontend, runs every Go and TypeScript check and test, and writes `build/bin/legaj.exe`.
+> - **Live development:** `wails dev`.
+
 ---
 
 ## Getting Started

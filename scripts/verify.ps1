@@ -94,7 +94,16 @@ Invoke-Step 'gcc (for -race)' {
         $global:LASTEXITCODE = 1
     }
 }
-Invoke-Step 'go test -race' { & $go test -race -count=1 ./... }
+# Tests refuse to run without an isolated data folder (R36, internal/testenv).
+$testHome = Join-Path ([IO.Path]::GetTempPath()) ('legaj-verify-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $testHome | Out-Null
+$env:LEGAJ_HOME = $testHome
+try {
+    Invoke-Step 'go test -race' { & $go test -race -count=1 ./... }
+} finally {
+    Remove-Item Env:\LEGAJ_HOME
+    Remove-Item -LiteralPath $testHome -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 # --- Frontend --------------------------------------------------------------
 Invoke-Step 'svelte-check' { Invoke-InFrontend { & $npm run check } }

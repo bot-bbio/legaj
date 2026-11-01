@@ -14,7 +14,10 @@ import (
 	"time"
 
 	"github.com/bot-bbio/legaj/internal/proc"
+	"github.com/bot-bbio/legaj/internal/testenv"
 )
+
+func TestMain(m *testing.M) { testenv.Main(m) }
 
 // Environment variables that turn this test binary into a "second launch" of
 // the app for TestHelperProcessGate.

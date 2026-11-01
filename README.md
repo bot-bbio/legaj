@@ -12,6 +12,7 @@ LeGaJ (Let's Get a Job) is an offline-first job search suite. It pairs a **Go + 
 > - **Prerequisites:** Go 1.26+, Node.js 24+, a MinGW-w64 `gcc` on `PATH` (for the race detector), and the Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1`).
 > - **Run the full check:** `powershell -NoProfile -File scripts/verify.ps1` generates the bindings, builds the frontend, runs every Go and TypeScript check and test, and writes `build/bin/legaj.exe`.
 > - **Live development:** `wails dev`.
+> - **Running `go test` by hand:** first set `LEGAJ_HOME` to a scratch folder. Tests refuse to run against your real data folder.
 
 ---
 

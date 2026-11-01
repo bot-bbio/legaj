@@ -14,7 +14,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/bot-bbio/legaj/internal/testenv"
 )
+
+func TestMain(m *testing.M) { testenv.Main(m) }
 
 // skipDirs are never scanned: VCS data, local-only harness docs, dependencies,
 // and V1 runtime/build output that is gitignored and not part of the source tree.
@@ -191,6 +195,104 @@ func TestR6_NoProcessSpawnOutsideProc(t *testing.T) {
 	})
 	if len(violations) > 0 {
 		t.Fatalf("process-spawning calls outside internal/proc (use proc.Command):\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// R36: every test binary runs behind the real-data guard
+// ---------------------------------------------------------------------------
+
+const testenvPath = "github.com/bot-bbio/legaj/internal/testenv"
+
+// hasGuardedTestMain reports whether the Go source declares
+// func TestMain(m *testing.M) and calls testenv.Main inside it.
+func hasGuardedTestMain(filename string, src []byte) (bool, error) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, filename, src, parser.SkipObjectResolution)
+	if err != nil {
+		return false, err
+	}
+	local := ""
+	for _, imp := range file.Imports {
+		if path, _ := strconv.Unquote(imp.Path.Value); path == testenvPath {
+			local = "testenv"
+			if imp.Name != nil {
+				local = imp.Name.Name
+			}
+		}
+	}
+	if local == "" {
+		return false, nil
+	}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || fn.Name.Name != "TestMain" || fn.Body == nil {
+			continue
+		}
+		found := false
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+				if id, ok := sel.X.(*ast.Ident); ok && id.Name == local && sel.Sel.Name == "Main" {
+					found = true
+				}
+			}
+			return !found
+		})
+		return found, nil
+	}
+	return false, nil
+}
+
+func TestR36_GuardDetector(t *testing.T) {
+	good := `package p
+import ("testing"; "github.com/bot-bbio/legaj/internal/testenv")
+func TestMain(m *testing.M) { testenv.Main(m) }`
+	bad := `package p
+import "testing"
+func TestMain(m *testing.M) { m.Run() }`
+	if ok, err := hasGuardedTestMain("good_test.go", []byte(good)); err != nil || !ok {
+		t.Fatalf("guarded TestMain not recognised: %v %v", ok, err)
+	}
+	if ok, err := hasGuardedTestMain("bad_test.go", []byte(bad)); err != nil || ok {
+		t.Fatalf("unguarded TestMain accepted: %v %v", ok, err)
+	}
+}
+
+func TestR36_EveryTestPackageUsesGuard(t *testing.T) {
+	root := repoRoot(t)
+	guarded := map[string]bool{} // dir -> has guarded TestMain
+	walkFiles(t, root, func(rel, abs string) {
+		if !strings.HasSuffix(rel, "_test.go") {
+			return
+		}
+		dir := filepath.ToSlash(filepath.Dir(rel))
+		if _, seen := guarded[dir]; !seen {
+			guarded[dir] = false
+		}
+		src, err := os.ReadFile(abs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ok, err := hasGuardedTestMain(abs, src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok {
+			guarded[dir] = true
+		}
+	})
+	var missing []string
+	for dir, ok := range guarded {
+		if !ok {
+			missing = append(missing, dir)
+		}
+	}
+	if len(missing) > 0 {
+		t.Fatalf("A1: these test packages lack `func TestMain(m *testing.M) { testenv.Main(m) }`:\n%s", strings.Join(missing, "\n"))
 	}
 }
 

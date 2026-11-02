@@ -5,6 +5,7 @@
  */
 import * as App from '../../wailsjs/go/main/App';
 import * as OnboardingAPI from '../../wailsjs/go/main/OnboardingAPI';
+import * as PipelineAPI from '../../wailsjs/go/main/PipelineAPI';
 import * as ProfileAPI from '../../wailsjs/go/main/ProfileAPI';
 import * as SettingsAPI from '../../wailsjs/go/main/SettingsAPI';
 import { profile, type main, type onboarding, type settings } from '../../wailsjs/go/models';
@@ -30,6 +31,8 @@ export type OnboardingState = Plain<onboarding.State>;
 export type KeyResult = Plain<onboarding.KeyResult>;
 export type ResumeImport = Plain<main.ResumeImport>;
 export type StepID = 'key' | 'resume' | 'profile' | 'clipper';
+export type ApplicationRow = Plain<main.ApplicationRow>;
+export type Stage = 'lead' | 'ready' | 'applied' | 'interviewing' | 'offer' | 'rejected' | 'withdrawn';
 
 export const api = {
   startup: (): Promise<StartupView> => App.Startup(),
@@ -50,4 +53,6 @@ export const api = {
   uploadResume: (): Promise<ResumeImport> => OnboardingAPI.UploadResume(),
   parseResume: (fileId: number): Promise<ResumeImport> => OnboardingAPI.ParseResume(fileId),
   finishOnboarding: (): Promise<void> => OnboardingAPI.FinishOnboarding(),
+
+  listApplications: (): Promise<ApplicationRow[]> => PipelineAPI.ListApplications(),
 };

@@ -62,9 +62,15 @@ func stripMarkers(s string) string {
 	}
 }
 
-// userPrompt builds the message: the task, then the data blocks. Only this
-// application's data is included (R21).
-func userPrompt(app store.Application, p profile.Profile, style Style, retryReason string) (string, error) {
+// StripMarkers is stripMarkers for other prompt builders (R25), so text
+// they quote can't forge a data block either.
+func StripMarkers(s string) string { return stripMarkers(s) }
+
+// DataBlocks returns the untrusted data a grounded prompt ends with: the
+// minimized profile and this application's job description, each inside
+// markers that the data itself can't contain (R21, R35). Form answers
+// (R25) use the same blocks.
+func DataBlocks(app store.Application, p profile.Profile) (string, error) {
 	pp := promptProfile{
 		Name: p.FullName, Headline: p.Headline, TargetRole: p.TargetRole, Summary: p.Summary,
 		Experiences: p.Experiences, Education: p.Education, Skills: p.Skills,
@@ -80,12 +86,25 @@ func userPrompt(app store.Application, p profile.Profile, style Style, retryReas
 	}
 	pj := strings.TrimSpace(buf.String())
 	var sb strings.Builder
+	fmt.Fprintf(&sb, "%s\n%s\n%s\n", BeginProfile, stripMarkers(pj), EndProfile)
+	fmt.Fprintf(&sb, "\n%s\n%s\n%s\n", BeginJD, stripMarkers(app.Description), EndJD)
+	return sb.String(), nil
+}
+
+// userPrompt builds the message: the task, then the data blocks. Only this
+// application's data is included (R21).
+func userPrompt(app store.Application, p profile.Profile, style Style, retryReason string) (string, error) {
+	blocks, err := DataBlocks(app, p)
+	if err != nil {
+		return "", err
+	}
+	var sb strings.Builder
 	fmt.Fprintf(&sb, "Write a cover letter for the %q role at %q.\n", app.Role, app.Company)
 	fmt.Fprintf(&sb, "Opening style: %s\n", style.Instruction)
 	if retryReason != "" {
 		fmt.Fprintf(&sb, "%s %s Fix that and answer again.\n", RetryNote, retryReason)
 	}
-	fmt.Fprintf(&sb, "\n%s\n%s\n%s\n", BeginProfile, stripMarkers(pj), EndProfile)
-	fmt.Fprintf(&sb, "\n%s\n%s\n%s\n", BeginJD, stripMarkers(app.Description), EndJD)
+	sb.WriteString("\n")
+	sb.WriteString(blocks)
 	return sb.String(), nil
 }

@@ -16,6 +16,7 @@ import (
 
 	"github.com/bot-bbio/legaj/internal/ai"
 	"github.com/bot-bbio/legaj/internal/ai/gemini"
+	"github.com/bot-bbio/legaj/internal/answers"
 	"github.com/bot-bbio/legaj/internal/apperr"
 	"github.com/bot-bbio/legaj/internal/documents"
 	"github.com/bot-bbio/legaj/internal/events"
@@ -94,6 +95,8 @@ type Services struct {
 	Letters    *letters.Service
 	// Jobs runs letter generation in the background (R23).
 	Jobs *jobs.Queue
+	// Answers drafts form answers and keeps the answer bank (R25).
+	Answers *answers.Service
 }
 
 // geminiKeyTester makes one tiny call with the candidate key. Any 200
@@ -254,6 +257,9 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 		Documents: svc.Documents, SkipReview: svc.skipReview,
 	})
 	svc.Jobs = jobs.New(jobs.Config{Bus: c.Bus, Work: svc.Letters.Generate})
+	svc.Answers = answers.NewService(answers.Config{
+		DB: db, Bus: c.Bus, AI: c.AI, Profile: svc.Profile, Machine: svc.Stages, Model: svc.model, Now: c.Now,
+	})
 	svc.Jobs.Start(context.Background())
 	// Deleting rows cancels their queued and running generation (R13).
 	svc.Pipeline.OnDelete(svc.Jobs.CancelApps)

@@ -53,6 +53,10 @@ var placeholder = regexp.MustCompile(`[\[\]]|\{\{|\}\}|<[^<>\n]{1,40}>|(?i)hirin
 // check rejects drafts with placeholders, or that never name the company
 // they're for (a letter written for the wrong company). It returns a reason
 // suitable for the retry note, or "" when the draft is acceptable.
+// FindPlaceholder returns the first template leftover in s, or "". Form
+// answers (R25) use the same rule as letters.
+func FindPlaceholder(s string) string { return placeholder.FindString(s) }
+
 func check(a answer, company string) string {
 	all := append([]string{a.Salutation, a.Opening, a.Closing, a.SignOff}, append(a.WhyOptions, a.Body...)...)
 	for _, s := range all {

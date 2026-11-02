@@ -58,5 +58,6 @@ func bindings(app *App) []any {
 	return []any{
 		app,
 		&SettingsAPI{app: app},
+		&ProfileAPI{app: app},
 	}
 }

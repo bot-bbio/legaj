@@ -2,9 +2,21 @@ import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
+// The views behind the nav load their own data; give them empty answers.
+vi.mock('./lib/events', () => ({ onEntityChanged: () => () => {} }));
 vi.mock('./lib/api', () => ({
   api: {
     startup: () => Promise.resolve({ kind: 'ready', movedAside: '', backups: [], message: '' }),
+    getProfile: () =>
+      Promise.resolve({
+        fullName: '', email: '', phone: '', location: '', headline: '', targetRole: '', summary: '',
+        links: [], experiences: [], education: [], skills: [],
+      }),
+    getSettings: () =>
+      Promise.resolve({
+        settings: { model: 'm', skipReview: false, defaultMaterials: 'letter', followUpDays: 7, updateCheck: true, startWithWindows: false },
+        key: { saved: false, masked: '' },
+      }),
   },
 }));
 

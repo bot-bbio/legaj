@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bot-bbio/legaj/internal/ai/aitest"
 	"github.com/bot-bbio/legaj/internal/core"
 	"github.com/bot-bbio/legaj/internal/events"
 	"github.com/bot-bbio/legaj/internal/secrets"
@@ -30,7 +31,7 @@ func newTestApp(t *testing.T) (*App, *secrets.Memory) {
 	keys := secrets.NewMemory()
 	c, st, err := core.Boot(context.Background(), core.Options{
 		Dir: testenv.Isolate(t), Now: time.Now, Emitter: &events.Recorder{},
-		Secrets: keys, Autostart: noAutostart{},
+		Secrets: keys, Autostart: noAutostart{}, AI: &aitest.Fake{},
 		Exe: func() (string, error) { return `C:\LeGaJ\legaj.exe`, nil },
 	})
 	if err != nil {

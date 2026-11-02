@@ -184,6 +184,13 @@ func (s *Service) Save(ctx context.Context, in Profile) (Profile, error) {
 	return p, nil
 }
 
+// Clean normalizes p and validates it: exactly what Save would store,
+// minus IDs. Resume import uses it so a draft is always saveable.
+func Clean(p Profile) (Profile, error) {
+	p = normalize(p)
+	return p, Validate(p)
+}
+
 // assignIDs gives new list items a random ID; existing IDs are kept.
 func assignIDs(p *Profile) {
 	for i := range p.Experiences {

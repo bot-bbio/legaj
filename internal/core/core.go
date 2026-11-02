@@ -13,10 +13,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bot-bbio/legaj/internal/ai"
+	"github.com/bot-bbio/legaj/internal/ai/gemini"
 	"github.com/bot-bbio/legaj/internal/apperr"
 	"github.com/bot-bbio/legaj/internal/events"
 	"github.com/bot-bbio/legaj/internal/logx"
 	"github.com/bot-bbio/legaj/internal/profile"
+	"github.com/bot-bbio/legaj/internal/resume"
 	"github.com/bot-bbio/legaj/internal/secrets"
 	"github.com/bot-bbio/legaj/internal/settings"
 	"github.com/bot-bbio/legaj/internal/store"
@@ -36,6 +39,8 @@ type Options struct {
 	Autostart settings.Autostart
 	// Exe returns this program's path; default os.Executable.
 	Exe func() (string, error)
+	// AI is the model provider; default the Gemini client.
+	AI ai.Provider
 }
 
 // Core is the running backend.
@@ -47,6 +52,8 @@ type Core struct {
 	Bus      *events.Bus
 	// Secrets works before the database is ready (it doesn't use it).
 	Secrets *secrets.Manager
+	// AI reads the key from Secrets on every call.
+	AI ai.Provider
 
 	opts    Options
 	mu      sync.Mutex
@@ -60,6 +67,16 @@ type Services struct {
 	DB       *store.DB
 	Settings *settings.Service
 	Profile  *profile.Service
+	Resume   *resume.Service
+}
+
+// model is the Gemini model chosen in Settings, or the default.
+func (s *Services) model(ctx context.Context) string {
+	st, err := s.Settings.Get(ctx)
+	if err != nil {
+		return gemini.DefaultModel
+	}
+	return st.Model
 }
 
 // ErrNotReady is returned by Ready before the database is open.
@@ -112,6 +129,10 @@ func Boot(ctx context.Context, opts Options) (*Core, store.Startup, error) {
 		Secrets: secrets.NewManager(opts.Secrets, redactor),
 		opts:    opts, logFile: logFile,
 	}
+	c.AI = opts.AI
+	if c.AI == nil {
+		c.AI = gemini.New(gemini.Config{Key: c.Secrets.Load, Logger: log})
+	}
 	// Register a saved key with the log redactor right away (R4, R34).
 	if _, err := c.Secrets.Status(); err != nil {
 		c.Log.Warn("could not read the API key status", "err", err)
@@ -144,6 +165,10 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 		Settings: settings.New(db, c.Bus, c.opts.Autostart, c.opts.Exe),
 		Profile:  profile.NewService(db, c.Bus, c.Now),
 	}
+	svc.Resume = resume.NewService(resume.Config{
+		DB: db, Bus: c.Bus, Dir: c.Dir, AI: c.AI, Now: c.Now,
+		Model: svc.model,
+	})
 	c.mu.Lock()
 	c.svc = svc
 	c.mu.Unlock()

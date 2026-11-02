@@ -18,6 +18,7 @@ import (
 	"github.com/bot-bbio/legaj/internal/apperr"
 	"github.com/bot-bbio/legaj/internal/documents"
 	"github.com/bot-bbio/legaj/internal/events"
+	"github.com/bot-bbio/legaj/internal/letters"
 	"github.com/bot-bbio/legaj/internal/logx"
 	"github.com/bot-bbio/legaj/internal/onboarding"
 	"github.com/bot-bbio/legaj/internal/opener"
@@ -88,6 +89,7 @@ type Services struct {
 	Stages     *pipeline.Machine
 	Pipeline   *pipeline.Service
 	Documents  *documents.Service
+	Letters    *letters.Service
 }
 
 // geminiKeyTester makes one tiny call with the candidate key. Any 200
@@ -219,6 +221,7 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 	svc.Stages = pipeline.NewMachine(c.Now)
 	svc.Pipeline = pipeline.NewService(pipeline.Config{DB: db, Bus: c.Bus, Machine: svc.Stages, Now: c.Now})
 	svc.Documents = documents.NewService(db, c.Bus, c.Dir, c.Now)
+	svc.Letters = letters.NewService(letters.Config{DB: db, Bus: c.Bus, AI: c.AI, Profile: svc.Profile, Model: svc.model, Now: c.Now})
 	// Rows deleted in a previous session are past their undo window (R13).
 	if n, err := svc.Pipeline.PurgeDeleted(ctx); err != nil {
 		c.Log.Error("purge of deleted applications failed", "err", err)

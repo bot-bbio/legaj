@@ -164,6 +164,17 @@ func TestR37_StartWithWindowsWritesHKCURun(t *testing.T) {
 	}
 }
 
+func TestR37_ReconcileAppliesStoredSetting(t *testing.T) {
+	f := newFixture(t)
+	f.auto.enabled = true // the Run entry exists, but the saved setting is off
+	if err := f.svc.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if f.auto.enabled {
+		t.Fatal("Reconcile left a Run entry the setting says shouldn't exist")
+	}
+}
+
 func TestR37_RegistryFailureSavesNothing(t *testing.T) {
 	f := newFixture(t)
 	f.auto.failNext = errors.New("access denied")

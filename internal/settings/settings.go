@@ -141,27 +141,46 @@ func (s *Service) Save(ctx context.Context, in Settings) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
+	// The DB commits first, then Windows is told. If the registry refuses,
+	// the stored settings are put back, so the two never disagree; should
+	// even that fail, Reconcile at the next start heals it.
+	if err := s.store(ctx, in); err != nil {
+		return Settings{}, err
+	}
+	if in.StartWithWindows != current.StartWithWindows {
+		if err := s.applyAutostart(in.StartWithWindows); err != nil {
+			_ = s.store(ctx, current)
+			return Settings{}, err
+		}
+	}
+	return in, nil
+}
+
+// store writes every setting in one transaction and emits a change.
+func (s *Service) store(ctx context.Context, in Settings) error {
 	values, err := toKeyValues(in)
 	if err != nil {
-		return Settings{}, apperr.Wrap(err, apperr.CodeInternal, apperr.GenericMessage)
+		return apperr.Wrap(err, apperr.CodeInternal, apperr.GenericMessage)
 	}
-	err = events.Mutate(ctx, s.db, s.bus, events.Change(events.EntitySettings), func(tx *sql.Tx) error {
+	return events.Mutate(ctx, s.db, s.bus, events.Change(events.EntitySettings), func(tx *sql.Tx) error {
 		for k, v := range values {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key, value) VALUES (?, ?)
 				ON CONFLICT(key) DO UPDATE SET value = excluded.value`, k, string(v)); err != nil {
 				return apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't save your settings. Try again.")
 			}
 		}
-		// Last, so a registry failure rolls the DB writes back.
-		if in.StartWithWindows != current.StartWithWindows {
-			return s.applyAutostart(in.StartWithWindows)
-		}
 		return nil
 	})
+}
+
+// Reconcile makes the HKCU Run entry match the saved setting. Run at
+// startup, it heals any save that changed one but not the other.
+func (s *Service) Reconcile(ctx context.Context) error {
+	cur, err := s.Get(ctx)
 	if err != nil {
-		return Settings{}, err
+		return err
 	}
-	return in, nil
+	return s.applyAutostart(cur.StartWithWindows)
 }
 
 func (s *Service) applyAutostart(on bool) error {

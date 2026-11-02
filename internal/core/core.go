@@ -48,6 +48,9 @@ type Options struct {
 	KeyTester func(ctx context.Context, key string) error
 	// Launcher opens validated links and files; default ShellExecute.
 	Launcher opener.Launcher
+	// BackupEvery is how often a running app checks whether today's backup
+	// exists; default one hour.
+	BackupEvery time.Duration
 }
 
 // Core is the running backend.
@@ -64,10 +67,13 @@ type Core struct {
 	// Opener is the only way to open a link or a file (R33).
 	Opener *opener.Opener
 
-	opts    Options
-	mu      sync.Mutex
-	svc     *Services // nil until the startup state is ready
-	logFile io.Closer
+	opts      Options
+	mu        sync.Mutex
+	svc       *Services // nil until the startup state is ready
+	logFile   io.Closer
+	restoreMu sync.Mutex // one Restore at a time, check through open
+	stopLoop  chan struct{}
+	loopDone  sync.WaitGroup
 }
 
 // Services are the parts of the backend that need the database. They
@@ -216,16 +222,51 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 	} else if n > 0 {
 		c.Log.Info("purged deleted applications", "count", n)
 	}
+	// Make the Run entry match the saved setting, healing any save that
+	// changed one but not the other (R37).
+	if err := svc.Settings.Reconcile(ctx); err != nil {
+		c.Log.Warn("start-with-Windows reconcile failed", "err", err)
+	}
 	c.mu.Lock()
 	c.svc = svc
+	c.stopLoop = make(chan struct{})
 	c.mu.Unlock()
+	c.startBackupLoop(db, c.stopLoop)
 	c.Log.Info("database ready")
 	return st, nil
 }
 
+// startBackupLoop keeps the "daily" in daily backups true while LeGaJ stays
+// open for days (it may start with Windows and never restart).
+func (c *Core) startBackupLoop(db *store.DB, stop <-chan struct{}) {
+	every := c.opts.BackupEvery
+	if every <= 0 {
+		every = time.Hour
+	}
+	c.loopDone.Add(1)
+	go func() {
+		defer c.loopDone.Done()
+		t := time.NewTicker(every)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				if _, err := db.DailyBackup(context.Background()); err != nil {
+					c.Log.Error("daily backup failed", "err", err)
+				}
+			}
+		}
+	}()
+}
+
 // Restore replaces the database with a backup the user chose from the
-// startup restore offer, then opens it. It's refused while a database is open.
+// startup restore offer, then opens it. It's refused while a database is
+// open, and concurrent calls are serialized so only one can restore.
 func (c *Core) Restore(ctx context.Context, backupName string) (store.Startup, error) {
+	c.restoreMu.Lock()
+	defer c.restoreMu.Unlock()
 	if _, err := c.Ready(); err == nil {
 		return store.Startup{}, apperr.New(apperr.CodeConflict, "A backup can only be restored when LeGaJ starts with a damaged database.")
 	}
@@ -245,7 +286,12 @@ func (c *Core) Close() error {
 	c.mu.Lock()
 	svc := c.svc
 	c.svc = nil
+	if c.stopLoop != nil {
+		close(c.stopLoop)
+		c.stopLoop = nil
+	}
 	c.mu.Unlock()
+	c.loopDone.Wait() // no backup may run against a closing database
 	var errs []error
 	if svc != nil {
 		errs = append(errs, svc.DB.Close())

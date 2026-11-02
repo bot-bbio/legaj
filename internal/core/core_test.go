@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -125,6 +126,140 @@ func TestR2_BootCorruptOffersRestoreThenRecovers(t *testing.T) {
 	}
 	if st.Kind != store.StartupReady || c.DB() == nil {
 		t.Fatalf("after restore: %+v", st)
+	}
+}
+
+func TestR2_ConcurrentRestoresAreSerialized(t *testing.T) {
+	dir := testenv.Isolate(t)
+	day1 := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
+	c, _, err := core.Boot(ctx, opts(dir, day1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = c.Close()
+	if err := os.WriteFile(filepath.Join(dir, store.FileName), []byte(strings.Repeat("garbage", 1000)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, st, err := core.Boot(ctx, opts(dir, day1.Add(time.Hour)))
+	if err != nil || st.Kind != store.StartupCorrupt {
+		t.Fatalf("boot: %+v %v", st, err)
+	}
+	defer c.Close()
+
+	var wg sync.WaitGroup
+	errs := make([]error, 4)
+	for i := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = c.Restore(ctx, st.Backups[0].Name)
+		}()
+	}
+	wg.Wait()
+	ok := 0
+	for _, e := range errs {
+		if e == nil {
+			ok++
+		}
+	}
+	if ok != 1 || c.DB() == nil {
+		t.Fatalf("%d restores succeeded (errs %v), want exactly 1 and an open DB", ok, errs)
+	}
+}
+
+// movingClock is a clock tests can advance while the backend runs.
+type movingClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (m *movingClock) now() time.Time {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.t
+}
+
+func (m *movingClock) advance(d time.Duration) {
+	m.mu.Lock()
+	m.t = m.t.Add(d)
+	m.mu.Unlock()
+}
+
+func TestR2_DailyBackupWhileRunning(t *testing.T) {
+	dir := testenv.Isolate(t)
+	clk := &movingClock{t: time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)}
+	o := opts(dir, clk.t)
+	o.Now = clk.now
+	o.BackupEvery = 5 * time.Millisecond
+	c, _, err := core.Boot(ctx, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	clk.advance(25 * time.Hour) // LeGaJ has been left running overnight
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		backups, err := store.ListBackups(ctx, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(backups) == 2 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d backups after a day of uptime, want 2 (one per day)", len(backups))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// recordingAutostart remembers the last registry action.
+type recordingAutostart struct {
+	mu      sync.Mutex
+	enabled bool
+	calls   int
+}
+
+func (r *recordingAutostart) Enable(string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.enabled, r.calls = true, r.calls+1
+	return nil
+}
+
+func (r *recordingAutostart) Disable() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.enabled, r.calls = false, r.calls+1
+	return nil
+}
+
+func TestR37_BootReconcilesStartWithWindows(t *testing.T) {
+	dir := testenv.Isolate(t)
+	o := opts(dir, time.Now())
+	c, _, err := core.Boot(ctx, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, _ := c.Ready()
+	s, _ := svc.Settings.Get(ctx)
+	s.StartWithWindows = true
+	if _, err := svc.Settings.Save(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	_ = c.Close()
+
+	// The Run entry went missing (or a save half-failed): the next start fixes it.
+	reg := &recordingAutostart{}
+	o.Autostart = reg
+	c, _, err = core.Boot(ctx, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if !reg.enabled {
+		t.Fatal("boot didn't bring the Run entry in line with the saved setting")
 	}
 }
 

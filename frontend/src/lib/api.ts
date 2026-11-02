@@ -4,11 +4,20 @@
  * bindings (C13), minus the generated helper methods.
  */
 import * as App from '../../wailsjs/go/main/App';
+import * as LettersAPI from '../../wailsjs/go/main/LettersAPI';
 import * as OnboardingAPI from '../../wailsjs/go/main/OnboardingAPI';
 import * as PipelineAPI from '../../wailsjs/go/main/PipelineAPI';
 import * as ProfileAPI from '../../wailsjs/go/main/ProfileAPI';
 import * as SettingsAPI from '../../wailsjs/go/main/SettingsAPI';
-import { profile, type main, type onboarding, type pipeline, type settings } from '../../wailsjs/go/models';
+import {
+  letters,
+  profile,
+  type documents,
+  type main,
+  type onboarding,
+  type pipeline,
+  type settings,
+} from '../../wailsjs/go/models';
 
 /** The data fields of a generated model class (deeply), without its helper methods. */
 export type Plain<T> = T extends readonly (infer U)[]
@@ -37,6 +46,9 @@ export type DeleteResult = Plain<pipeline.DeleteResult>;
 export type UndoResult = Plain<pipeline.UndoResult>;
 export type StatsView = Plain<main.StatsView>;
 export type ResumeFileView = Plain<main.ResumeFileView>;
+export type Draft = Plain<letters.Draft>;
+export type DocumentVersion = Plain<documents.Version>;
+export type DraftPart = 'opening' | 'why' | 'body' | 'closing';
 export type PasteInput = Plain<pipeline.PasteInput>;
 export type PasteResult = Plain<pipeline.PasteResult>;
 export type Stage = 'lead' | 'ready' | 'applied' | 'interviewing' | 'offer' | 'rejected' | 'withdrawn';
@@ -74,4 +86,10 @@ export const api = {
   pasteJob: (input: PasteInput): Promise<PasteResult> => PipelineAPI.PasteJob(input),
   openPosting: (id: number): Promise<void> => PipelineAPI.OpenPosting(id),
   openResume: (id: number): Promise<void> => PipelineAPI.OpenResume(id),
+
+  getDraft: (appId: number): Promise<Draft> => LettersAPI.GetDraft(appId),
+  saveDraft: (appId: number, d: Draft): Promise<Draft> => LettersAPI.SaveDraft(appId, letters.Draft.createFrom(d)),
+  regenerateParagraph: (appId: number, part: DraftPart, index: number): Promise<Draft> =>
+    LettersAPI.RegenerateParagraph(appId, part, index),
+  approveLetter: (appId: number): Promise<DocumentVersion> => LettersAPI.ApproveLetter(appId),
 };

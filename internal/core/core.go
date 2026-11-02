@@ -224,7 +224,7 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 	svc.Stages = pipeline.NewMachine(c.Now)
 	svc.Pipeline = pipeline.NewService(pipeline.Config{DB: db, Bus: c.Bus, Machine: svc.Stages, Now: c.Now})
 	svc.Documents = documents.NewService(db, c.Bus, c.Dir, c.Now)
-	svc.Letters = letters.NewService(letters.Config{DB: db, Bus: c.Bus, AI: c.AI, Profile: svc.Profile, Model: svc.model, Now: c.Now})
+	svc.Letters = letters.NewService(letters.Config{DB: db, Bus: c.Bus, AI: c.AI, Profile: svc.Profile, Model: svc.model, Now: c.Now, Documents: svc.Documents})
 	svc.Jobs = jobs.New(jobs.Config{
 		Bus: c.Bus,
 		Work: func(ctx context.Context, appID int64) error {

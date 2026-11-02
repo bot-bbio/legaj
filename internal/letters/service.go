@@ -12,6 +12,7 @@ import (
 
 	"github.com/bot-bbio/legaj/internal/ai"
 	"github.com/bot-bbio/legaj/internal/apperr"
+	"github.com/bot-bbio/legaj/internal/documents"
 	"github.com/bot-bbio/legaj/internal/events"
 	"github.com/bot-bbio/legaj/internal/pdf"
 	"github.com/bot-bbio/legaj/internal/profile"
@@ -39,6 +40,8 @@ type Config struct {
 	Profile *profile.Service
 	Model   func(ctx context.Context) string
 	Now     func() time.Time
+	// Documents writes approved letters as versioned PDFs (R22).
+	Documents *documents.Service
 }
 
 // Service drafts and stores letters.

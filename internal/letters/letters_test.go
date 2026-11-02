@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/bot-bbio/legaj/internal/ai"
 	"github.com/bot-bbio/legaj/internal/ai/aitest"
 	"github.com/bot-bbio/legaj/internal/apperr"
+	"github.com/bot-bbio/legaj/internal/documents"
 	"github.com/bot-bbio/legaj/internal/events"
 	"github.com/bot-bbio/legaj/internal/letters"
 	"github.com/bot-bbio/legaj/internal/pipeline"
@@ -27,11 +30,13 @@ type fixture struct {
 	svc *letters.Service
 	ai  *aitest.Fake
 	db  *store.DB
+	dir string
 }
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	db, st, err := store.Open(ctx, store.Options{Dir: testenv.Isolate(t)})
+	dir := testenv.Isolate(t)
+	db, st, err := store.Open(ctx, store.Options{Dir: dir})
 	if err != nil || st.Kind != store.StartupReady {
 		t.Fatalf("open: %v %+v", err, st)
 	}
@@ -45,10 +50,11 @@ func newFixture(t *testing.T) *fixture {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	f := &fixture{ai: &aitest.Fake{}, db: db}
+	f := &fixture{ai: &aitest.Fake{}, db: db, dir: dir}
 	f.svc = letters.NewService(letters.Config{
 		DB: db, Bus: bus, AI: f.ai, Profile: prof, Now: time.Now,
-		Model: func(context.Context) string { return "gemini-test" },
+		Documents: documents.NewService(db, bus, dir, time.Now),
+		Model:     func(context.Context) string { return "gemini-test" },
 	})
 	return f
 }
@@ -267,6 +273,123 @@ func TestR21_DraftIsSavedAndReplacesThePreviousDraft(t *testing.T) {
 	got, err := f.svc.CurrentDraft(ctx, id)
 	if err != nil || len(got.WhyOptions) != 3 {
 		t.Fatalf("current draft = %+v, %v", got, err)
+	}
+}
+
+func TestR22_RegenerateParagraphReplacesOnlyThat(t *testing.T) {
+	f := newFixture(t)
+	id := f.app(t, "Acme", "JD")
+	f.ai.Push(reply(t, "Acme"))
+	before, err := f.svc.Draft(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.ai.Push(`{"paragraph": "Acme's compiler team is where I can do my best work."}`)
+	after, err := f.svc.RegenerateParagraph(ctx, id, letters.PartWhy, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.WhyOptions[1] != "Acme's compiler team is where I can do my best work." {
+		t.Fatalf("why[1] = %q", after.WhyOptions[1])
+	}
+	after.WhyOptions[1] = before.WhyOptions[1]
+	if fmtDraft(after) != fmtDraft(before) {
+		t.Fatalf("other paragraphs changed:\nbefore %+v\nafter  %+v", before, after)
+	}
+	req := f.ai.Requests()[1]
+	if !strings.Contains(allText(req), before.Opening) || !strings.Contains(allText(req), before.WhyOptions[1]) {
+		t.Fatal("the rewrite request must carry the current draft as context")
+	}
+	stored, _ := f.svc.CurrentDraft(ctx, id)
+	if stored.WhyOptions[1] != after.WhyOptions[1] && stored.WhyOptions[1] != "Acme's compiler team is where I can do my best work." {
+		t.Fatal("the regenerated paragraph wasn't saved")
+	}
+}
+
+func fmtDraft(d letters.Draft) string {
+	b, _ := json.Marshal(d)
+	return string(b)
+}
+
+func TestR22_RegenerateRejectsPlaceholdersAndBadTargets(t *testing.T) {
+	f := newFixture(t)
+	id := f.app(t, "Acme", "JD")
+	f.ai.Push(reply(t, "Acme"))
+	if _, err := f.svc.Draft(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	f.ai.Push(`{"paragraph": "Dear [Name], hello."}`)
+	f.ai.Push(`{"paragraph": "Still [Name]."}`)
+	if _, err := f.svc.RegenerateParagraph(ctx, id, letters.PartOpening, 0); apperr.CodeOf(err) != apperr.CodeAIInvalidOutput {
+		t.Fatalf("placeholder paragraph accepted: %v", err)
+	}
+	for _, bad := range []struct {
+		part letters.Part
+		i    int
+	}{{letters.PartWhy, 3}, {letters.PartBody, 5}, {"signature", 0}} {
+		if _, err := f.svc.RegenerateParagraph(ctx, id, bad.part, bad.i); apperr.CodeOf(err) != apperr.CodeInvalid {
+			t.Errorf("target %v/%d: err = %v, want invalid", bad.part, bad.i, err)
+		}
+	}
+}
+
+func TestR22_SaveDraftKeepsEditsAndValidates(t *testing.T) {
+	f := newFixture(t)
+	id := f.app(t, "Acme", "JD")
+	f.ai.Push(reply(t, "Acme"))
+	d, err := f.svc.Draft(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Opening = "My own opening for Acme."
+	d.ChosenWhy = 2
+	if _, err := f.svc.SaveDraft(ctx, id, d); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := f.svc.CurrentDraft(ctx, id)
+	if got.Opening != "My own opening for Acme." || got.ChosenWhy != 2 {
+		t.Fatalf("draft = %+v", got)
+	}
+	d.ChosenWhy = 7
+	if _, err := f.svc.SaveDraft(ctx, id, d); apperr.CodeOf(err) != apperr.CodeInvalid {
+		t.Fatalf("out-of-range why choice accepted: %v", err)
+	}
+	d.ChosenWhy = 0
+	d.Body = []string{strings.Repeat("x", 6000)}
+	if _, err := f.svc.SaveDraft(ctx, id, d); apperr.CodeOf(err) != apperr.CodeInvalid {
+		t.Fatalf("oversized paragraph accepted: %v", err)
+	}
+}
+
+func TestR22_ApproveProducesPDFVersion(t *testing.T) {
+	f := newFixture(t)
+	id := f.app(t, "Acme", "JD")
+	for want := 1; want <= 2; want++ {
+		f.ai.Push(reply(t, "Acme"))
+		if _, err := f.svc.Draft(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+		v, err := f.svc.Approve(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v.Version != want {
+			t.Fatalf("approval %d made version %d", want, v.Version)
+		}
+		if _, err := os.Stat(filepath.Join(f.dir, filepath.FromSlash(v.Path))); err != nil {
+			t.Fatalf("PDF not written: %v", err)
+		}
+		if _, err := f.svc.CurrentDraft(ctx, id); apperr.CodeOf(err) != apperr.CodeNotFound {
+			t.Fatal("the approved draft should no longer be pending review")
+		}
+	}
+}
+
+func TestR22_ApproveWithoutDraftFails(t *testing.T) {
+	f := newFixture(t)
+	id := f.app(t, "Acme", "JD")
+	if _, err := f.svc.Approve(ctx, id); apperr.CodeOf(err) != apperr.CodeNotFound {
+		t.Fatalf("err = %v", err)
 	}
 }
 

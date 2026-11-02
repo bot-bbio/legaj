@@ -179,6 +179,18 @@ func TestR7_UnverifiableKeySavedWithNote(t *testing.T) {
 	}
 }
 
+func TestR7_CancelledKeyTestSavesNothing(t *testing.T) {
+	f := newFixture(t)
+	// What the Gemini client returns when the call is cancelled mid-flight.
+	f.result = apperr.Wrap(context.Canceled, apperr.CodeAIUnavailable, "The Gemini request was cancelled.")
+	if _, err := f.svc.SaveKey(ctx, goodKey); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the cancellation", err)
+	}
+	if _, err := f.keys.Get(); !errors.Is(err, secrets.ErrNotFound) {
+		t.Fatal("an untested key was saved after the test was cancelled")
+	}
+}
+
 func TestR7_MalformedKeyNeverTested(t *testing.T) {
 	f := newFixture(t)
 	if _, err := f.svc.SaveKey(ctx, "short"); apperr.CodeOf(err) != apperr.CodeInvalid {

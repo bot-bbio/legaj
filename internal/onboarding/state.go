@@ -125,15 +125,17 @@ func (s *Service) SaveKey(ctx context.Context, raw string) (KeyResult, error) {
 	s.cfg.Secrets.Protect(key)
 	res := KeyResult{Verified: true, Message: "Key works. Saved to Windows Credential Manager."}
 	if err := s.cfg.TestKey(ctx, key); err != nil {
+		// Checked first: the AI client reports a cancelled call as
+		// "unavailable", and an untested key must not be saved on shutdown.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+			return KeyResult{}, err
+		}
 		switch apperr.CodeOf(err) {
 		case apperr.CodeAIKeyRejected:
 			return KeyResult{}, err
 		case apperr.CodeAIRateLimited, apperr.CodeAIUnavailable:
 			res = KeyResult{Message: "Saved. Gemini couldn't be reached to check the key, so LeGaJ will check it on first use."}
 		default:
-			if errors.Is(err, context.Canceled) {
-				return KeyResult{}, err
-			}
 			res = KeyResult{Message: "Saved, but LeGaJ couldn't confirm the key works."}
 		}
 	}

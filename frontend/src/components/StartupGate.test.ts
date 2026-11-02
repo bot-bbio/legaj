@@ -61,6 +61,14 @@ describe('R2 startup states', () => {
     expect(api.quit).toHaveBeenCalled();
   });
 
+  it('a missing data file with backups offers restore, never a silent fresh start', async () => {
+    api.startup.mockResolvedValue({ kind: 'missing', movedAside: '', backups, message: '' });
+    render(StartupGate, { children });
+    expect(await screen.findByRole('heading', { name: /couldn.t find your data/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /restore/i })).toHaveLength(2);
+    expect(screen.queryByText('the app')).not.toBeInTheDocument();
+  });
+
   it('shows the backend message for a startup error', async () => {
     api.startup.mockResolvedValue({ kind: 'error', movedAside: '', backups: [], message: 'LeGaJ couldn’t open its database.' });
     render(StartupGate, { children });

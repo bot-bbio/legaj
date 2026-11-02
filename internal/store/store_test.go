@@ -424,6 +424,84 @@ func TestR2_FailedMigrationLeavesSchemaUnchanged(t *testing.T) {
 	}
 }
 
+func TestR2_MissingDBWithBackupsOffersRestoreNotEmptyDB(t *testing.T) {
+	dir := testenv.Isolate(t)
+	c := newClock()
+	fs := migrations(map[string]string{"1_notes.sql": mig1})
+	db := mustOpen(t, store.Options{Dir: dir, Now: c.now, Migrations: fs})
+	insertNote(t, db, "precious")
+	if _, err := db.DailyBackup(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// e.g. the user chose Quit on the corrupt screen, so legaj.db is now absent.
+	for _, f := range []string{store.FileName, store.FileName + "-wal", store.FileName + "-shm"} {
+		_ = os.Remove(filepath.Join(dir, f))
+	}
+
+	got, st, err := store.Open(ctx, store.Options{Dir: dir, Now: c.now, Migrations: fs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		_ = got.Close()
+		t.Fatal("an empty database was opened although backups exist")
+	}
+	if st.Kind != store.StartupMissing || len(st.Backups) != 1 {
+		t.Fatalf("startup = %+v, want missing with the backup offered", st)
+	}
+	if _, err := os.Stat(filepath.Join(dir, store.FileName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("legaj.db was created empty")
+	}
+	if err := store.Restore(dir, st.Backups[0].Name, c.now); err != nil {
+		t.Fatal(err)
+	}
+	db = mustOpen(t, store.Options{Dir: dir, Now: c.now, Migrations: fs})
+	if n := countNotes(t, db); n != 1 {
+		t.Fatalf("restored %d notes, want 1", n)
+	}
+}
+
+func TestR2_PremigrateBackupsDontPushOutDailies(t *testing.T) {
+	dir := testenv.Isolate(t)
+	c := newClock()
+	db := mustOpen(t, store.Options{Dir: dir, Now: c.now, Migrations: migrations(map[string]string{"1_notes.sql": mig1})})
+	for range 7 {
+		if _, err := db.DailyBackup(ctx); err != nil {
+			t.Fatal(err)
+		}
+		c.advance(24 * time.Hour)
+	}
+	// A migration that keeps failing: every retry takes a pre-migration copy.
+	for range 5 {
+		c.advance(time.Minute)
+		if _, err := db.Backup(ctx, "premigrate"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backups, err := store.ListBackups(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	daily, pre := 0, 0
+	for _, b := range backups {
+		if strings.Contains(b.Name, "premigrate") {
+			pre++
+		} else {
+			daily++
+		}
+	}
+	if daily != 7 || pre != 3 {
+		t.Fatalf("kept %d daily and %d pre-migration backups, want 7 and 3", daily, pre)
+	}
+	// A pre-migration copy taken today doesn't count as today's daily backup.
+	if created, err := db.DailyBackup(ctx); err != nil || !created {
+		t.Fatalf("daily backup skipped because of a pre-migration copy: %v %v", created, err)
+	}
+}
+
 func TestR2_RestoreRejectsPathTraversal(t *testing.T) {
 	dir := testenv.Isolate(t)
 	for _, name := range []string{`..\legaj.db`, `../x.db`, `C:\Windows\x.db`, `legaj-x.db`, ``} {

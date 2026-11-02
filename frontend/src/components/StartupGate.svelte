@@ -51,6 +51,12 @@
         LeGaJ moved it aside as <code>{view.movedAside}</code> and did <strong>not</strong> create an empty one. Restore
         a backup to carry on where it was taken, or quit.
       </p>
+    {:else if view?.kind === 'missing'}
+      <h1>LeGaJ couldn’t find your data file</h1>
+      <p>
+        It may have been moved or deleted. LeGaJ won’t start over with an empty one while backups exist. Restore a
+        backup, or quit.
+      </p>
     {:else if view?.kind === 'migration_failed'}
       <h1>LeGaJ couldn’t upgrade your data</h1>
       <p>Nothing was changed. Restore a backup taken before the upgrade, or quit and report the problem.</p>

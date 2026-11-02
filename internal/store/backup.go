@@ -10,14 +10,19 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 )
 
 // BackupDir is the folder of backups inside the data folder.
 const BackupDir = "backups"
 
-// keepBackups is how many backups survive pruning (R2).
-const keepBackups = 7
+// Backups are rotated per kind, so a migration that keeps failing (each
+// retry takes a pre-migration copy) can never push out the daily history.
+const (
+	keepDaily      = 7 // R2
+	keepPremigrate = 3
+)
 
 // BackupInfo describes one backup file.
 type BackupInfo struct {
@@ -32,16 +37,31 @@ const stampLayout = "20060102T150405Z"
 // accepts names that match this, which rules out path traversal.
 var backupName = regexp.MustCompile(`^legaj-(\d{8}T\d{6}Z)(-[a-z]+)?(-\d+)?\.db$`)
 
-// DailyBackup takes a backup unless one already exists from today (in the
-// clock's local zone). It reports whether a backup was taken.
+// reasonOf returns a backup file's reason ("" for a daily backup).
+func reasonOf(name string) string {
+	m := backupName.FindStringSubmatch(name)
+	if m == nil {
+		return ""
+	}
+	return strings.TrimPrefix(m[2], "-")
+}
+
+// DailyBackup takes a daily backup unless one already exists from today
+// (in the clock's local zone). It reports whether a backup was taken.
 func (d *DB) DailyBackup(ctx context.Context) (bool, error) {
 	all, err := scanBackups(d.dir)
 	if err != nil {
 		return false, err
 	}
 	now := d.now()
-	if len(all) > 0 && sameDay(all[0].TakenAt.In(now.Location()), now) {
-		return false, nil
+	for _, b := range all {
+		if reasonOf(b.Name) != "" {
+			continue // a pre-migration copy isn't today's daily backup
+		}
+		if sameDay(b.TakenAt.In(now.Location()), now) {
+			return false, nil
+		}
+		break // newest daily is older than today
 	}
 	if _, err := d.Backup(ctx, ""); err != nil {
 		return false, err
@@ -93,14 +113,25 @@ func (d *DB) Backup(ctx context.Context, reason string) (BackupInfo, error) {
 	return BackupInfo{Name: name, TakenAt: taken, SizeBytes: fi.Size()}, nil
 }
 
-// prune deletes all but the newest keepBackups backup files.
+// prune keeps the newest keepDaily daily backups and the newest
+// keepPremigrate pre-migration copies, and deletes the rest.
 func prune(dir string) error {
-	all, err := scanBackupDir(dir)
+	all, err := scanBackupDir(dir) // newest first
 	if err != nil {
 		return err
 	}
+	kept := map[string]int{}
 	var errs []error
-	for _, b := range all[min(len(all), keepBackups):] {
+	for _, b := range all {
+		reason := reasonOf(b.Name)
+		limit := keepDaily
+		if reason != "" {
+			limit = keepPremigrate
+		}
+		kept[reason]++
+		if kept[reason] <= limit {
+			continue
+		}
 		if err := os.Remove(filepath.Join(dir, b.Name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, err)
 		}

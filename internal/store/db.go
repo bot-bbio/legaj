@@ -61,6 +61,10 @@ const (
 	// StartupMigrationFailed means an upgrade failed and was rolled back.
 	// The user may restore one of Backups or quit.
 	StartupMigrationFailed StartupKind = "migration_failed"
+	// StartupMissing means legaj.db is gone but valid backups exist (e.g.
+	// the user chose Quit on the corrupt screen). An empty database would
+	// silently hide their data, so the user restores or quits instead.
+	StartupMissing StartupKind = "missing"
 )
 
 // Startup is the outcome of Open, rendered by the frontend (plan item 10).
@@ -94,6 +98,17 @@ func Open(ctx context.Context, opts Options) (*DB, Startup, error) {
 	path := filepath.Join(opts.Dir, FileName)
 	_, statErr := os.Stat(path)
 	existed := statErr == nil
+	if !existed {
+		// Only a truly first run may create a database (R2): with backups
+		// around, a missing file means lost data, not a new user.
+		backups, err := ListBackups(ctx, opts.Dir)
+		if err != nil {
+			return nil, Startup{}, err
+		}
+		if len(backups) > 0 {
+			return nil, Startup{Kind: StartupMissing, Backups: backups}, nil
+		}
+	}
 
 	d, err := openPools(path)
 	if err != nil {

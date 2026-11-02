@@ -19,6 +19,7 @@ import (
 	"github.com/bot-bbio/legaj/internal/events"
 	"github.com/bot-bbio/legaj/internal/logx"
 	"github.com/bot-bbio/legaj/internal/onboarding"
+	"github.com/bot-bbio/legaj/internal/opener"
 	"github.com/bot-bbio/legaj/internal/pipeline"
 	"github.com/bot-bbio/legaj/internal/profile"
 	"github.com/bot-bbio/legaj/internal/resume"
@@ -45,6 +46,8 @@ type Options struct {
 	AI ai.Provider
 	// KeyTester checks a candidate API key; default one small Gemini call.
 	KeyTester func(ctx context.Context, key string) error
+	// Launcher opens validated links and files; default ShellExecute.
+	Launcher opener.Launcher
 }
 
 // Core is the running backend.
@@ -58,6 +61,8 @@ type Core struct {
 	Secrets *secrets.Manager
 	// AI reads the key from Secrets on every call.
 	AI ai.Provider
+	// Opener is the only way to open a link or a file (R33).
+	Opener *opener.Opener
 
 	opts    Options
 	mu      sync.Mutex
@@ -158,6 +163,10 @@ func Boot(ctx context.Context, opts Options) (*Core, store.Startup, error) {
 	if c.AI == nil {
 		c.AI = gemini.New(gemini.Config{Key: c.Secrets.Load, Logger: log})
 	}
+	if opts.Launcher == nil {
+		opts.Launcher = opener.ShellExecute{}
+	}
+	c.Opener = opener.New(opts.Dir, opts.Launcher)
 	// Register a saved key with the log redactor right away (R4, R34).
 	if _, err := c.Secrets.Status(); err != nil {
 		c.Log.Warn("could not read the API key status", "err", err)

@@ -45,6 +45,7 @@ export const api = {
   restoreBackup: (name: string): Promise<StartupView> => App.RestoreBackup(name),
   quit: (): Promise<void> => App.Quit(),
   version: (): Promise<string> => App.Version(),
+  openURL: (link: string): Promise<void> => App.OpenURL(link),
 
   getSettings: (): Promise<SettingsView> => SettingsAPI.GetSettings(),
   saveSettings: (s: Settings): Promise<SettingsView> => SettingsAPI.SaveSettings(s),
@@ -66,4 +67,6 @@ export const api = {
   undoDelete: (undoId: string): Promise<UndoResult> => PipelineAPI.UndoDelete(undoId),
   pipelineStats: (): Promise<StatsView> => PipelineAPI.PipelineStats(),
   pasteJob: (input: PasteInput): Promise<PasteResult> => PipelineAPI.PasteJob(input),
+  openPosting: (id: number): Promise<void> => PipelineAPI.OpenPosting(id),
+  openResume: (id: number): Promise<void> => PipelineAPI.OpenResume(id),
 };

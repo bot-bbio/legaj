@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/bot-bbio/legaj/internal/apperr"
 	"github.com/bot-bbio/legaj/internal/pipeline"
+	"github.com/bot-bbio/legaj/internal/resume"
 	"github.com/bot-bbio/legaj/internal/store"
 )
 
@@ -47,6 +48,40 @@ func (p *PipelineAPI) PasteJob(in pipeline.PasteInput) (pipeline.PasteResult, er
 	}
 	res, err := svc.Pipeline.PasteJob(p.app.ctx, in)
 	return res, apperr.Public(err)
+}
+
+// OpenPosting opens an application's job posting in the browser (R33).
+func (p *PipelineAPI) OpenPosting(id int64) error {
+	c, svc, err := p.app.services()
+	if err != nil {
+		return err
+	}
+	a, err := svc.Pipeline.Get(p.app.ctx, id)
+	if err != nil {
+		return apperr.Public(err)
+	}
+	if a.URL == "" {
+		return apperr.New(apperr.CodeNotFound, "This application has no posting link.")
+	}
+	return apperr.Public(c.Opener.OpenURL(a.URL))
+}
+
+// OpenResume opens the resume this application uses: the version it was
+// applied with, or the current one before applying (R10).
+func (p *PipelineAPI) OpenResume(id int64) error {
+	c, svc, err := p.app.services()
+	if err != nil {
+		return err
+	}
+	ref, err := svc.Pipeline.ResumeFor(p.app.ctx, id)
+	if err != nil {
+		return apperr.Public(err)
+	}
+	path, err := svc.Resume.Path(resume.FileInfo{StoredPath: ref.StoredPath})
+	if err != nil {
+		return apperr.Public(err)
+	}
+	return apperr.Public(c.Opener.OpenFile(path))
 }
 
 // SetStage moves exactly the given applications to a stage (R12).

@@ -27,11 +27,16 @@ type noAutostart struct{}
 func (noAutostart) Enable(string) error { return nil }
 func (noAutostart) Disable() error      { return nil }
 
+// noLaunch never opens anything: tests must not pop up a browser.
+type noLaunch struct{}
+
+func (*noLaunch) Launch(string) error { return nil }
+
 // opts never reaches real user state: memory secrets, no registry.
 func opts(dir string, now time.Time) core.Options {
 	return core.Options{
 		Dir: dir, Now: func() time.Time { return now }, Emitter: &events.Recorder{},
-		Secrets: secrets.NewMemory(), Autostart: noAutostart{}, AI: &aitest.Fake{}, KeyTester: func(context.Context, string) error { return nil },
+		Secrets: secrets.NewMemory(), Autostart: noAutostart{}, AI: &aitest.Fake{}, KeyTester: func(context.Context, string) error { return nil }, Launcher: &noLaunch{},
 		Exe: func() (string, error) { return `C:\LeGaJ\legaj.exe`, nil },
 	}
 }

@@ -184,6 +184,16 @@ func (a *App) services() (*core.Core, *core.Services, error) {
 	return c, svc, nil
 }
 
+// OpenURL opens an http, https or mailto link in the user's default app;
+// anything else is refused (R33).
+func (a *App) OpenURL(link string) error {
+	c, err := a.coreOnly()
+	if err != nil {
+		return err
+	}
+	return apperr.Public(c.Opener.OpenURL(link))
+}
+
 // Quit closes LeGaJ (the "Quit" choice on the restore screen).
 func (a *App) Quit() {
 	runtime.Quit(a.ctx)

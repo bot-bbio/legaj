@@ -13,6 +13,7 @@ import (
 	"github.com/bot-bbio/legaj/internal/ai/aitest"
 	"github.com/bot-bbio/legaj/internal/core"
 	"github.com/bot-bbio/legaj/internal/events"
+	"github.com/bot-bbio/legaj/internal/pipeline"
 	"github.com/bot-bbio/legaj/internal/secrets"
 	"github.com/bot-bbio/legaj/internal/testenv"
 )
@@ -26,15 +27,30 @@ type noAutostart struct{}
 func (noAutostart) Enable(string) error { return nil }
 func (noAutostart) Disable() error      { return nil }
 
+// launches records what would have been opened; tests never open anything.
+type launches struct{ targets []string }
+
+func (l *launches) Launch(target string) error {
+	l.targets = append(l.targets, target)
+	return nil
+}
+
 // newTestApp boots a real core in a temp folder, with the API key in an
 // in-memory store, and marks the app as started.
 func newTestApp(t *testing.T) (*App, *secrets.Memory) {
+	app, keys, _ := newTestAppWithLaunches(t)
+	return app, keys
+}
+
+func newTestAppWithLaunches(t *testing.T) (*App, *secrets.Memory, *launches) {
 	t.Helper()
 	keys := secrets.NewMemory()
+	opened := &launches{}
 	c, st, err := core.Boot(context.Background(), core.Options{
 		Dir: testenv.Isolate(t), Now: time.Now, Emitter: &events.Recorder{},
 		Secrets: keys, Autostart: noAutostart{}, AI: &aitest.Fake{}, KeyTester: func(context.Context, string) error { return nil },
-		Exe: func() (string, error) { return `C:\LeGaJ\legaj.exe`, nil },
+		Exe:      func() (string, error) { return `C:\LeGaJ\legaj.exe`, nil },
+		Launcher: opened,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +62,51 @@ func newTestApp(t *testing.T) (*App, *secrets.Memory) {
 	app.pickFile = func(context.Context) (string, error) { return "", nil }
 	app.setStartup(c, toStartupView(st))
 	close(app.booted)
-	return app, keys
+	return app, keys, opened
+}
+
+func TestR33_OpenURLRefusesA8Payload(t *testing.T) {
+	app, _, opened := newTestAppWithLaunches(t)
+	if err := app.OpenURL(`file:///x&cd>pwned.txt`); err == nil {
+		t.Fatal("A8 payload accepted")
+	}
+	if err := app.OpenURL("https://jobs.lever.co/acme/1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(opened.targets) != 1 || opened.targets[0] != "https://jobs.lever.co/acme/1" {
+		t.Fatalf("opened %q", opened.targets)
+	}
+}
+
+func TestR10_OpenResumeOpensAppliedVersion(t *testing.T) {
+	app, _, opened := newTestAppWithLaunches(t)
+	c, svc, err := app.services()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	v1, err := svc.Resume.Store(ctx, "cv-2025.pdf", []byte("%PDF-1.7 version one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := svc.Pipeline.PasteJob(ctx, pipeline.PasteInput{Company: "Acme", Role: "Dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Pipeline.SetStage(ctx, []int64{res.ID}, "applied"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Resume.Store(ctx, "cv-2026.pdf", []byte("%PDF-1.7 version two")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := (&PipelineAPI{app: app}).OpenResume(res.ID); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(c.Dir, filepath.FromSlash(v1.StoredPath))
+	if len(opened.targets) != 1 || opened.targets[0] != want {
+		t.Fatalf("opened %q, want the applied version %q", opened.targets, want)
+	}
 }
 
 func TestR8_UploadResumeStoresFileAndReportsParseFailure(t *testing.T) {

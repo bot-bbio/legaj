@@ -6,6 +6,8 @@
   import VirtualTable from '../components/VirtualTable.svelte';
   import type { ApplicationRow, DeleteResult } from '../lib/api';
   import { filterRows, prune, toggle, type RowFilter } from '../lib/selection';
+  import { api } from '../lib/api';
+  import { errorMessage } from '../lib/errors';
   import { STAGES, stageLabel } from '../lib/stages';
   import { applicationsStore } from '../lib/stores/applications';
 
@@ -19,6 +21,17 @@
   }
 
   let pasting = $state(false);
+  let openError = $state('');
+
+  /** Links and files open only through the backend's safe opener (R33). */
+  async function open(action: () => Promise<void>): Promise<void> {
+    openError = '';
+    try {
+      await action();
+    } catch (err) {
+      openError = errorMessage(err);
+    }
+  }
 
   /** Shows an existing row: clears the filters and selects only that row. */
   function show(id: number): void {
@@ -92,6 +105,7 @@
   {#if selected.size > 0}
     <BulkBar ids={[...selected]} ondeleted={deleted} />
   {/if}
+  {#if openError}<p class="error" role="alert">{openError}</p>{/if}
 
   {#if rows.length === 0}
     <p class="muted">No applications yet. Clip a job from your browser, or use Paste job.</p>
@@ -112,6 +126,7 @@
         <span role="columnheader">Stage</span>
         <span role="columnheader">Location</span>
         <span role="columnheader">Added</span>
+        <span role="columnheader">Open</span>
       {/snippet}
       {#snippet row(r: ApplicationRow)}
         <span role="cell">
@@ -130,6 +145,12 @@
         <span role="cell"><span class="stage stage-{r.stage}">{stageLabel(r.stage)}</span></span>
         <span role="cell" class="clip muted">{r.location}</span>
         <span role="cell" class="muted">{added(r.createdAt)}</span>
+        <span role="cell" class="links">
+          {#if r.url}
+            <button type="button" class="link" onclick={() => open(() => api.openPosting(r.id))}>Posting</button>
+          {/if}
+          <button type="button" class="link" onclick={() => open(() => api.openResume(r.id))}>Resume</button>
+        </span>
       {/snippet}
     </VirtualTable>
   {/if}
@@ -159,11 +180,23 @@
   }
   :global(.grid-row) {
     display: grid;
-    grid-template-columns: 2.5rem minmax(8rem, 1fr) minmax(10rem, 1.5fr) 8rem minmax(6rem, 1fr) 7rem;
+    grid-template-columns: 2.5rem minmax(8rem, 1fr) minmax(10rem, 1.5fr) 8rem minmax(6rem, 1fr) 7rem 8rem;
     align-items: center;
     gap: 0.75rem;
     padding: 0 0.75rem;
     min-height: 36px;
+  }
+  .links {
+    display: flex;
+    gap: 0.6rem;
+  }
+  .link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    text-decoration: underline;
+    cursor: pointer;
   }
   .clip {
     overflow: hidden;

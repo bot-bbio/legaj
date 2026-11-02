@@ -27,6 +27,8 @@ const api = {
   deleteApplications: vi.fn<(ids: number[]) => Promise<DeleteResult>>(),
   undoDelete: vi.fn<(id: string) => Promise<UndoResult>>(),
   pipelineStats: vi.fn<() => Promise<StatsView>>(),
+  openPosting: vi.fn<(id: number) => Promise<void>>(() => Promise.resolve()),
+  openResume: vi.fn<(id: number) => Promise<void>>(() => Promise.reject('No resume has been uploaded yet.')),
 };
 vi.mock('../lib/api', () => ({ api }));
 
@@ -113,6 +115,37 @@ describe('R12 bulk stage change', () => {
     expect(stage).toBe('lead');
     expect(await screen.findByText(/1 moved/i)).toBeInTheDocument();
     expect(screen.getByText(/use reopen/i)).toBeInTheDocument();
+  });
+});
+
+describe('R33/R10 row links', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api.listApplications.mockResolvedValue([{ ...row(1, 'Acme', 'applied'), url: 'https://jobs.lever.co/acme/1' }, row(2, 'Globex', 'lead')]);
+    api.pipelineStats.mockResolvedValue(stats);
+  });
+
+  it('opens the posting through the backend, and only for rows that have one', async () => {
+    const user = userEvent.setup();
+    render(Pipeline);
+    const acme = (await screen.findByRole('checkbox', { name: /select acme/i })).closest('[role="row"]');
+    if (!(acme instanceof HTMLElement)) throw new Error('row missing');
+    await user.click(within(acme).getByRole('button', { name: /posting/i }));
+    expect(api.openPosting).toHaveBeenCalledWith(1);
+
+    const globex = screen.getByRole('checkbox', { name: /select globex/i }).closest('[role="row"]');
+    if (!(globex instanceof HTMLElement)) throw new Error('row missing');
+    expect(within(globex).queryByRole('button', { name: /posting/i })).not.toBeInTheDocument();
+  });
+
+  it('shows why the resume could not be opened', async () => {
+    const user = userEvent.setup();
+    render(Pipeline);
+    const acme = (await screen.findByRole('checkbox', { name: /select acme/i })).closest('[role="row"]');
+    if (!(acme instanceof HTMLElement)) throw new Error('row missing');
+    await user.click(within(acme).getByRole('button', { name: /resume/i }));
+    expect(api.openResume).toHaveBeenCalledWith(1);
+    expect(await screen.findByRole('alert')).toHaveTextContent('No resume has been uploaded yet.');
   });
 });
 

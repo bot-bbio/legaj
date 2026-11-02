@@ -7,7 +7,7 @@ import type { ApplicationRow, DeleteResult, StageResult, StatsView, UndoResult }
 vi.mock('../lib/events', () => ({ onEntityChanged: () => () => {} }));
 
 const row = (id: number, company: string, stage: string): ApplicationRow => ({
-  id, company, role: `Role ${id}`, location: '', url: '', stage, source: 'paste',
+  id, company, role: `Role ${id}`, location: '', url: '', stage, source: 'paste', materials: 'letter',
   createdAt: '2026-11-01T09:00:00Z', appliedAt: '',
 });
 

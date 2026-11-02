@@ -49,6 +49,10 @@ export type ResumeFileView = Plain<main.ResumeFileView>;
 export type Draft = Plain<letters.Draft>;
 export type DocumentVersion = Plain<documents.Version>;
 export type DraftPart = 'opening' | 'why' | 'body' | 'closing';
+export type ReviewItem = Plain<main.ReviewItem>;
+export type ReviewStatus = 'queued' | 'running' | 'draft' | 'failed';
+export type GenerateResult = Plain<main.GenerateResult>;
+export type ApproveAllResult = Plain<letters.ApproveAllResult>;
 export type PasteInput = Plain<pipeline.PasteInput>;
 export type PasteResult = Plain<pipeline.PasteResult>;
 export type Stage = 'lead' | 'ready' | 'applied' | 'interviewing' | 'offer' | 'rejected' | 'withdrawn';
@@ -92,4 +96,9 @@ export const api = {
   regenerateParagraph: (appId: number, part: DraftPart, index: number): Promise<Draft> =>
     LettersAPI.RegenerateParagraph(appId, part, index),
   approveLetter: (appId: number): Promise<DocumentVersion> => LettersAPI.ApproveLetter(appId),
+  generateLetters: (appIds: number[]): Promise<GenerateResult> => LettersAPI.Generate(appIds),
+  approveAll: (appIds: number[]): Promise<ApproveAllResult> => LettersAPI.ApproveAll(appIds),
+  reviewQueue: (): Promise<ReviewItem[]> => LettersAPI.ReviewQueue(),
+  dismissJob: (appId: number): Promise<void> => LettersAPI.Dismiss(appId),
+  setMaterials: (id: number, materials: Materials): Promise<ApplicationRow> => PipelineAPI.SetMaterials(id, materials),
 };

@@ -42,6 +42,9 @@ type Config struct {
 	Now     func() time.Time
 	// Documents writes approved letters as versioned PDFs (R22).
 	Documents *documents.Service
+	// SkipReview reports the Skip-review setting: Generate then makes the
+	// PDF without waiting for review (R23). nil means review is on.
+	SkipReview func(ctx context.Context) bool
 }
 
 // Service drafts and stores letters.
@@ -166,20 +169,28 @@ func (s *Service) saveDraft(ctx context.Context, appID int64, d Draft) error {
 
 // CurrentDraft returns the application's draft awaiting review.
 func (s *Service) CurrentDraft(ctx context.Context, appID int64) (Draft, error) {
+	_, d, err := s.currentDraft(ctx, appID)
+	return d, err
+}
+
+// currentDraft also returns the draft's row ID, so Approve can retire
+// exactly the draft it rendered.
+func (s *Service) currentDraft(ctx context.Context, appID int64) (int64, Draft, error) {
+	var id int64
 	var body string
-	err := s.cfg.DB.Reader().QueryRowContext(ctx, `SELECT body FROM documents
-		WHERE application_id = ? AND kind = 'letter' AND status = 'draft' ORDER BY id DESC LIMIT 1`, appID).Scan(&body)
+	err := s.cfg.DB.Reader().QueryRowContext(ctx, `SELECT id, body FROM documents
+		WHERE application_id = ? AND kind = 'letter' AND status = 'draft' ORDER BY id DESC LIMIT 1`, appID).Scan(&id, &body)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Draft{}, apperr.New(apperr.CodeNotFound, "There's no draft for this application yet.")
+		return 0, Draft{}, apperr.New(apperr.CodeNotFound, "There's no draft for this application yet.")
 	}
 	if err != nil {
-		return Draft{}, apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't read the draft.")
+		return 0, Draft{}, apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't read the draft.")
 	}
 	var d Draft
 	if err := json.Unmarshal([]byte(body), &d); err != nil {
-		return Draft{}, apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't read the draft.")
+		return 0, Draft{}, apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't read the draft.")
 	}
-	return d, nil
+	return id, d, nil
 }
 
 // ToPDF assembles the letter: the chosen why paragraph follows the opening,

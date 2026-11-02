@@ -9,9 +9,11 @@
   interface Props {
     ids: number[];
     ondeleted: (result: DeleteResult) => void;
+    /** Queue cover letters for the selected rows (R23). */
+    ongenerate?: (ids: number[]) => void;
   }
 
-  let { ids, ondeleted }: Props = $props();
+  let { ids, ondeleted, ongenerate }: Props = $props();
 
   let target = $state('applied');
   let busy = $state(false);
@@ -97,6 +99,9 @@
     </select>
   </label>
   <button type="button" disabled={busy} onclick={move}>Move</button>
+  {#if ongenerate}
+    <button type="button" class="secondary" disabled={busy} onclick={() => ongenerate([...ids])}>Generate letters</button>
+  {/if}
   <button type="button" class="danger" disabled={busy} onclick={remove}>Delete</button>
   {#if message}<span class="muted">{message}</span>{/if}
 </div>

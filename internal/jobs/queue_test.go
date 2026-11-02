@@ -271,3 +271,30 @@ func TestR13_FinishingJobForDeletedRowWritesNoFile(t *testing.T) {
 		t.Fatal("files written for a deleted row")
 	}
 }
+
+func TestR23_DismissForgetsFinishedJobsOnly(t *testing.T) {
+	release := make(chan struct{})
+	q := newQueue(t, func(ctx context.Context, appID int64) error {
+		switch appID {
+		case 1:
+			return apperr.New(apperr.CodeAIUnavailable, "Gemini is unavailable.")
+		case 2:
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+		}
+		return nil
+	}, &events.Recorder{})
+	q.Enqueue([]int64{1})
+	waitIdle(t, q)
+	q.Enqueue([]int64{2})
+
+	q.Dismiss([]int64{1, 2})
+	left := q.List()
+	if len(left) != 1 || left[0].AppID != 2 {
+		t.Fatalf("after Dismiss: %+v; want only app 2's unfinished job", left)
+	}
+	close(release)
+	waitIdle(t, q)
+}

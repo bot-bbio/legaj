@@ -3,7 +3,6 @@ package letters
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -155,10 +154,12 @@ func (s *Service) RegenerateParagraph(ctx context.Context, appID int64, part Par
 }
 
 // Approve renders the current draft to the application's next PDF version
-// (R22) and retires the draft. The document is recorded only if the
-// application still exists and the letter fits on one page.
+// (R22) and retires the draft in the same transaction, so one draft is
+// never approved twice. The document is recorded only if the application
+// still exists and the letter fits on one page; recording it also applies
+// the Ready rule (R26).
 func (s *Service) Approve(ctx context.Context, appID int64) (documents.Version, error) {
-	d, err := s.CurrentDraft(ctx, appID)
+	draftID, d, err := s.currentDraft(ctx, appID)
 	if err != nil {
 		return documents.Version{}, err
 	}
@@ -173,15 +174,5 @@ func (s *Service) Approve(ctx context.Context, appID int64) (documents.Version, 
 	if err != nil {
 		return documents.Version{}, err
 	}
-	v, err := s.cfg.Documents.WriteLetter(ctx, appID, ToPDF(d, p, app, s.cfg.Now()))
-	if err != nil {
-		return documents.Version{}, err
-	}
-	// The PDF exists and is recorded. Retiring the draft is best effort: a
-	// leftover draft is harmless and is replaced by the next one.
-	_ = s.cfg.DB.Tx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `DELETE FROM documents WHERE application_id = ? AND kind = 'letter' AND status = 'draft'`, appID)
-		return err
-	})
-	return v, nil
+	return s.cfg.Documents.ApproveDraft(ctx, appID, draftID, ToPDF(d, p, app, s.cfg.Now()))
 }

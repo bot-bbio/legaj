@@ -34,12 +34,18 @@ type Version struct {
 	Path       string `json:"path"` // relative to the data folder, slash-separated
 }
 
+// ApprovedHook runs inside the transaction that records an approved
+// letter. The pipeline uses it to apply the Ready rule (R26), so the
+// approval and the stage change commit together.
+type ApprovedHook func(ctx context.Context, tx *sql.Tx, appID int64) error
+
 // Service writes and records documents.
 type Service struct {
-	db  *store.DB
-	bus *events.Bus
-	dir string
-	now func() time.Time
+	db         *store.DB
+	bus        *events.Bus
+	dir        string
+	now        func() time.Time
+	onApproved ApprovedHook
 }
 
 // NewService creates the service. dir is the data folder.
@@ -47,7 +53,13 @@ func NewService(db *store.DB, bus *events.Bus, dir string, now func() time.Time)
 	return &Service{db: db, bus: bus, dir: dir, now: now}
 }
 
+// OnApproved sets the hook run when a letter is approved. Call it while
+// wiring the app, before any letter is written.
+func (s *Service) OnApproved(h ApprovedHook) { s.onApproved = h }
+
 var errAppGone = apperr.New(apperr.CodeNotFound, "That application no longer exists, so no letter was saved.")
+
+var errDraftGone = apperr.New(apperr.CodeConflict, "This draft was already approved or has changed. Reopen the review to see the latest.")
 
 // WriteLetter renders the letter to the application's next version and
 // records it. In one transaction it checks the application is still live
@@ -56,12 +68,27 @@ var errAppGone = apperr.New(apperr.CodeNotFound, "That application no longer exi
 // nothing is recorded. A letter that doesn't fit on one page fails before
 // any file is written (R24).
 func (s *Service) WriteLetter(ctx context.Context, appID int64, l pdf.Letter) (Version, error) {
+	return s.write(ctx, appID, 0, l)
+}
+
+// ApproveDraft is WriteLetter for a reviewed draft: in the same
+// transaction it retires the draft row, so a draft becomes exactly one
+// version even if Approve is clicked twice or Approve all races a single
+// Approve. A draft that's gone or was replaced is a conflict.
+func (s *Service) ApproveDraft(ctx context.Context, appID, draftID int64, l pdf.Letter) (Version, error) {
+	if draftID <= 0 {
+		return Version{}, errDraftGone
+	}
+	return s.write(ctx, appID, draftID, l)
+}
+
+func (s *Service) write(ctx context.Context, appID, draftID int64, l pdf.Letter) (Version, error) {
 	body, err := json.Marshal(l)
 	if err != nil {
 		return Version{}, apperr.Wrap(err, apperr.CodeInternal, apperr.GenericMessage)
 	}
 	var out Version
-	err = events.Mutate(ctx, s.db, s.bus, events.Change(events.EntityDocument, appID), func(tx *sql.Tx) error {
+	err = s.db.Tx(ctx, func(tx *sql.Tx) error {
 		var company, role string
 		err := tx.QueryRowContext(ctx, `SELECT company, role FROM applications WHERE id = ? AND deleted_at IS NULL`, appID).Scan(&company, &role)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -69,6 +96,18 @@ func (s *Service) WriteLetter(ctx context.Context, appID int64, l pdf.Letter) (V
 		}
 		if err != nil {
 			return storageErr(err)
+		}
+		if draftID > 0 {
+			res, err := tx.ExecContext(ctx, `DELETE FROM documents
+				WHERE id = ? AND application_id = ? AND kind = 'letter' AND status = 'draft'`, draftID, appID)
+			if err != nil {
+				return storageErr(err)
+			}
+			if n, err := res.RowsAffected(); err != nil {
+				return storageErr(err)
+			} else if n == 0 {
+				return errDraftGone
+			}
 		}
 		var maxV int
 		if err := tx.QueryRowContext(ctx, `SELECT coalesce(max(version), 0) FROM documents
@@ -99,12 +138,21 @@ func (s *Service) WriteLetter(ctx context.Context, appID int64, l pdf.Letter) (V
 		if err != nil {
 			return storageErr(err)
 		}
+		if s.onApproved != nil {
+			if err := s.onApproved(ctx, tx, appID); err != nil {
+				_ = os.Remove(s.abs(rel))
+				return err
+			}
+		}
 		out = Version{DocumentID: id, AppID: appID, Version: v, Path: rel}
 		return nil
 	})
 	if err != nil {
 		return Version{}, apperr.Public(err)
 	}
+	// The approval may also have moved the row to Ready (R26).
+	s.bus.Emit(events.Change(events.EntityDocument, appID))
+	s.bus.Emit(events.Change(events.EntityApplication, appID))
 	return out, nil
 }
 

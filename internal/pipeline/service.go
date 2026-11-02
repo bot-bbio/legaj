@@ -31,6 +31,9 @@ type Config struct {
 	Now     func() time.Time
 	// AfterFunc schedules the purge; default time.AfterFunc. Tests fire it by hand.
 	AfterFunc func(d time.Duration, f func()) Timer
+	// DefaultMaterials is the Settings default for new rows (R26); nil
+	// means a letter.
+	DefaultMaterials func(ctx context.Context) store.Materials
 }
 
 // Service manages applications by stable ID (R12, R13).
@@ -64,8 +67,11 @@ func (s *Service) changed(ids ...int64) events.Changed {
 	return events.Change(events.EntityApplication, ids...)
 }
 
-// Create adds a new Lead.
+// Create adds a new Lead. Without a materials choice it takes the default.
 func (s *Service) Create(ctx context.Context, in NewLead) (int64, error) {
+	if in.Materials == store.MaterialsNone {
+		in.Materials = s.defaultMaterials(ctx)
+	}
 	var id int64
 	err := s.cfg.DB.Tx(ctx, func(tx *sql.Tx) error {
 		var err error
@@ -80,20 +86,20 @@ func (s *Service) Create(ctx context.Context, in NewLead) (int64, error) {
 }
 
 const appColumns = `id, company, role, location, url, canonical_url, description, source, stage,
-	applied_at, resume_file_id, notes, created_at, updated_at`
+	materials, applied_at, resume_file_id, notes, created_at, updated_at`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
 func scanApplication(r rowScanner) (store.Application, error) {
 	var a store.Application
-	var source, stage, created, updated string
+	var source, stage, materials, created, updated string
 	var applied sql.NullString
 	var resume sql.NullInt64
 	if err := r.Scan(&a.ID, &a.Company, &a.Role, &a.Location, &a.URL, &a.CanonicalURL, &a.Description,
-		&source, &stage, &applied, &resume, &a.Notes, &created, &updated); err != nil {
+		&source, &stage, &materials, &applied, &resume, &a.Notes, &created, &updated); err != nil {
 		return a, err
 	}
-	a.Source, a.Stage = store.Source(source), store.Stage(stage)
+	a.Source, a.Stage, a.Materials = store.Source(source), store.Stage(stage), store.Materials(materials)
 	var err error
 	if a.CreatedAt, err = store.ParseTime(created); err != nil {
 		return a, err

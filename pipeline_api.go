@@ -22,6 +22,7 @@ type ApplicationRow struct {
 	URL       string `json:"url"`
 	Stage     string `json:"stage"`
 	Source    string `json:"source"`
+	Materials string `json:"materials"` // letter | answers | both ("" = none chosen)
 	CreatedAt string `json:"createdAt"` // RFC 3339, UTC
 	AppliedAt string `json:"appliedAt"` // "" when not applied
 }
@@ -29,12 +30,27 @@ type ApplicationRow struct {
 func toRow(a store.Application) ApplicationRow {
 	r := ApplicationRow{
 		ID: a.ID, Company: a.Company, Role: a.Role, Location: a.Location, URL: a.URL,
-		Stage: string(a.Stage), Source: string(a.Source), CreatedAt: apiTime(a.CreatedAt),
+		Stage: string(a.Stage), Source: string(a.Source), Materials: string(a.Materials),
+		CreatedAt: apiTime(a.CreatedAt),
 	}
 	if a.AppliedAt != nil {
 		r.AppliedAt = apiTime(*a.AppliedAt)
 	}
 	return r
+}
+
+// SetMaterials sets an application's materials choice (R26). If the new
+// choice is already approved, a Lead moves to Ready.
+func (p *PipelineAPI) SetMaterials(id int64, materials string) (ApplicationRow, error) {
+	_, svc, err := p.app.services()
+	if err != nil {
+		return ApplicationRow{}, err
+	}
+	a, err := svc.Pipeline.SetMaterials(p.app.ctx, id, store.Materials(materials))
+	if err != nil {
+		return ApplicationRow{}, p.app.public("PipelineAPI.SetMaterials", err)
+	}
+	return toRow(a), nil
 }
 
 // PasteJob adds a Lead entered by hand, or names the row that already has

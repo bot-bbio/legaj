@@ -50,6 +50,7 @@ func (s *Service) PasteJob(ctx context.Context, in PasteInput) (PasteResult, err
 		return PasteResult{}, err
 	}
 
+	materials := s.defaultMaterials(ctx) // read before the write transaction
 	var res PasteResult
 	err = s.cfg.DB.Tx(ctx, func(tx *sql.Tx) error {
 		if canonical != "" {
@@ -66,6 +67,7 @@ func (s *Service) PasteJob(ctx context.Context, in PasteInput) (PasteResult, err
 		id, err := s.cfg.Machine.CreateLead(ctx, tx, NewLead{
 			Company: in.Company, Role: in.Role, Location: in.Location,
 			URL: in.URL, CanonicalURL: canonical, Description: in.Description, Source: store.SourcePaste,
+			Materials: materials,
 		})
 		if err != nil {
 			return err

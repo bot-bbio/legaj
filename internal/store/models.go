@@ -51,6 +51,31 @@ const (
 	CauseAuto Cause = "auto"
 )
 
+// Materials is an application's materials choice (R26): what must be
+// approved before a Lead becomes Ready. MaterialsNone means nothing is
+// chosen, and such a row never advances on its own.
+type Materials string
+
+// Materials choices.
+const (
+	MaterialsNone    Materials = ""
+	MaterialsLetter  Materials = "letter"
+	MaterialsAnswers Materials = "answers"
+	MaterialsBoth    Materials = "both"
+)
+
+// Valid reports whether m is a choice the user can make (at least one
+// kind of material; MaterialsNone isn't one).
+func (m Materials) Valid() bool {
+	return m == MaterialsLetter || m == MaterialsAnswers || m == MaterialsBoth
+}
+
+// NeedsLetter reports whether a cover letter is part of the choice.
+func (m Materials) NeedsLetter() bool { return m == MaterialsLetter || m == MaterialsBoth }
+
+// NeedsAnswers reports whether form answers are part of the choice.
+func (m Materials) NeedsAnswers() bool { return m == MaterialsAnswers || m == MaterialsBoth }
+
 // Application is a row of the applications table.
 type Application struct {
 	ID           int64      `json:"id"`
@@ -62,6 +87,7 @@ type Application struct {
 	Description  string     `json:"description"`
 	Source       Source     `json:"source"`
 	Stage        Stage      `json:"stage"`
+	Materials    Materials  `json:"materials"`
 	AppliedAt    *time.Time `json:"appliedAt"`
 	ResumeFileID *int64     `json:"resumeFileId"`
 	Notes        string     `json:"notes"`

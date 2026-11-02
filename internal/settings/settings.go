@@ -17,20 +17,16 @@ import (
 	"github.com/bot-bbio/legaj/internal/store"
 )
 
-// Materials is what an application needs before it's Ready (R26).
-type Materials string
+// Materials is what an application needs before it's Ready (R26). The
+// type lives in store, next to the column it describes.
+type Materials = store.Materials
 
 // Materials choices.
 const (
-	MaterialsLetter  Materials = "letter"
-	MaterialsAnswers Materials = "answers"
-	MaterialsBoth    Materials = "both"
+	MaterialsLetter  = store.MaterialsLetter
+	MaterialsAnswers = store.MaterialsAnswers
+	MaterialsBoth    = store.MaterialsBoth
 )
-
-// Valid reports whether m is a known choice.
-func (m Materials) Valid() bool {
-	return m == MaterialsLetter || m == MaterialsAnswers || m == MaterialsBoth
-}
 
 // Settings are the user's preferences. Keep it a comparable value type.
 type Settings struct {

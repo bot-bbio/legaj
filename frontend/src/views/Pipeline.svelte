@@ -1,6 +1,8 @@
 <script lang="ts">
   import BulkBar from '../components/BulkBar.svelte';
+  import MaterialsChoice from '../components/MaterialsChoice.svelte';
   import PasteJob from '../components/PasteJob.svelte';
+  import ReviewPanel from '../components/ReviewPanel.svelte';
   import StatsHeader from '../components/StatsHeader.svelte';
   import UndoToast from '../components/UndoToast.svelte';
   import VirtualTable from '../components/VirtualTable.svelte';
@@ -28,7 +30,26 @@
   let focusId = $state<number | null>(null);
 
   let pasting = $state(false);
+  let reviewing = $state(false);
   let openError = $state('');
+
+  /**
+   * Queue letter generation and open the Review panel beside the table,
+   * where the drafts arrive (R23). One click per row (U6, R43).
+   */
+  async function generate(ids: number[]): Promise<void> {
+    openError = '';
+    try {
+      await api.generateLetters(ids);
+      reviewing = true;
+    } catch (err) {
+      openError = errorMessage(err);
+    }
+  }
+
+  // Letters are drafted for rows that still need them and whose choice includes one.
+  const canGenerate = (r: ApplicationRow): boolean =>
+    (r.stage === 'lead' || r.stage === 'ready') && r.materials !== 'answers';
 
   /** Links and files open only through the backend's safe opener (R33). */
   async function open(action: () => Promise<void>): Promise<void> {
@@ -75,9 +96,14 @@
 
 <div class="title">
   <h1>Pipeline</h1>
-  {#if !pasting}
-    <button type="button" onclick={() => (pasting = true)}>Paste job</button>
-  {/if}
+  <div class="title-actions">
+    <button type="button" class="secondary" aria-pressed={reviewing} onclick={() => (reviewing = !reviewing)}>
+      Review
+    </button>
+    {#if !pasting}
+      <button type="button" onclick={() => (pasting = true)}>Paste job</button>
+    {/if}
+  </div>
 </div>
 
 {#if pasting}
@@ -86,6 +112,8 @@
 
 <StatsHeader />
 
+<div class="layout" class:with-panel={reviewing}>
+  <div class="main">
 {#if $applicationsStore.status === 'loading'}
   <p class="muted">Loading…</p>
 {:else if $applicationsStore.status === 'error'}
@@ -111,7 +139,7 @@
   </div>
 
   {#if selected.size > 0}
-    <BulkBar ids={[...selected]} ondeleted={deleted} />
+    <BulkBar ids={[...selected]} ondeleted={deleted} ongenerate={generate} />
   {/if}
   {#if openError}<p class="error" role="alert">{openError}</p>{/if}
 
@@ -132,6 +160,7 @@
         <span role="columnheader">Company</span>
         <span role="columnheader">Role</span>
         <span role="columnheader">Stage</span>
+        <span role="columnheader">Materials</span>
         <span role="columnheader">Location</span>
         <span role="columnheader">Added</span>
         <span role="columnheader">Open</span>
@@ -151,9 +180,18 @@
         </span>
         <span role="cell" class="clip">{r.role}</span>
         <span role="cell"><span class="stage stage-{r.stage}">{stageLabel(r.stage)}</span></span>
+        <span role="cell"><MaterialsChoice row={r} onerror={(m) => (openError = m)} /></span>
         <span role="cell" class="clip muted">{r.location}</span>
         <span role="cell" class="muted">{added(r.createdAt)}</span>
         <span role="cell" class="links">
+          {#if canGenerate(r)}
+            <button
+              type="button"
+              class="link"
+              aria-label="Generate letter for {r.company || r.role || 'row'}"
+              onclick={() => generate([r.id])}>Generate</button
+            >
+          {/if}
           {#if r.url}
             <button type="button" class="link" onclick={() => open(() => api.openPosting(r.id))}>Posting</button>
           {/if}
@@ -163,6 +201,11 @@
     </VirtualTable>
   {/if}
 {/if}
+  </div>
+  {#if reviewing}
+    <ReviewPanel onclose={() => (reviewing = false)} />
+  {/if}
+</div>
 
 {#if deletes.length > 0}
   <div class="toasts">
@@ -188,6 +231,19 @@
     align-items: baseline;
     justify-content: space-between;
   }
+  .title-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .layout.with-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(20rem, 26rem);
+    gap: 1rem;
+    align-items: start;
+  }
+  .main {
+    min-width: 0;
+  }
   .toolbar {
     display: flex;
     align-items: flex-end;
@@ -200,7 +256,7 @@
   }
   :global(.grid-row) {
     display: grid;
-    grid-template-columns: 2.5rem minmax(8rem, 1fr) minmax(10rem, 1.5fr) 8rem minmax(6rem, 1fr) 7rem 8rem;
+    grid-template-columns: 2.5rem minmax(8rem, 1fr) minmax(10rem, 1.5fr) 8rem 6.5rem minmax(6rem, 1fr) 7rem 12rem;
     align-items: center;
     gap: 0.75rem;
     padding: 0 0.75rem;

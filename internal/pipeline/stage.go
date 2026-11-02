@@ -154,6 +154,8 @@ type NewLead struct {
 	CanonicalURL string
 	Description  string
 	Source       store.Source
+	// Materials is the row's materials choice (R26); MaterialsNone means none.
+	Materials store.Materials
 }
 
 // CreateLead inserts a new application in Lead (U9) and logs its creation.
@@ -163,9 +165,9 @@ func (m *Machine) CreateLead(ctx context.Context, tx *sql.Tx, in NewLead) (int64
 	}
 	now := store.FormatTime(m.now())
 	res, err := tx.ExecContext(ctx, `INSERT INTO applications
-		(company, role, location, url, canonical_url, description, source, stage, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'lead', ?, ?)`,
-		in.Company, in.Role, in.Location, in.URL, in.CanonicalURL, in.Description, string(in.Source), now, now)
+		(company, role, location, url, canonical_url, description, source, stage, materials, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'lead', ?, ?, ?)`,
+		in.Company, in.Role, in.Location, in.URL, in.CanonicalURL, in.Description, string(in.Source), string(in.Materials), now, now)
 	if err != nil {
 		return 0, storageErr(err)
 	}

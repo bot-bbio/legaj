@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,10 +28,11 @@ func TestMain(m *testing.M) { testenv.Main(m) }
 var ctx = context.Background()
 
 type fixture struct {
-	svc *letters.Service
-	ai  *aitest.Fake
-	db  *store.DB
-	dir string
+	svc  *letters.Service
+	ai   *aitest.Fake
+	db   *store.DB
+	dir  string
+	skip atomic.Bool // the Skip-review setting (R23)
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -51,10 +53,17 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	f := &fixture{ai: &aitest.Fake{}, db: db, dir: dir}
+	docs := documents.NewService(db, bus, dir, time.Now)
+	machine := pipeline.NewMachine(time.Now)
+	docs.OnApproved(func(ctx context.Context, tx *sql.Tx, appID int64) error {
+		_, err := machine.CheckReady(ctx, tx, appID)
+		return err
+	})
 	f.svc = letters.NewService(letters.Config{
 		DB: db, Bus: bus, AI: f.ai, Profile: prof, Now: time.Now,
-		Documents: documents.NewService(db, bus, dir, time.Now),
-		Model:     func(context.Context) string { return "gemini-test" },
+		Documents:  docs,
+		Model:      func(context.Context) string { return "gemini-test" },
+		SkipReview: func(context.Context) bool { return f.skip.Load() },
 	})
 	return f
 }

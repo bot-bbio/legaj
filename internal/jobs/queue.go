@@ -206,6 +206,18 @@ func (q *Queue) ClearFinished() {
 	q.emit()
 }
 
+// Dismiss forgets the finished jobs (done, failed or cancelled) of these
+// applications: the user has seen a failure and doesn't want to retry it.
+// Queued and running jobs are untouched.
+func (q *Queue) Dismiss(appIDs []int64) {
+	q.mu.Lock()
+	q.jobs = slices.DeleteFunc(q.jobs, func(j *Job) bool {
+		return slices.Contains(appIDs, j.AppID) && j.Status != Queued && j.Status != Running
+	})
+	q.mu.Unlock()
+	q.emit(appIDs...)
+}
+
 // next blocks until a job is pending or the queue closes.
 func (q *Queue) next() (*Job, context.Context, bool) {
 	q.mu.Lock()

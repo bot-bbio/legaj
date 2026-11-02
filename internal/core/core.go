@@ -6,6 +6,7 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"log/slog"
@@ -122,6 +123,22 @@ func (s *Services) model(ctx context.Context) string {
 	return st.Model
 }
 
+// defaultMaterials is the Settings default for new applications (R26).
+func (s *Services) defaultMaterials(ctx context.Context) store.Materials {
+	st, err := s.Settings.Get(ctx)
+	if err != nil {
+		return store.MaterialsLetter
+	}
+	return st.DefaultMaterials
+}
+
+// skipReview reports the Skip-review setting (R23). If settings can't be
+// read, review stays on: a draft is the safe outcome.
+func (s *Services) skipReview(ctx context.Context) bool {
+	st, err := s.Settings.Get(ctx)
+	return err == nil && st.SkipReview
+}
+
 // ErrNotReady is returned by Ready before the database is open.
 var ErrNotReady = apperr.New(apperr.CodeConflict, "LeGaJ is still starting. Try again in a moment.")
 
@@ -222,16 +239,21 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 	}
 	svc.Onboarding = onboarding.NewService(onboarding.Config{DB: db, Bus: c.Bus, Secrets: c.Secrets, TestKey: tester})
 	svc.Stages = pipeline.NewMachine(c.Now)
-	svc.Pipeline = pipeline.NewService(pipeline.Config{DB: db, Bus: c.Bus, Machine: svc.Stages, Now: c.Now})
-	svc.Documents = documents.NewService(db, c.Bus, c.Dir, c.Now)
-	svc.Letters = letters.NewService(letters.Config{DB: db, Bus: c.Bus, AI: c.AI, Profile: svc.Profile, Model: svc.model, Now: c.Now, Documents: svc.Documents})
-	svc.Jobs = jobs.New(jobs.Config{
-		Bus: c.Bus,
-		Work: func(ctx context.Context, appID int64) error {
-			_, err := svc.Letters.Draft(ctx, appID)
-			return err
-		},
+	svc.Pipeline = pipeline.NewService(pipeline.Config{
+		DB: db, Bus: c.Bus, Machine: svc.Stages, Now: c.Now,
+		DefaultMaterials: svc.defaultMaterials,
 	})
+	svc.Documents = documents.NewService(db, c.Bus, c.Dir, c.Now)
+	// Approving a letter applies the Ready rule in the same transaction (R26).
+	svc.Documents.OnApproved(func(ctx context.Context, tx *sql.Tx, appID int64) error {
+		_, err := svc.Stages.CheckReady(ctx, tx, appID)
+		return err
+	})
+	svc.Letters = letters.NewService(letters.Config{
+		DB: db, Bus: c.Bus, AI: c.AI, Profile: svc.Profile, Model: svc.model, Now: c.Now,
+		Documents: svc.Documents, SkipReview: svc.skipReview,
+	})
+	svc.Jobs = jobs.New(jobs.Config{Bus: c.Bus, Work: svc.Letters.Generate})
 	svc.Jobs.Start(context.Background())
 	// Deleting rows cancels their queued and running generation (R13).
 	svc.Pipeline.OnDelete(svc.Jobs.CancelApps)

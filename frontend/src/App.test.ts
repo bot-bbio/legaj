@@ -7,6 +7,11 @@ vi.mock('./lib/events', () => ({ onEntityChanged: () => () => {} }));
 vi.mock('./lib/api', () => ({
   api: {
     startup: () => Promise.resolve({ kind: 'ready', movedAside: '', backups: [], message: '' }),
+    onboardingState: () =>
+      Promise.resolve({
+        finished: true,
+        steps: ['key', 'resume', 'profile', 'clipper'].map((id) => ({ id, done: true })),
+      }),
     getProfile: () =>
       Promise.resolve({
         fullName: '', email: '', phone: '', location: '', headline: '', targetRole: '', summary: '',

@@ -31,7 +31,7 @@ func (noAutostart) Disable() error      { return nil }
 func opts(dir string, now time.Time) core.Options {
 	return core.Options{
 		Dir: dir, Now: func() time.Time { return now }, Emitter: &events.Recorder{},
-		Secrets: secrets.NewMemory(), Autostart: noAutostart{}, AI: &aitest.Fake{},
+		Secrets: secrets.NewMemory(), Autostart: noAutostart{}, AI: &aitest.Fake{}, KeyTester: func(context.Context, string) error { return nil },
 		Exe: func() (string, error) { return `C:\LeGaJ\legaj.exe`, nil },
 	}
 }

@@ -36,6 +36,9 @@ export function entityStore<T>(entities: readonly Entity[], load: () => Promise<
     return () => {
       clearTimeout(timer);
       off();
+      // Forget the data: the next subscriber must never act on a stale copy.
+      latest++;
+      set({ status: 'loading' });
     };
   });
 

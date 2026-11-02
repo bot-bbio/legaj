@@ -59,5 +59,6 @@ func bindings(app *App) []any {
 		app,
 		&SettingsAPI{app: app},
 		&ProfileAPI{app: app},
+		&OnboardingAPI{app: app},
 	}
 }

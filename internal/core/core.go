@@ -18,6 +18,7 @@ import (
 	"github.com/bot-bbio/legaj/internal/apperr"
 	"github.com/bot-bbio/legaj/internal/events"
 	"github.com/bot-bbio/legaj/internal/logx"
+	"github.com/bot-bbio/legaj/internal/onboarding"
 	"github.com/bot-bbio/legaj/internal/profile"
 	"github.com/bot-bbio/legaj/internal/resume"
 	"github.com/bot-bbio/legaj/internal/secrets"
@@ -41,6 +42,8 @@ type Options struct {
 	Exe func() (string, error)
 	// AI is the model provider; default the Gemini client.
 	AI ai.Provider
+	// KeyTester checks a candidate API key; default one small Gemini call.
+	KeyTester func(ctx context.Context, key string) error
 }
 
 // Core is the running backend.
@@ -64,10 +67,29 @@ type Core struct {
 // Services are the parts of the backend that need the database. They
 // become available together, once the startup state is ready.
 type Services struct {
-	DB       *store.DB
-	Settings *settings.Service
-	Profile  *profile.Service
-	Resume   *resume.Service
+	DB         *store.DB
+	Settings   *settings.Service
+	Profile    *profile.Service
+	Resume     *resume.Service
+	Onboarding *onboarding.Service
+}
+
+// geminiKeyTester makes one tiny call with the candidate key. Any 200
+// proves the key works, even if the answer itself was cut short.
+func geminiKeyTester(log *slog.Logger, model func(context.Context) string) func(context.Context, string) error {
+	return func(ctx context.Context, key string) error {
+		client := gemini.New(gemini.Config{Key: func() (string, error) { return key, nil }, Logger: log})
+		zero := 0.0
+		_, err := client.Generate(ctx, ai.Request{
+			Model:       model(ctx),
+			Parts:       []ai.Part{ai.Text("Reply with the single word OK.")},
+			Temperature: &zero,
+		})
+		if apperr.CodeOf(err) == apperr.CodeAIInvalidOutput {
+			return nil
+		}
+		return err
+	}
 }
 
 // model is the Gemini model chosen in Settings, or the default.
@@ -169,6 +191,11 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 		DB: db, Bus: c.Bus, Dir: c.Dir, AI: c.AI, Now: c.Now,
 		Model: svc.model,
 	})
+	tester := c.opts.KeyTester
+	if tester == nil {
+		tester = geminiKeyTester(c.Log, svc.model)
+	}
+	svc.Onboarding = onboarding.NewService(onboarding.Config{DB: db, Bus: c.Bus, Secrets: c.Secrets, TestKey: tester})
 	c.mu.Lock()
 	c.svc = svc
 	c.mu.Unlock()

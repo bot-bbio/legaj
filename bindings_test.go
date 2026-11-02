@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -31,7 +33,7 @@ func newTestApp(t *testing.T) (*App, *secrets.Memory) {
 	keys := secrets.NewMemory()
 	c, st, err := core.Boot(context.Background(), core.Options{
 		Dir: testenv.Isolate(t), Now: time.Now, Emitter: &events.Recorder{},
-		Secrets: keys, Autostart: noAutostart{}, AI: &aitest.Fake{},
+		Secrets: keys, Autostart: noAutostart{}, AI: &aitest.Fake{}, KeyTester: func(context.Context, string) error { return nil },
 		Exe: func() (string, error) { return `C:\LeGaJ\legaj.exe`, nil },
 	})
 	if err != nil {
@@ -40,9 +42,40 @@ func newTestApp(t *testing.T) (*App, *secrets.Memory) {
 	t.Cleanup(func() { _ = c.Close() })
 	app := NewApp()
 	app.ctx = context.Background()
+	// Never open a real Windows dialog from a test: "user cancelled".
+	app.pickFile = func(context.Context) (string, error) { return "", nil }
 	app.setStartup(c, toStartupView(st))
 	close(app.booted)
 	return app, keys
+}
+
+func TestR8_UploadResumeStoresFileAndReportsParseFailure(t *testing.T) {
+	app, _ := newTestApp(t)
+	pdf := filepath.Join(t.TempDir(), "My CV.pdf")
+	if err := os.WriteFile(pdf, []byte("%PDF-1.7\n%%EOF\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app.pickFile = func(context.Context) (string, error) { return pdf, nil }
+
+	// The test core's fake AI has no reply queued, so parsing fails.
+	res, err := (&OnboardingAPI{app: app}).UploadResume()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Cancelled || res.File.ID == 0 || res.File.FileName != "My CV.pdf" {
+		t.Fatalf("result = %+v", res)
+	}
+	if res.Draft != nil || res.ParseError == "" || strings.Contains(res.ParseError, "aitest") {
+		t.Fatalf("parse failure must come back as a user-safe message: %+v", res)
+	}
+}
+
+func TestR7_UploadCancelledIsNotAnError(t *testing.T) {
+	app, _ := newTestApp(t)
+	res, err := (&OnboardingAPI{app: app}).UploadResume()
+	if err != nil || !res.Cancelled {
+		t.Fatalf("res = %+v, err = %v", res, err)
+	}
 }
 
 // keyLikeField matches field names that could carry a secret.

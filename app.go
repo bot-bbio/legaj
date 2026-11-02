@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -21,6 +22,8 @@ var version = "2.0.0-dev"
 type App struct {
 	ctx    context.Context
 	booted chan struct{} // closed once startup has run
+	// pickFile shows the native open-file dialog; tests replace it.
+	pickFile func(ctx context.Context) (string, error)
 
 	mu    sync.Mutex
 	core  *core.Core
@@ -29,7 +32,17 @@ type App struct {
 
 // NewApp creates the bound app object.
 func NewApp() *App {
-	return &App{booted: make(chan struct{})}
+	return &App{booted: make(chan struct{}), pickFile: pickResumeFile}
+}
+
+// log returns the core's logger, or a discarding one before boot.
+func (a *App) log() *slog.Logger {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.core == nil {
+		return slog.New(slog.DiscardHandler)
+	}
+	return a.core.Log
 }
 
 // wailsEmitter delivers backend events to the frontend.

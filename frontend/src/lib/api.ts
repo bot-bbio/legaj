@@ -4,9 +4,10 @@
  * bindings (C13), minus the generated helper methods.
  */
 import * as App from '../../wailsjs/go/main/App';
+import * as OnboardingAPI from '../../wailsjs/go/main/OnboardingAPI';
 import * as ProfileAPI from '../../wailsjs/go/main/ProfileAPI';
 import * as SettingsAPI from '../../wailsjs/go/main/SettingsAPI';
-import { profile, type main, type settings } from '../../wailsjs/go/models';
+import { profile, type main, type onboarding, type settings } from '../../wailsjs/go/models';
 
 /** The data fields of a generated model class (deeply), without its helper methods. */
 export type Plain<T> = T extends readonly (infer U)[]
@@ -25,6 +26,10 @@ export type Experience = Plain<profile.Experience>;
 export type Education = Plain<profile.Education>;
 export type SkillGroup = Plain<profile.SkillGroup>;
 export type YearMonth = Plain<profile.YearMonth>;
+export type OnboardingState = Plain<onboarding.State>;
+export type KeyResult = Plain<onboarding.KeyResult>;
+export type ResumeImport = Plain<main.ResumeImport>;
+export type StepID = 'key' | 'resume' | 'profile' | 'clipper';
 
 export const api = {
   startup: (): Promise<StartupView> => App.Startup(),
@@ -39,4 +44,10 @@ export const api = {
 
   getProfile: (): Promise<Profile> => ProfileAPI.GetProfile(),
   saveProfile: (p: Profile): Promise<Profile> => ProfileAPI.SaveProfile(profile.Profile.createFrom(p)),
+
+  onboardingState: (): Promise<OnboardingState> => OnboardingAPI.OnboardingState(),
+  saveKeyAndTest: (key: string): Promise<KeyResult> => OnboardingAPI.SaveKey(key),
+  uploadResume: (): Promise<ResumeImport> => OnboardingAPI.UploadResume(),
+  parseResume: (fileId: number): Promise<ResumeImport> => OnboardingAPI.ParseResume(fileId),
+  finishOnboarding: (): Promise<void> => OnboardingAPI.FinishOnboarding(),
 };

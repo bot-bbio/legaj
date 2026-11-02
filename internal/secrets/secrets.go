@@ -153,11 +153,24 @@ func (m *Manager) Load() (string, error) {
 	return key, nil
 }
 
+// Normalize trims a pasted key and checks its shape. Error messages never
+// echo the input.
+func Normalize(key string) (string, error) {
+	key = strings.TrimSpace(key)
+	return key, validate(key)
+}
+
+// Protect registers a key with the log redactor before it is used for
+// anything, e.g. a test call ahead of saving.
+func (m *Manager) Protect(key string) {
+	m.redactor.Register(key)
+}
+
 // Save validates and stores a key the user pasted (surrounding whitespace
 // is trimmed). Error messages never echo the input.
 func (m *Manager) Save(key string) error {
-	key = strings.TrimSpace(key)
-	if err := validate(key); err != nil {
+	key, err := Normalize(key)
+	if err != nil {
 		return err
 	}
 	m.redactor.Register(key)

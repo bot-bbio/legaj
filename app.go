@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -123,7 +124,7 @@ type BackupView struct {
 func toStartupView(st store.Startup) StartupView {
 	v := StartupView{Kind: string(st.Kind), MovedAside: st.MovedAside, Backups: []BackupView{}}
 	for _, b := range st.Backups {
-		v.Backups = append(v.Backups, BackupView{Name: b.Name, TakenAt: b.TakenAt.UTC().Format("2006-01-02T15:04:05Z"), SizeBytes: b.SizeBytes})
+		v.Backups = append(v.Backups, BackupView{Name: b.Name, TakenAt: apiTime(b.TakenAt), SizeBytes: b.SizeBytes})
 	}
 	return v
 }
@@ -152,11 +153,32 @@ func (a *App) RestoreBackup(name string) (StartupView, error) {
 	}
 	st, err := c.Restore(a.ctx, name)
 	if err != nil {
-		return StartupView{}, apperr.Public(err)
+		return StartupView{}, a.public("App.RestoreBackup", err)
 	}
 	v := toStartupView(st)
 	a.setStartup(c, v)
 	return v, nil
+}
+
+// public logs a failed bound call through the redacting logger, then
+// returns the user-safe form. The generic message promises the details are
+// in the log, so every failure must be logged here, once.
+func (a *App) public(op string, err error) error {
+	if err == nil {
+		return nil
+	}
+	level := slog.LevelInfo // the user's input or a state they can fix
+	switch apperr.CodeOf(err) {
+	case apperr.CodeInternal, apperr.CodeStorage, apperr.CodeAIUnavailable:
+		level = slog.LevelError
+	}
+	a.log().Log(context.Background(), level, "call failed", "op", op, "code", string(apperr.CodeOf(err)), "err", err)
+	return apperr.Public(err)
+}
+
+// apiTime is the one time format bound methods return: RFC 3339, UTC.
+func apiTime(t time.Time) string {
+	return t.UTC().Format("2006-01-02T15:04:05Z")
 }
 
 // coreOnly returns the booted core, for calls that don't need the database.
@@ -191,7 +213,7 @@ func (a *App) OpenURL(link string) error {
 	if err != nil {
 		return err
 	}
-	return apperr.Public(c.Opener.OpenURL(link))
+	return a.public("App.OpenURL", c.Opener.OpenURL(link))
 }
 
 // Quit closes LeGaJ (the "Quit" choice on the restore screen).

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"github.com/bot-bbio/legaj/internal/apperr"
 	"github.com/bot-bbio/legaj/internal/events"
 	"github.com/bot-bbio/legaj/internal/secrets"
 	"github.com/bot-bbio/legaj/internal/settings"
@@ -27,11 +26,11 @@ func (s *SettingsAPI) GetSettings() (SettingsView, error) {
 	}
 	st, err := svc.Settings.Get(s.app.ctx)
 	if err != nil {
-		return SettingsView{}, apperr.Public(err)
+		return SettingsView{}, s.app.public("SettingsAPI.GetSettings", err)
 	}
 	key, err := c.Secrets.Status()
 	if err != nil {
-		return SettingsView{}, apperr.Public(err)
+		return SettingsView{}, s.app.public("SettingsAPI.GetSettings", err)
 	}
 	return SettingsView{Settings: st, Key: key}, nil
 }
@@ -43,7 +42,7 @@ func (s *SettingsAPI) SaveSettings(in settings.Settings) (SettingsView, error) {
 		return SettingsView{}, err
 	}
 	if _, err := svc.Settings.Save(s.app.ctx, in); err != nil {
-		return SettingsView{}, apperr.Public(err)
+		return SettingsView{}, s.app.public("SettingsAPI.SaveSettings", err)
 	}
 	return s.GetSettings()
 }
@@ -56,7 +55,7 @@ func (s *SettingsAPI) SaveAPIKey(key string) error {
 		return err
 	}
 	if err := c.Secrets.Save(key); err != nil {
-		return apperr.Public(err)
+		return s.app.public("SettingsAPI.SaveAPIKey", err)
 	}
 	c.Log.Info("api key saved")
 	c.Bus.Emit(events.Change(events.EntitySettings))
@@ -70,7 +69,7 @@ func (s *SettingsAPI) RemoveAPIKey() error {
 		return err
 	}
 	if err := c.Secrets.Remove(); err != nil {
-		return apperr.Public(err)
+		return s.app.public("SettingsAPI.RemoveAPIKey", err)
 	}
 	c.Log.Info("api key removed")
 	c.Bus.Emit(events.Change(events.EntitySettings))

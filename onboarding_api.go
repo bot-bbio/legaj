@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -38,7 +36,7 @@ type ResumeImport struct {
 }
 
 func toFileView(f resume.FileInfo) ResumeFileView {
-	return ResumeFileView{ID: f.ID, FileName: f.FileName, SizeBytes: f.SizeBytes, UploadedAt: f.UploadedAt.UTC().Format("2006-01-02T15:04:05Z")}
+	return ResumeFileView{ID: f.ID, FileName: f.FileName, SizeBytes: f.SizeBytes, UploadedAt: apiTime(f.UploadedAt)}
 }
 
 // pickResumeFile shows Windows' open-file dialog. The file is read in Go,
@@ -57,7 +55,7 @@ func (o *OnboardingAPI) OnboardingState() (onboarding.State, error) {
 		return onboarding.State{}, err
 	}
 	st, err := svc.Onboarding.State(o.app.ctx)
-	return st, apperr.Public(err)
+	return st, o.app.public("OnboardingAPI.OnboardingState", err)
 }
 
 // SaveKey tests and saves a pasted API key.
@@ -67,7 +65,7 @@ func (o *OnboardingAPI) SaveKey(key string) (onboarding.KeyResult, error) {
 		return onboarding.KeyResult{}, err
 	}
 	res, err := svc.Onboarding.SaveKey(o.app.ctx, key)
-	return res, apperr.Public(err)
+	return res, o.app.public("OnboardingAPI.SaveKey", err)
 }
 
 // UploadResume lets the user pick a resume, stores it unchanged, and parses
@@ -77,27 +75,9 @@ func (o *OnboardingAPI) UploadResume() (ResumeImport, error) {
 	if err != nil {
 		return ResumeImport{}, err
 	}
-	path, err := o.app.pickFile(o.app.ctx)
-	if err != nil {
-		return ResumeImport{}, apperr.Public(err)
-	}
-	if path == "" {
-		return ResumeImport{Cancelled: true}, nil
-	}
-	fi, err := os.Stat(path)
-	if err != nil {
-		return ResumeImport{}, apperr.Wrap(err, apperr.CodeInvalid, "LeGaJ couldn't open that file.")
-	}
-	if fi.Size() > resume.MaxFileBytes {
-		return ResumeImport{}, apperr.New(apperr.CodeInvalid, "That file is too large. Resumes up to 10 MB are supported.")
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ResumeImport{}, apperr.Wrap(err, apperr.CodeInvalid, "LeGaJ couldn't open that file.")
-	}
-	info, err := svc.Resume.Store(o.app.ctx, filepath.Base(path), data)
-	if err != nil {
-		return ResumeImport{}, apperr.Public(err)
+	info, cancelled, err := o.app.pickAndStoreResume(svc.Resume)
+	if err != nil || cancelled {
+		return ResumeImport{Cancelled: cancelled}, o.app.public("OnboardingAPI.UploadResume", err)
 	}
 	return o.parse(svc.Resume, info)
 }
@@ -110,7 +90,7 @@ func (o *OnboardingAPI) ParseResume(fileID int64) (ResumeImport, error) {
 	}
 	info, err := svc.Resume.Get(o.app.ctx, fileID)
 	if err != nil {
-		return ResumeImport{}, apperr.Public(err)
+		return ResumeImport{}, o.app.public("OnboardingAPI.ParseResume", err)
 	}
 	return o.parse(svc.Resume, info)
 }
@@ -133,5 +113,5 @@ func (o *OnboardingAPI) FinishOnboarding() error {
 	if err != nil {
 		return err
 	}
-	return apperr.Public(svc.Onboarding.Finish(o.app.ctx))
+	return o.app.public("OnboardingAPI.FinishOnboarding", svc.Onboarding.Finish(o.app.ctx))
 }

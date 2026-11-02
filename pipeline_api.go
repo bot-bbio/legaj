@@ -26,15 +26,13 @@ type ApplicationRow struct {
 	AppliedAt string `json:"appliedAt"` // "" when not applied
 }
 
-const rfc3339 = "2006-01-02T15:04:05Z"
-
 func toRow(a store.Application) ApplicationRow {
 	r := ApplicationRow{
 		ID: a.ID, Company: a.Company, Role: a.Role, Location: a.Location, URL: a.URL,
-		Stage: string(a.Stage), Source: string(a.Source), CreatedAt: a.CreatedAt.UTC().Format(rfc3339),
+		Stage: string(a.Stage), Source: string(a.Source), CreatedAt: apiTime(a.CreatedAt),
 	}
 	if a.AppliedAt != nil {
-		r.AppliedAt = a.AppliedAt.UTC().Format(rfc3339)
+		r.AppliedAt = apiTime(*a.AppliedAt)
 	}
 	return r
 }
@@ -47,7 +45,7 @@ func (p *PipelineAPI) PasteJob(in pipeline.PasteInput) (pipeline.PasteResult, er
 		return pipeline.PasteResult{}, err
 	}
 	res, err := svc.Pipeline.PasteJob(p.app.ctx, in)
-	return res, apperr.Public(err)
+	return res, p.app.public("PipelineAPI.PasteJob", err)
 }
 
 // OpenPosting opens an application's job posting in the browser (R33).
@@ -58,12 +56,12 @@ func (p *PipelineAPI) OpenPosting(id int64) error {
 	}
 	a, err := svc.Pipeline.Get(p.app.ctx, id)
 	if err != nil {
-		return apperr.Public(err)
+		return p.app.public("PipelineAPI.OpenPosting", err)
 	}
 	if a.URL == "" {
 		return apperr.New(apperr.CodeNotFound, "This application has no posting link.")
 	}
-	return apperr.Public(c.Opener.OpenURL(a.URL))
+	return p.app.public("PipelineAPI.OpenPosting", c.Opener.OpenURL(a.URL))
 }
 
 // OpenResume opens the resume this application uses: the version it was
@@ -75,13 +73,13 @@ func (p *PipelineAPI) OpenResume(id int64) error {
 	}
 	ref, err := svc.Pipeline.ResumeFor(p.app.ctx, id)
 	if err != nil {
-		return apperr.Public(err)
+		return p.app.public("PipelineAPI.OpenResume", err)
 	}
 	path, err := svc.Resume.Path(resume.FileInfo{StoredPath: ref.StoredPath})
 	if err != nil {
-		return apperr.Public(err)
+		return p.app.public("PipelineAPI.OpenResume", err)
 	}
-	return apperr.Public(c.Opener.OpenFile(path))
+	return p.app.public("PipelineAPI.OpenResume", c.Opener.OpenFile(path))
 }
 
 // SetStage moves exactly the given applications to a stage (R12).
@@ -91,7 +89,18 @@ func (p *PipelineAPI) SetStage(ids []int64, stage string) (pipeline.StageResult,
 		return pipeline.StageResult{}, err
 	}
 	res, err := svc.Pipeline.SetStage(p.app.ctx, ids, store.Stage(stage))
-	return res, apperr.Public(err)
+	return res, p.app.public("PipelineAPI.SetStage", err)
+}
+
+// Reopen moves exactly the given applications back to an earlier stage, or
+// out of Rejected or Withdrawn (R11, D23).
+func (p *PipelineAPI) Reopen(ids []int64, stage string) (pipeline.StageResult, error) {
+	_, svc, err := p.app.services()
+	if err != nil {
+		return pipeline.StageResult{}, err
+	}
+	res, err := svc.Pipeline.Reopen(p.app.ctx, ids, store.Stage(stage))
+	return res, p.app.public("PipelineAPI.Reopen", err)
 }
 
 // DeleteApplications soft-deletes exactly the given applications; the
@@ -102,7 +111,7 @@ func (p *PipelineAPI) DeleteApplications(ids []int64) (pipeline.DeleteResult, er
 		return pipeline.DeleteResult{}, err
 	}
 	res, err := svc.Pipeline.Delete(p.app.ctx, ids)
-	return res, apperr.Public(err)
+	return res, p.app.public("PipelineAPI.DeleteApplications", err)
 }
 
 // UndoDelete restores a delete within its undo window.
@@ -112,7 +121,7 @@ func (p *PipelineAPI) UndoDelete(undoID string) (pipeline.UndoResult, error) {
 		return pipeline.UndoResult{}, err
 	}
 	res, err := svc.Pipeline.Undo(p.app.ctx, undoID)
-	return res, apperr.Public(err)
+	return res, p.app.public("PipelineAPI.UndoDelete", err)
 }
 
 // StatsView is the Pipeline header (R14), with times as RFC 3339 strings.
@@ -150,17 +159,17 @@ func (p *PipelineAPI) PipelineStats() (StatsView, error) {
 	}
 	st, err := svc.Pipeline.Stats(p.app.ctx)
 	if err != nil {
-		return StatsView{}, apperr.Public(err)
+		return StatsView{}, p.app.public("PipelineAPI.PipelineStats", err)
 	}
 	v := StatsView{Counts: map[string]int{}, Total: st.Total, Recent: []RecentView{}}
 	for k, n := range st.Counts {
 		v.Counts[string(k)] = n
 	}
 	for _, r := range st.Recent {
-		v.Recent = append(v.Recent, RecentView{ID: r.ID, Company: r.Company, Role: r.Role, Stage: string(r.Stage), CreatedAt: r.CreatedAt.UTC().Format(rfc3339)})
+		v.Recent = append(v.Recent, RecentView{ID: r.ID, Company: r.Company, Role: r.Role, Stage: string(r.Stage), CreatedAt: apiTime(r.CreatedAt)})
 	}
 	if n := st.NextInterview; n != nil {
-		v.NextInterview = &InterviewBrief{ApplicationID: n.ApplicationID, Company: n.Company, Role: n.Role, StartsAt: n.StartsAt.UTC().Format(rfc3339), Zone: n.Zone, Kind: n.Kind}
+		v.NextInterview = &InterviewBrief{ApplicationID: n.ApplicationID, Company: n.Company, Role: n.Role, StartsAt: apiTime(n.StartsAt), Zone: n.Zone, Kind: n.Kind}
 	}
 	return v, nil
 }
@@ -173,7 +182,7 @@ func (p *PipelineAPI) ListApplications() ([]ApplicationRow, error) {
 	}
 	apps, err := svc.Pipeline.List(p.app.ctx)
 	if err != nil {
-		return nil, apperr.Public(err)
+		return nil, p.app.public("PipelineAPI.ListApplications", err)
 	}
 	rows := make([]ApplicationRow, len(apps))
 	for i, a := range apps {

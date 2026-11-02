@@ -65,6 +65,77 @@ func newTestAppWithLaunches(t *testing.T) (*App, *secrets.Memory, *launches) {
 	return app, keys, opened
 }
 
+func TestR34_FailedCallsAreLoggedWithoutSecrets(t *testing.T) {
+	app, keys, _ := newTestAppWithLaunches(t)
+	if err := keys.Set(sentinelKey); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := app.coreOnly()
+	c.Secrets.Protect(sentinelKey)
+	if _, err := (&PipelineAPI{app: app}).SetStage([]int64{1}, "hired"); err == nil {
+		t.Fatal("unknown stage accepted")
+	}
+	if err := (&SettingsAPI{app: app}).SaveAPIKey("short " + sentinelKey); err == nil {
+		t.Fatal("malformed key accepted")
+	}
+	data, err := os.ReadFile(filepath.Join(c.Dir, "logs", "legaj.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(data)
+	for _, want := range []string{`"op":"PipelineAPI.SetStage"`, `"op":"SettingsAPI.SaveAPIKey"`, `"code":"invalid"`} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("log lacks %s; the user is told details are in the log:\n%s", want, log)
+		}
+	}
+	if strings.Contains(log, sentinelKey) {
+		t.Fatal("the key reached the log")
+	}
+}
+
+func TestR11_ReopenBinding(t *testing.T) {
+	app, _, _ := newTestAppWithLaunches(t)
+	_, svc, _ := app.services()
+	res, err := svc.Pipeline.PasteJob(context.Background(), pipeline.PasteInput{Company: "Acme", Role: "Dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := &PipelineAPI{app: app}
+	if _, err := api.SetStage([]int64{res.ID}, "rejected"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := api.Reopen([]int64{res.ID}, "applied")
+	if err != nil || len(out.Changed) != 1 {
+		t.Fatalf("reopen = %+v, %v", out, err)
+	}
+}
+
+func TestR10_ProfileReplacesResumeWithoutParsing(t *testing.T) {
+	app, _, opened := newTestAppWithLaunches(t)
+	pdf := filepath.Join(t.TempDir(), "cv-2026.pdf")
+	if err := os.WriteFile(pdf, []byte("%PDF-1.7 new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app.pickFile = func(context.Context) (string, error) { return pdf, nil }
+	api := &ProfileAPI{app: app}
+
+	before, err := api.CurrentResume()
+	if err != nil || before.ID != 0 {
+		t.Fatalf("before = %+v, %v; no resume yet is not an error", before, err)
+	}
+	up, err := api.UploadNewResume()
+	if err != nil || up.Cancelled || up.File.FileName != "cv-2026.pdf" {
+		t.Fatalf("upload = %+v, %v", up, err)
+	}
+	cur, err := api.CurrentResume()
+	if err != nil || cur.ID != up.File.ID {
+		t.Fatalf("current = %+v, %v", cur, err)
+	}
+	if err := api.OpenCurrentResume(); err != nil || len(opened.targets) != 1 {
+		t.Fatalf("open: %v, opened %q", err, opened.targets)
+	}
+}
+
 func TestR33_OpenURLRefusesA8Payload(t *testing.T) {
 	app, _, opened := newTestAppWithLaunches(t)
 	if err := app.OpenURL(`file:///x&cd>pwned.txt`); err == nil {

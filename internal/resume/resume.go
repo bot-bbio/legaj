@@ -181,7 +181,7 @@ func displayName(name string) string {
 // Current returns the most recently uploaded resume.
 func (s *Service) Current(ctx context.Context) (FileInfo, error) {
 	return s.get(ctx, `SELECT id, file_name, stored_path, mime_type, sha256, size_bytes, uploaded_at
-		FROM resume_files ORDER BY uploaded_at DESC, id DESC LIMIT 1`)
+		FROM resume_files WHERE id = (`+store.NewestResumeIDQuery+`)`)
 }
 
 // Get returns one stored resume by ID.

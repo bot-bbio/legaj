@@ -241,6 +241,37 @@ func (s *Service) SetStage(ctx context.Context, ids []int64, to store.Stage) (St
 	return res, nil
 }
 
+// Reopen moves exactly the given rows back to an earlier stage, or out of
+// Rejected or Withdrawn (R11, D23). Rows Reopen doesn't apply to are skipped
+// with the reason.
+func (s *Service) Reopen(ctx context.Context, ids []int64, to store.Stage) (StageResult, error) {
+	if !to.Valid() {
+		return StageResult{}, apperr.New(apperr.CodeInvalid, "Unknown stage.")
+	}
+	res := StageResult{Changed: []int64{}, Skipped: []Skip{}}
+	err := s.cfg.DB.Tx(ctx, func(tx *sql.Tx) error {
+		for _, id := range uniqueSorted(ids) {
+			_, err := s.cfg.Machine.Reopen(ctx, tx, id, to)
+			switch code := apperr.CodeOf(err); {
+			case err == nil:
+				res.Changed = append(res.Changed, id)
+			case code == apperr.CodeConflict || code == apperr.CodeNotFound:
+				res.Skipped = append(res.Skipped, Skip{ID: id, Reason: apperr.UserMessage(err)})
+			default:
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return StageResult{}, apperr.Public(err)
+	}
+	if len(res.Changed) > 0 {
+		s.cfg.Bus.Emit(s.changed(res.Changed...))
+	}
+	return res, nil
+}
+
 // DeleteResult identifies a delete for Undo by its UndoID.
 type DeleteResult struct {
 	UndoID string  `json:"undoId"`
@@ -294,10 +325,13 @@ func (s *Service) Delete(ctx context.Context, ids []int64) (DeleteResult, error)
 }
 
 // UndoResult reports an Undo. Skipped rows couldn't come back because a
-// live row with the same job URL was added meanwhile.
+// live row with the same job URL was added meanwhile; their letters,
+// rounds, answers, follow-ups and history moved to that row, listed in
+// MergedInto at the same index, so nothing is lost when they're purged.
 type UndoResult struct {
-	IDs     []int64 `json:"ids"`
-	Skipped []int64 `json:"skipped"`
+	IDs        []int64 `json:"ids"`
+	Skipped    []int64 `json:"skipped"`
+	MergedInto []int64 `json:"mergedInto"`
 }
 
 // ErrUndoExpired is returned once a delete has been purged.
@@ -305,7 +339,7 @@ var ErrUndoExpired = apperr.New(apperr.CodeConflict, "It's too late to undo that
 
 // Undo restores a delete batch with all its children.
 func (s *Service) Undo(ctx context.Context, token string) (UndoResult, error) {
-	res := UndoResult{IDs: []int64{}, Skipped: []int64{}}
+	res := UndoResult{IDs: []int64{}, Skipped: []int64{}, MergedInto: []int64{}}
 	err := s.cfg.DB.Tx(ctx, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx, `SELECT id, canonical_url FROM applications
 			WHERE delete_token = ? AND deleted_at IS NOT NULL ORDER BY id`, token)
@@ -334,13 +368,18 @@ func (s *Service) Undo(ctx context.Context, token string) (UndoResult, error) {
 		}
 		for _, p := range batch {
 			if p.url != "" {
-				var live int
-				if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM applications
-					WHERE canonical_url = ? AND deleted_at IS NULL`, p.url).Scan(&live); err != nil {
+				var live int64
+				err := tx.QueryRowContext(ctx, `SELECT id FROM applications
+					WHERE canonical_url = ? AND deleted_at IS NULL`, p.url).Scan(&live)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
 					return storageErr(err)
 				}
-				if live > 0 {
+				if err == nil {
+					if err := moveChildren(ctx, tx, p.id, live); err != nil {
+						return err
+					}
 					res.Skipped = append(res.Skipped, p.id)
+					res.MergedInto = append(res.MergedInto, live)
 					continue
 				}
 			}
@@ -359,6 +398,47 @@ func (s *Service) Undo(ctx context.Context, token string) (UndoResult, error) {
 		s.cfg.Bus.Emit(s.changed(res.IDs...))
 	}
 	return res, nil
+}
+
+// moveChildren re-parents everything a soft-deleted row owns onto the live
+// row that replaced it, so the coming purge removes only the empty shell.
+// Approved letter versions are renumbered after the live row's own.
+func moveChildren(ctx context.Context, tx *sql.Tx, from, to int64) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id, kind FROM documents
+		WHERE application_id = ? AND version IS NOT NULL ORDER BY kind, version`, from)
+	if err != nil {
+		return storageErr(err)
+	}
+	type doc struct {
+		id   int64
+		kind string
+	}
+	var versioned []doc
+	for rows.Next() {
+		var d doc
+		if err := rows.Scan(&d.id, &d.kind); err != nil {
+			rows.Close()
+			return storageErr(err)
+		}
+		versioned = append(versioned, d)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return storageErr(err)
+	}
+	for _, d := range versioned {
+		if _, err := tx.ExecContext(ctx, `UPDATE documents SET application_id = ?,
+			version = 1 + (SELECT coalesce(max(version), 0) FROM documents WHERE application_id = ? AND kind = ?)
+			WHERE id = ?`, to, to, d.kind, d.id); err != nil {
+			return storageErr(err)
+		}
+	}
+	for _, table := range []string{"documents", "rounds", "followups", "answers", "stage_events"} {
+		if _, err := tx.ExecContext(ctx, `UPDATE `+table+` SET application_id = ? WHERE application_id = ?`, to, from); err != nil {
+			return storageErr(err)
+		}
+	}
+	return nil
 }
 
 // PurgeDeleted removes every soft-deleted row, for use at startup: single

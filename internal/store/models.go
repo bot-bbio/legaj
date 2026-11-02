@@ -80,6 +80,11 @@ type StageEvent struct {
 	At            time.Time `json:"at"`
 }
 
+// NewestResumeIDQuery selects the current resume: the most recent upload.
+// The one definition shared by the state machine, Open resume and the
+// resume service, so "current" can't drift between them.
+const NewestResumeIDQuery = `SELECT id FROM resume_files ORDER BY uploaded_at DESC, id DESC LIMIT 1`
+
 // timeLayout is fixed width (always 3 fractional digits, always Z), so
 // stored times sort correctly as text.
 const timeLayout = "2006-01-02T15:04:05.000Z"

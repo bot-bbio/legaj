@@ -187,12 +187,13 @@ func (m *Machine) apply(ctx context.Context, tx *sql.Tx, appID int64, from, to s
 	var err error
 	switch {
 	case !terminal(to) && order[to] >= order[store.StageApplied]:
-		// Entering Applied or later: stamp it and pin the newest resume,
-		// unless an earlier move already did.
+		// Entering Applied or later: the first such move stamps applied_at
+		// and pins the resume current at that moment. Later moves never
+		// pin: a resume uploaded after applying wasn't the one sent (R10).
+		// (SET expressions see the row's old values.)
 		_, err = tx.ExecContext(ctx, `UPDATE applications SET stage = ?, updated_at = ?,
-			applied_at = coalesce(applied_at, ?),
-			resume_file_id = coalesce(resume_file_id,
-				(SELECT id FROM resume_files ORDER BY uploaded_at DESC, id DESC LIMIT 1))
+			resume_file_id = CASE WHEN applied_at IS NULL THEN (`+store.NewestResumeIDQuery+`) ELSE resume_file_id END,
+			applied_at = coalesce(applied_at, ?)
 			WHERE id = ?`, string(to), now, now, appID)
 	case !terminal(to):
 		// Lead or Ready (only reachable backwards via Reopen): not applied.

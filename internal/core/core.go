@@ -19,6 +19,7 @@ import (
 	"github.com/bot-bbio/legaj/internal/events"
 	"github.com/bot-bbio/legaj/internal/logx"
 	"github.com/bot-bbio/legaj/internal/onboarding"
+	"github.com/bot-bbio/legaj/internal/pipeline"
 	"github.com/bot-bbio/legaj/internal/profile"
 	"github.com/bot-bbio/legaj/internal/resume"
 	"github.com/bot-bbio/legaj/internal/secrets"
@@ -72,6 +73,8 @@ type Services struct {
 	Profile    *profile.Service
 	Resume     *resume.Service
 	Onboarding *onboarding.Service
+	Stages     *pipeline.Machine
+	Pipeline   *pipeline.Service
 }
 
 // geminiKeyTester makes one tiny call with the candidate key. Any 200
@@ -196,6 +199,14 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 		tester = geminiKeyTester(c.Log, svc.model)
 	}
 	svc.Onboarding = onboarding.NewService(onboarding.Config{DB: db, Bus: c.Bus, Secrets: c.Secrets, TestKey: tester})
+	svc.Stages = pipeline.NewMachine(c.Now)
+	svc.Pipeline = pipeline.NewService(pipeline.Config{DB: db, Bus: c.Bus, Machine: svc.Stages, Now: c.Now})
+	// Rows deleted in a previous session are past their undo window (R13).
+	if n, err := svc.Pipeline.PurgeDeleted(ctx); err != nil {
+		c.Log.Error("purge of deleted applications failed", "err", err)
+	} else if n > 0 {
+		c.Log.Info("purged deleted applications", "count", n)
+	}
 	c.mu.Lock()
 	c.svc = svc
 	c.mu.Unlock()

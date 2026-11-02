@@ -1,5 +1,7 @@
 <script lang="ts">
   /** Actions on exactly the selected IDs (R12, R13). */
+  import { untrack } from 'svelte';
+
   import { api, type DeleteResult } from '../lib/api';
   import { errorMessage } from '../lib/errors';
   import { STAGES, stageLabel } from '../lib/stages';
@@ -18,6 +20,24 @@
   // Rows the move refused, which Reopen may take back (R11, D23).
   let refused = $state<number[]>([]);
   let refusedTarget = $state('');
+
+  // A result belongs to the selection it was made for: when the selection
+  // changes, forget it, so Reopen can only act on rows still selected (R12).
+  let shownFor = '';
+  $effect(() => {
+    const key = [...ids].sort((a, b) => a - b).join(',');
+    if (key !== shownFor) {
+      shownFor = key;
+      untrack(() => {
+        refused = [];
+        problems = [];
+        message = '';
+      });
+    }
+  });
+
+  // Reopen never leads into Rejected or Withdrawn (D23).
+  const canReopen = $derived(refused.length > 0 && refusedTarget !== 'rejected' && refusedTarget !== 'withdrawn');
 
   async function move(): Promise<void> {
     busy = true;
@@ -85,7 +105,7 @@
     <ul>
       {#each problems as p, i (i)}<li>{p}</li>{/each}
     </ul>
-    {#if refused.length > 0}
+    {#if canReopen}
       <button type="button" class="secondary" disabled={busy} onclick={reopen}>
         Reopen {refused.length} to {stageLabel(refusedTarget)}
       </button>

@@ -4,7 +4,7 @@
    * a full-height spacer (R17, C12). 1,000 rows keep about 40 row nodes in
    * the DOM.
    */
-  import type { Snippet } from 'svelte';
+  import { untrack, type Snippet } from 'svelte';
 
   interface Props {
     rows: readonly T[];
@@ -14,23 +14,41 @@
     rowHeight?: number;
     height?: number;
     overscan?: number;
-    /** When set, the table scrolls so this row is in view. */
+    /** When set, the table scrolls once so this row is in view, then calls onscrolled. */
     scrollToId?: number | null;
+    onscrolled?: () => void;
   }
 
-  let { rows, label, header, row, rowHeight = 36, height = 560, overscan = 8, scrollToId = null }: Props = $props();
+  let {
+    rows,
+    label,
+    header,
+    row,
+    rowHeight = 36,
+    height = 560,
+    overscan = 8,
+    scrollToId = null,
+    onscrolled,
+  }: Props = $props();
 
   let scrollTop = $state(0);
   let viewport = $state<HTMLDivElement | null>(null);
 
+  // Runs when scrollToId changes, never on later row changes: a refresh
+  // must not yank the user back to a row they already moved away from.
   $effect(() => {
-    if (scrollToId === null || !viewport) return;
-    const index = rows.findIndex((r) => r.id === scrollToId);
-    if (index < 0) return;
-    // Put the row a couple of lines below the top edge.
-    const top = Math.max(0, (index - 2) * rowHeight);
-    viewport.scrollTop = top;
-    scrollTop = top;
+    const id = scrollToId;
+    const el = viewport;
+    if (id === null || !el) return;
+    untrack(() => {
+      const index = rows.findIndex((r) => r.id === id);
+      if (index < 0) return;
+      // Put the row a couple of lines below the top edge.
+      const top = Math.max(0, (index - 2) * rowHeight);
+      el.scrollTop = top;
+      scrollTop = top;
+      onscrolled?.();
+    });
   });
   const start = $derived(Math.max(0, Math.floor(scrollTop / rowHeight) - overscan));
   const end = $derived(Math.min(rows.length, Math.ceil((scrollTop + height) / rowHeight) + overscan));

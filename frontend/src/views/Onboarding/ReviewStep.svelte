@@ -32,7 +32,12 @@
           base = saved;
         }
       })
-      .catch((err: unknown) => (failure = errorMessage(err)));
+      .catch((err: unknown) => {
+        failure = errorMessage(err);
+        // The saved profile couldn't be read: still show what Gemini read,
+        // rather than throwing the parse away.
+        if (draft) base = $state.snapshot(draft);
+      });
   });
 
   async function save(e: SubmitEvent): Promise<void> {

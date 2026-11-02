@@ -118,7 +118,7 @@
   {#if rows.length === 0}
     <p class="muted">No applications yet. Clip a job from your browser, or use Paste job.</p>
   {:else}
-    <VirtualTable rows={visible} label="Applications" scrollToId={focusId}>
+    <VirtualTable rows={visible} label="Applications" scrollToId={focusId} onscrolled={() => (focusId = null)}>
       {#snippet header()}
         <span role="columnheader">
           <input

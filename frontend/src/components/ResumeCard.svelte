@@ -51,6 +51,10 @@
     </p>
   {:else if $resumeStore.status === 'error'}
     <p class="error">{$resumeStore.message}</p>
+    <p class="cols">
+      <button type="button" class="secondary" onclick={() => resumeStore.refresh()}>Try again</button>
+      <button type="button" disabled={busy} onclick={upload}>Upload your resume</button>
+    </p>
   {:else}
     <p class="cols">
       <span class="muted">No resume uploaded yet.</span>

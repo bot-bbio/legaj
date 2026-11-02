@@ -145,6 +145,23 @@ describe('R11 Reopen from the bulk bar (gate C4)', () => {
     api.reopen.mockResolvedValue({ changed: [1], skipped: [] });
   });
 
+  it('drops the Reopen offer when the selection changes, and never offers it for a terminal target', async () => {
+    const user = userEvent.setup();
+    render(Pipeline);
+    await selectRows(user, 1);
+    await user.selectOptions(screen.getByLabelText(/move selected to/i), 'applied');
+    await user.click(screen.getByRole('button', { name: /^move$/i }));
+    expect(await screen.findByRole('button', { name: /reopen 1 to applied/i })).toBeInTheDocument();
+    await selectRows(user, 2); // the selection is now {1, 2}
+    expect(screen.queryByRole('button', { name: /reopen/i })).not.toBeInTheDocument();
+
+    api.setStage.mockResolvedValue({ changed: [], skipped: [{ id: 1, reason: 'Can’t move from Rejected to Withdrawn.' }] });
+    await user.selectOptions(screen.getByLabelText(/move selected to/i), 'withdrawn');
+    await user.click(screen.getByRole('button', { name: /^move$/i }));
+    await screen.findByText(/rejected to withdrawn/i);
+    expect(screen.queryByRole('button', { name: /reopen/i })).not.toBeInTheDocument();
+  });
+
   it('offers Reopen for rows the move refused, with the same target', async () => {
     const user = userEvent.setup();
     render(Pipeline);

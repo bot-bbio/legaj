@@ -12,11 +12,12 @@
   import Settings from './views/Settings.svelte';
 
   // Open the wizard once, on first run (R7). After that it only opens from
-  // the setup checklist.
-  let autoOpened = false;
+  // the setup checklist. firstRun shows it from the very first frame, so the
+  // shell never flashes (and never loads its views) before the wizard.
+  let autoOpened = $state(false);
+  const firstRun = $derived($onboardingStore.status === 'ready' && !$onboardingStore.data.finished && !autoOpened);
   $effect(() => {
-    const s = $onboardingStore;
-    if (s.status === 'ready' && !s.data.finished && !autoOpened) {
+    if (firstRun) {
       autoOpened = true;
       openWizard('key');
     }
@@ -26,9 +27,9 @@
 <StartupGate>
   {#if $onboardingStore.status === 'loading'}
     <p class="muted center">Loading…</p>
-  {:else if $wizard.open}
+  {:else if $wizard.open || firstRun}
     {#key $wizard.step}
-      <Wizard start={$wizard.step} />
+      <Wizard start={$wizard.open ? $wizard.step : 'key'} />
     {/key}
   {:else}
     <div class="shell">

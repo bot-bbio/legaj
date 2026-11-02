@@ -179,6 +179,22 @@ describe('R7 onboarding', () => {
     );
   });
 
+  it('keeps the parsed draft when the saved profile cannot be read (gate round 2)', async () => {
+    api.getProfile.mockRejectedValueOnce('LeGaJ couldn’t read your profile.');
+    api.uploadResume.mockResolvedValue({
+      cancelled: false,
+      file: { id: 1, fileName: 'cv.pdf', sizeBytes: 10, uploadedAt: '2026-11-01T09:00:00Z' },
+      draft: parsed(),
+      parseError: '',
+    });
+    render(App);
+    await userEvent.click(await screen.findByRole('button', { name: /skip for now/i }));
+    await userEvent.click(screen.getByRole('button', { name: /choose resume file/i }));
+    expect(await screen.findByDisplayValue('Ada Lovelace')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /save profile/i }));
+    expect(api.saveProfile).toHaveBeenCalledWith(expect.objectContaining({ fullName: 'Ada Lovelace' }));
+  });
+
   it('does not open when setup was already finished', async () => {
     api.onboardingState.mockResolvedValue({ ...fresh(), finished: true });
     render(App);

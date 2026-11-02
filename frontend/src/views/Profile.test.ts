@@ -126,6 +126,16 @@ describe('R9 profile view', () => {
     expect(await within(card).findByText(/applications already marked applied keep/i)).toBeInTheDocument();
   });
 
+  it('a resume read error still offers upload and a retry (gate round 2)', async () => {
+    api.currentResume.mockRejectedValueOnce('LeGaJ couldn’t read your resume record.');
+    render(ProfileView);
+    const card = await screen.findByRole('region', { name: /^resume$/i });
+    expect(await within(card).findByText(/couldn.t read your resume record/i)).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: /upload/i })).toBeInTheDocument();
+    await userEvent.click(within(card).getByRole('button', { name: /try again/i }));
+    expect(await within(card).findByText('cv-2025.pdf')).toBeInTheDocument();
+  });
+
   it('bullets are edited one per line', async () => {
     render(ProfileView);
     const bullets = await screen.findByDisplayValue('Notes A-G');

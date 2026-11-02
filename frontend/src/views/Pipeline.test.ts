@@ -120,6 +120,25 @@ describe('R17 Pipeline at scale', () => {
     expect(box).toBeChecked();
   });
 
+  it('after "Show it", later list changes do not yank the table back (gate round 2)', async () => {
+    api.pasteJob.mockResolvedValue({ created: false, id: 501, duplicateOf: 501 });
+    const user = userEvent.setup();
+    render(Pipeline);
+    await screen.findByText('Company 1');
+    await user.click(screen.getByRole('button', { name: /paste job/i }));
+    await user.type(screen.getByLabelText(/^company$/i), 'Company 501');
+    await user.click(screen.getByRole('button', { name: /add to pipeline/i }));
+    await user.click(await screen.findByRole('button', { name: /show it/i }));
+    await screen.findByText('Company 501');
+
+    const viewport = screen.getByTestId('virtual-viewport');
+    viewport.scrollTop = 0; // the user scrolls back to the top
+    await fireEvent.scroll(viewport);
+    await user.type(screen.getByLabelText(/search/i), 'company'); // matches every row
+    expect(viewport.scrollTop).toBe(0);
+    expect(await screen.findByText('Company 1')).toBeInTheDocument();
+  });
+
   it('select all with 1000 rows selects all 1000 by ID', async () => {
     render(Pipeline);
     await screen.findByText('Company 1');

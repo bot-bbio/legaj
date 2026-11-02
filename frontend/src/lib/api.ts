@@ -8,7 +8,7 @@ import * as OnboardingAPI from '../../wailsjs/go/main/OnboardingAPI';
 import * as PipelineAPI from '../../wailsjs/go/main/PipelineAPI';
 import * as ProfileAPI from '../../wailsjs/go/main/ProfileAPI';
 import * as SettingsAPI from '../../wailsjs/go/main/SettingsAPI';
-import { profile, type main, type onboarding, type settings } from '../../wailsjs/go/models';
+import { profile, type main, type onboarding, type pipeline, type settings } from '../../wailsjs/go/models';
 
 /** The data fields of a generated model class (deeply), without its helper methods. */
 export type Plain<T> = T extends readonly (infer U)[]
@@ -32,6 +32,10 @@ export type KeyResult = Plain<onboarding.KeyResult>;
 export type ResumeImport = Plain<main.ResumeImport>;
 export type StepID = 'key' | 'resume' | 'profile' | 'clipper';
 export type ApplicationRow = Plain<main.ApplicationRow>;
+export type StageResult = Plain<pipeline.StageResult>;
+export type DeleteResult = Plain<pipeline.DeleteResult>;
+export type UndoResult = Plain<pipeline.UndoResult>;
+export type StatsView = Plain<main.StatsView>;
 export type Stage = 'lead' | 'ready' | 'applied' | 'interviewing' | 'offer' | 'rejected' | 'withdrawn';
 
 export const api = {
@@ -55,4 +59,8 @@ export const api = {
   finishOnboarding: (): Promise<void> => OnboardingAPI.FinishOnboarding(),
 
   listApplications: (): Promise<ApplicationRow[]> => PipelineAPI.ListApplications(),
+  setStage: (ids: number[], stage: string): Promise<StageResult> => PipelineAPI.SetStage(ids, stage),
+  deleteApplications: (ids: number[]): Promise<DeleteResult> => PipelineAPI.DeleteApplications(ids),
+  undoDelete: (undoId: string): Promise<UndoResult> => PipelineAPI.UndoDelete(undoId),
+  pipelineStats: (): Promise<StatsView> => PipelineAPI.PipelineStats(),
 };

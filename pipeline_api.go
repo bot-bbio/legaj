@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/bot-bbio/legaj/internal/apperr"
+	"github.com/bot-bbio/legaj/internal/pipeline"
 	"github.com/bot-bbio/legaj/internal/store"
 )
 
@@ -35,6 +36,87 @@ func toRow(a store.Application) ApplicationRow {
 		r.AppliedAt = a.AppliedAt.UTC().Format(rfc3339)
 	}
 	return r
+}
+
+// SetStage moves exactly the given applications to a stage (R12).
+func (p *PipelineAPI) SetStage(ids []int64, stage string) (pipeline.StageResult, error) {
+	_, svc, err := p.app.services()
+	if err != nil {
+		return pipeline.StageResult{}, err
+	}
+	res, err := svc.Pipeline.SetStage(p.app.ctx, ids, store.Stage(stage))
+	return res, apperr.Public(err)
+}
+
+// DeleteApplications soft-deletes exactly the given applications; the
+// result's UndoID undoes it for 10 seconds (R13).
+func (p *PipelineAPI) DeleteApplications(ids []int64) (pipeline.DeleteResult, error) {
+	_, svc, err := p.app.services()
+	if err != nil {
+		return pipeline.DeleteResult{}, err
+	}
+	res, err := svc.Pipeline.Delete(p.app.ctx, ids)
+	return res, apperr.Public(err)
+}
+
+// UndoDelete restores a delete within its undo window.
+func (p *PipelineAPI) UndoDelete(undoID string) (pipeline.UndoResult, error) {
+	_, svc, err := p.app.services()
+	if err != nil {
+		return pipeline.UndoResult{}, err
+	}
+	res, err := svc.Pipeline.Undo(p.app.ctx, undoID)
+	return res, apperr.Public(err)
+}
+
+// StatsView is the Pipeline header (R14), with times as RFC 3339 strings.
+type StatsView struct {
+	Counts        map[string]int  `json:"counts"`
+	Total         int             `json:"total"`
+	Recent        []RecentView    `json:"recent"`
+	NextInterview *InterviewBrief `json:"nextInterview"`
+}
+
+// RecentView is one recently added application.
+type RecentView struct {
+	ID        int64  `json:"id"`
+	Company   string `json:"company"`
+	Role      string `json:"role"`
+	Stage     string `json:"stage"`
+	CreatedAt string `json:"createdAt"`
+}
+
+// InterviewBrief is the next interview round.
+type InterviewBrief struct {
+	ApplicationID int64  `json:"applicationId"`
+	Company       string `json:"company"`
+	Role          string `json:"role"`
+	StartsAt      string `json:"startsAt"`
+	Zone          string `json:"zone"`
+	Kind          string `json:"kind"`
+}
+
+// PipelineStats returns per-stage counts, the newest 5 and the next interview.
+func (p *PipelineAPI) PipelineStats() (StatsView, error) {
+	_, svc, err := p.app.services()
+	if err != nil {
+		return StatsView{}, err
+	}
+	st, err := svc.Pipeline.Stats(p.app.ctx)
+	if err != nil {
+		return StatsView{}, apperr.Public(err)
+	}
+	v := StatsView{Counts: map[string]int{}, Total: st.Total, Recent: []RecentView{}}
+	for k, n := range st.Counts {
+		v.Counts[string(k)] = n
+	}
+	for _, r := range st.Recent {
+		v.Recent = append(v.Recent, RecentView{ID: r.ID, Company: r.Company, Role: r.Role, Stage: string(r.Stage), CreatedAt: r.CreatedAt.UTC().Format(rfc3339)})
+	}
+	if n := st.NextInterview; n != nil {
+		v.NextInterview = &InterviewBrief{ApplicationID: n.ApplicationID, Company: n.Company, Role: n.Role, StartsAt: n.StartsAt.UTC().Format(rfc3339), Zone: n.Zone, Kind: n.Kind}
+	}
+	return v, nil
 }
 
 // ListApplications returns every live application, newest first.

@@ -241,10 +241,10 @@ func (s *Service) SetStage(ctx context.Context, ids []int64, to store.Stage) (St
 	return res, nil
 }
 
-// DeleteResult identifies a delete for Undo.
+// DeleteResult identifies a delete for Undo by its UndoID.
 type DeleteResult struct {
-	Token string  `json:"token"`
-	IDs   []int64 `json:"ids"`
+	UndoID string  `json:"undoId"`
+	IDs    []int64 `json:"ids"`
 }
 
 func newToken() string {
@@ -257,12 +257,12 @@ func newToken() string {
 // schedules its purge after UndoWindow. Missing or already-deleted IDs are
 // ignored. Children stay untouched until the purge (R13, U4).
 func (s *Service) Delete(ctx context.Context, ids []int64) (DeleteResult, error) {
-	res := DeleteResult{Token: newToken(), IDs: []int64{}}
+	res := DeleteResult{UndoID: newToken(), IDs: []int64{}}
 	err := s.cfg.DB.Tx(ctx, func(tx *sql.Tx) error {
 		now := store.FormatTime(s.cfg.Now())
 		for _, id := range uniqueSorted(ids) {
 			r, err := tx.ExecContext(ctx, `UPDATE applications SET deleted_at = ?, delete_token = ?
-				WHERE id = ? AND deleted_at IS NULL`, now, res.Token, id)
+				WHERE id = ? AND deleted_at IS NULL`, now, res.UndoID, id)
 			if err != nil {
 				return storageErr(err)
 			}
@@ -278,7 +278,7 @@ func (s *Service) Delete(ctx context.Context, ids []int64) (DeleteResult, error)
 	if len(res.IDs) == 0 {
 		return res, nil
 	}
-	token := res.Token
+	token := res.UndoID
 	s.cfg.AfterFunc(UndoWindow, func() {
 		// Background purge: its own context, errors retried at next start.
 		_, _ = s.purge(context.Background(), `delete_token = ?`, token)

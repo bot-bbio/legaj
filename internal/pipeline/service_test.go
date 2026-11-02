@@ -111,7 +111,7 @@ func TestR13_BulkDeleteExactIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !eq(res.IDs, []int64{a, twin1, c}) || res.Token == "" {
+	if !eq(res.IDs, []int64{a, twin1, c}) || res.UndoID == "" {
 		t.Fatalf("result = %+v", res)
 	}
 	if got := sf.liveIDs(t); !eq(got, []int64{twin2, b}) {
@@ -182,7 +182,7 @@ func TestR13_UndoRestoresWithChildren(t *testing.T) {
 	if len(sf.liveIDs(t)) != 0 {
 		t.Fatal("rows still listed after delete")
 	}
-	restored, err := sf.svc.Undo(ctx, res.Token)
+	restored, err := sf.svc.Undo(ctx, res.UndoID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestR13_PurgeAfterWindowRemovesChildrenAndUndoFails(t *testing.T) {
 	if n := count(t, sf.db, `SELECT count(*) FROM documents WHERE application_id = ?`, id); n != 0 {
 		t.Fatal("children not purged")
 	}
-	if _, err := sf.svc.Undo(ctx, res.Token); apperr.CodeOf(err) != apperr.CodeConflict {
+	if _, err := sf.svc.Undo(ctx, res.UndoID); apperr.CodeOf(err) != apperr.CodeConflict {
 		t.Fatalf("late undo: err = %v, want conflict", err)
 	}
 }
@@ -251,7 +251,7 @@ func TestR13_SoftDeletedIgnoredByDedupeAndLists(t *testing.T) {
 	}
 
 	// Undo can't bring back a duplicate of the live row; it reports it.
-	undo, err := sf.svc.Undo(ctx, res.Token)
+	undo, err := sf.svc.Undo(ctx, res.UndoID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,12 +1,21 @@
 <script lang="ts">
+  import BulkBar from '../components/BulkBar.svelte';
+  import StatsHeader from '../components/StatsHeader.svelte';
+  import UndoToast from '../components/UndoToast.svelte';
   import VirtualTable from '../components/VirtualTable.svelte';
-  import type { ApplicationRow } from '../lib/api';
+  import type { ApplicationRow, DeleteResult } from '../lib/api';
   import { filterRows, prune, toggle, type RowFilter } from '../lib/selection';
   import { STAGES, stageLabel } from '../lib/stages';
   import { applicationsStore } from '../lib/stores/applications';
 
   let filter = $state<RowFilter>({ stage: 'all', query: '' });
   let selected = $state<Set<number>>(new Set());
+  let lastDelete = $state<DeleteResult | null>(null);
+
+  function deleted(result: DeleteResult): void {
+    selected = new Set();
+    lastDelete = result;
+  }
 
   const rows = $derived($applicationsStore.status === 'ready' ? $applicationsStore.data : []);
   const visible = $derived(filterRows(rows, filter));
@@ -35,6 +44,8 @@
 
 <h1>Pipeline</h1>
 
+<StatsHeader />
+
 {#if $applicationsStore.status === 'loading'}
   <p class="muted">Loading…</p>
 {:else if $applicationsStore.status === 'error'}
@@ -55,9 +66,13 @@
       </select>
     </label>
     <p class="muted summary">
-      {visible.length} of {rows.length} shown{#if selected.size > 0}&ensp;·&ensp;<b>{selected.size} selected</b>{/if}
+      {visible.length} of {rows.length} shown
     </p>
   </div>
+
+  {#if selected.size > 0}
+    <BulkBar ids={[...selected]} ondeleted={deleted} />
+  {/if}
 
   {#if rows.length === 0}
     <p class="muted">No applications yet. Clip a job from your browser, or use Paste job.</p>
@@ -99,6 +114,12 @@
       {/snippet}
     </VirtualTable>
   {/if}
+{/if}
+
+{#if lastDelete}
+  {#key lastDelete.undoId}
+    <UndoToast result={lastDelete} onclose={() => (lastDelete = null)} />
+  {/key}
 {/if}
 
 <style>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import EducationList from '../components/EducationList.svelte';
   import ExperienceList from '../components/ExperienceList.svelte';
+  import ResumeCard from '../components/ResumeCard.svelte';
   import SkillsEditor from '../components/SkillsEditor.svelte';
   import { api, type Profile } from '../lib/api';
   import { errorMessage } from '../lib/errors';
@@ -64,6 +65,8 @@
 </script>
 
 <h1>Profile</h1>
+
+<ResumeCard />
 
 {#if $profileStore.status === 'loading'}
   <p class="muted">Loading…</p>

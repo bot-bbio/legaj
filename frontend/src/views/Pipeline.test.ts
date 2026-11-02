@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ApplicationRow } from '../lib/api';
+import type { ApplicationRow, PasteInput, PasteResult } from '../lib/api';
 
 vi.mock('../lib/events', () => ({ onEntityChanged: () => () => {} }));
 
@@ -18,7 +18,10 @@ const row = (id: number, company: string, stage: string): ApplicationRow => ({
   appliedAt: '',
 });
 
-const api = { listApplications: vi.fn<() => Promise<ApplicationRow[]>>() };
+const api = {
+  listApplications: vi.fn<() => Promise<ApplicationRow[]>>(),
+  pasteJob: vi.fn<(i: PasteInput) => Promise<PasteResult>>(),
+};
 vi.mock('../lib/api', () => ({ api }));
 
 const { default: Pipeline } = await import('./Pipeline.svelte');
@@ -101,6 +104,20 @@ describe('R17 Pipeline at scale', () => {
     await fireEvent.scroll(viewport);
     expect(await screen.findByText('Company 501')).toBeInTheDocument();
     expect(screen.queryByText('Company 1')).not.toBeInTheDocument();
+  });
+
+  it('"Show it" on a duplicate paste scrolls the table to that row (gate CR8)', async () => {
+    api.pasteJob.mockResolvedValue({ created: false, id: 501, duplicateOf: 501 });
+    const user = userEvent.setup();
+    render(Pipeline);
+    await screen.findByText('Company 1');
+    await user.click(screen.getByRole('button', { name: /paste job/i }));
+    await user.type(screen.getByLabelText(/^company$/i), 'Company 501');
+    await user.click(screen.getByRole('button', { name: /add to pipeline/i }));
+    await user.click(await screen.findByRole('button', { name: /show it/i }));
+    expect(await screen.findByText('Company 501')).toBeInTheDocument();
+    const box = screen.getAllByRole('checkbox').find((c) => c.getAttribute('data-id') === '501');
+    expect(box).toBeChecked();
   });
 
   it('select all with 1000 rows selects all 1000 by ID', async () => {

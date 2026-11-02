@@ -13,12 +13,19 @@
 
   let filter = $state<RowFilter>({ stage: 'all', query: '' });
   let selected = $state<Set<number>>(new Set());
-  let lastDelete = $state<DeleteResult | null>(null);
+  // Every delete still inside its undo window keeps its own toast (gate C8).
+  let deletes = $state<DeleteResult[]>([]);
 
   function deleted(result: DeleteResult): void {
     selected = new Set();
-    lastDelete = result;
+    deletes = [...deletes, result];
   }
+
+  function closeToast(undoId: string): void {
+    deletes = deletes.filter((d) => d.undoId !== undoId);
+  }
+
+  let focusId = $state<number | null>(null);
 
   let pasting = $state(false);
   let openError = $state('');
@@ -33,11 +40,12 @@
     }
   }
 
-  /** Shows an existing row: clears the filters and selects only that row. */
+  /** Shows an existing row: clears the filters, selects only that row and scrolls to it. */
   function show(id: number): void {
     pasting = false;
     filter = { stage: 'all', query: '' };
     selected = new Set([id]);
+    focusId = id;
   }
 
   const rows = $derived($applicationsStore.status === 'ready' ? $applicationsStore.data : []);
@@ -110,7 +118,7 @@
   {#if rows.length === 0}
     <p class="muted">No applications yet. Clip a job from your browser, or use Paste job.</p>
   {:else}
-    <VirtualTable rows={visible} label="Applications">
+    <VirtualTable rows={visible} label="Applications" scrollToId={focusId}>
       {#snippet header()}
         <span role="columnheader">
           <input
@@ -156,13 +164,25 @@
   {/if}
 {/if}
 
-{#if lastDelete}
-  {#key lastDelete.undoId}
-    <UndoToast result={lastDelete} onclose={() => (lastDelete = null)} />
-  {/key}
+{#if deletes.length > 0}
+  <div class="toasts">
+    {#each deletes as d (d.undoId)}
+      <UndoToast result={d} onclose={() => closeToast(d.undoId)} />
+    {/each}
+  </div>
 {/if}
 
 <style>
+  .toasts {
+    position: fixed;
+    left: 50%;
+    bottom: 1.5rem;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: center;
+  }
   .title {
     display: flex;
     align-items: baseline;

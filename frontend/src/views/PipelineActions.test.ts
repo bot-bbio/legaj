@@ -26,6 +26,7 @@ const api = {
   setStage: vi.fn<(ids: number[], stage: string) => Promise<StageResult>>(),
   deleteApplications: vi.fn<(ids: number[]) => Promise<DeleteResult>>(),
   undoDelete: vi.fn<(id: string) => Promise<UndoResult>>(),
+  reopen: vi.fn<(ids: number[], stage: string) => Promise<StageResult>>(),
   pipelineStats: vi.fn<() => Promise<StatsView>>(),
   openPosting: vi.fn<(id: number) => Promise<void>>(() => Promise.resolve()),
   openResume: vi.fn<(id: number) => Promise<void>>(() => Promise.reject('No resume has been uploaded yet.')),
@@ -50,7 +51,7 @@ describe('R13 delete and undo', () => {
     api.listApplications.mockResolvedValue([row(1, 'Acme', 'applied'), row(2, 'Globex', 'lead'), row(3, 'Initech', 'lead')]);
     api.pipelineStats.mockResolvedValue(stats);
     api.deleteApplications.mockImplementation((ids) => Promise.resolve({ undoId: 'u1', ids: [...ids].sort() }));
-    api.undoDelete.mockResolvedValue({ ids: [1, 3], skipped: [] });
+    api.undoDelete.mockResolvedValue({ ids: [1, 3], skipped: [], mergedInto: [] });
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -84,14 +85,74 @@ describe('R13 delete and undo', () => {
     expect(api.undoDelete).not.toHaveBeenCalled();
   });
 
+  it('closes before the backend purges, so Undo is never offered when it can no longer work (gate CR7)', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(Pipeline);
+    await selectRows(user, 2);
+    await user.click(screen.getByRole('button', { name: /^delete/i }));
+    await screen.findByRole('status');
+    await vi.advanceTimersByTimeAsync(9_600);
+    expect(screen.queryByRole('button', { name: /undo/i })).not.toBeInTheDocument();
+  });
+
+  it('a second delete keeps the first one undoable (gate C8)', async () => {
+    let n = 0;
+    api.deleteApplications.mockImplementation((ids) => Promise.resolve({ undoId: `u${++n}`, ids: [...ids] }));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(Pipeline);
+    await selectRows(user, 1);
+    await user.click(screen.getByRole('button', { name: /^delete/i }));
+    await selectRows(user, 2);
+    await user.click(screen.getByRole('button', { name: /^delete/i }));
+
+    const undos = await screen.findAllByRole('button', { name: /undo/i });
+    expect(undos).toHaveLength(2);
+    const first = undos[0];
+    if (!first) throw new Error('missing');
+    await user.click(first);
+    expect(api.undoDelete).toHaveBeenCalledWith('u1');
+  });
+
+  it('keeps the partial-restore note until closed (gate CR7)', async () => {
+    api.undoDelete.mockResolvedValue({ ids: [1], skipped: [3], mergedInto: [7] });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(Pipeline);
+    await selectRows(user, 1, 3);
+    await user.click(screen.getByRole('button', { name: /^delete/i }));
+    await user.click(within(await screen.findByRole('status')).getByRole('button', { name: /undo/i }));
+    expect(await screen.findByText(/moved to the job you added again/i)).toBeInTheDocument();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(screen.getByText(/moved to the job you added again/i)).toBeInTheDocument();
+  });
+
   it('reports rows Undo could not bring back', async () => {
-    api.undoDelete.mockResolvedValue({ ids: [1], skipped: [3] });
+    api.undoDelete.mockResolvedValue({ ids: [1], skipped: [3], mergedInto: [7] });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(Pipeline);
     await selectRows(user, 1, 3);
     await user.click(screen.getByRole('button', { name: /^delete/i }));
     await user.click(within(await screen.findByRole('status')).getByRole('button', { name: /undo/i }));
     expect(await screen.findByText(/1 couldn.t be restored/i)).toBeInTheDocument();
+  });
+});
+
+describe('R11 Reopen from the bulk bar (gate C4)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api.listApplications.mockResolvedValue([row(1, 'Acme', 'rejected'), row(2, 'Globex', 'lead')]);
+    api.pipelineStats.mockResolvedValue(stats);
+    api.setStage.mockResolvedValue({ changed: [], skipped: [{ id: 1, reason: 'Can’t move from Rejected to Applied. Use Reopen to move a row back.' }] });
+    api.reopen.mockResolvedValue({ changed: [1], skipped: [] });
+  });
+
+  it('offers Reopen for rows the move refused, with the same target', async () => {
+    const user = userEvent.setup();
+    render(Pipeline);
+    await selectRows(user, 1);
+    await user.selectOptions(screen.getByLabelText(/move selected to/i), 'applied');
+    await user.click(screen.getByRole('button', { name: /^move$/i }));
+    await user.click(await screen.findByRole('button', { name: /reopen 1 to applied/i }));
+    expect(api.reopen).toHaveBeenCalledWith([1], 'applied');
   });
 });
 

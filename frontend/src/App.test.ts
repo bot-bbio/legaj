@@ -12,6 +12,7 @@ vi.mock('./lib/api', () => ({
         finished: true,
         steps: ['key', 'resume', 'profile', 'clipper'].map((id) => ({ id, done: true })),
       }),
+    currentResume: () => Promise.resolve({ id: 0, fileName: '', sizeBytes: 0, uploadedAt: '' }),
     getProfile: () =>
       Promise.resolve({
         fullName: '', email: '', phone: '', location: '', headline: '', targetRole: '', summary: '',

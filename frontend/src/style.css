@@ -133,3 +133,9 @@ button:disabled {
 .error {
   color: var(--danger);
 }
+.notice {
+  padding: 0.6rem 0.9rem;
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+}

@@ -2,7 +2,7 @@
   /** Actions on exactly the selected IDs (R12, R13). */
   import { api, type DeleteResult } from '../lib/api';
   import { errorMessage } from '../lib/errors';
-  import { STAGES } from '../lib/stages';
+  import { STAGES, stageLabel } from '../lib/stages';
 
   interface Props {
     ids: number[];
@@ -15,15 +15,35 @@
   let busy = $state(false);
   let message = $state('');
   let problems = $state<string[]>([]);
+  // Rows the move refused, which Reopen may take back (R11, D23).
+  let refused = $state<number[]>([]);
+  let refusedTarget = $state('');
 
   async function move(): Promise<void> {
     busy = true;
     message = '';
     problems = [];
+    refused = [];
     try {
       const r = await api.setStage([...ids], target);
       message = `${r.changed.length} moved.`;
       problems = r.skipped.map((s) => s.reason);
+      refused = r.skipped.map((s) => s.id);
+      refusedTarget = target;
+    } catch (err) {
+      message = errorMessage(err);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function reopen(): Promise<void> {
+    busy = true;
+    try {
+      const r = await api.reopen([...refused], refusedTarget);
+      message = `${r.changed.length} reopened.`;
+      problems = r.skipped.map((s) => s.reason);
+      refused = [];
     } catch (err) {
       message = errorMessage(err);
     } finally {
@@ -35,6 +55,7 @@
     busy = true;
     message = '';
     problems = [];
+    refused = [];
     try {
       ondeleted(await api.deleteApplications([...ids]));
     } catch (err) {
@@ -60,9 +81,16 @@
   {#if message}<span class="muted">{message}</span>{/if}
 </div>
 {#if problems.length > 0}
-  <ul class="problems">
-    {#each problems as p, i (i)}<li>{p}</li>{/each}
-  </ul>
+  <div class="problems">
+    <ul>
+      {#each problems as p, i (i)}<li>{p}</li>{/each}
+    </ul>
+    {#if refused.length > 0}
+      <button type="button" class="secondary" disabled={busy} onclick={reopen}>
+        Reopen {refused.length} to {stageLabel(refusedTarget)}
+      </button>
+    {/if}
+  </div>
 {/if}
 
 <style>
@@ -84,5 +112,8 @@
   .problems {
     margin: 0 0 0.5rem;
     color: var(--danger);
+  }
+  .problems ul {
+    margin: 0 0 0.4rem;
   }
 </style>

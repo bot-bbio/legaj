@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Profile } from '../lib/api';
+import type { Profile, ResumeFileView, ResumeImport } from '../lib/api';
 
 vi.mock('../lib/events', () => ({ onEntityChanged: () => () => {} }));
 
@@ -24,9 +24,13 @@ const stored = (): Profile => ({
   skills: [{ category: 'Math', items: ['Calculus'] }],
 });
 
+const cv = { id: 1, fileName: 'cv-2025.pdf', sizeBytes: 2048, uploadedAt: '2026-10-01T09:00:00Z' };
 const api = {
   getProfile: vi.fn<() => Promise<Profile>>(),
   saveProfile: vi.fn<(p: Profile) => Promise<Profile>>(),
+  currentResume: vi.fn<() => Promise<ResumeFileView>>(() => Promise.resolve(cv)),
+  uploadNewResume: vi.fn<() => Promise<ResumeImport>>(),
+  openCurrentResume: vi.fn<() => Promise<void>>(() => Promise.resolve()),
 };
 vi.mock('../lib/api', () => ({ api }));
 
@@ -104,6 +108,22 @@ describe('R9 profile view', () => {
 
     expect(within(exp).getByText(/YYYY-MM/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /save profile/i })).toBeDisabled();
+  });
+
+  it('shows the current resume and lets the user upload a new version (R10, gate C5)', async () => {
+    api.uploadNewResume.mockResolvedValue({
+      cancelled: false,
+      file: { id: 2, fileName: 'cv-2026.pdf', sizeBytes: 4096, uploadedAt: '2026-11-02T09:00:00Z' },
+      parseError: '',
+    });
+    render(ProfileView);
+    const card = await screen.findByRole('region', { name: /^resume$/i });
+    expect(await within(card).findByText('cv-2025.pdf')).toBeInTheDocument();
+    await userEvent.click(within(card).getByRole('button', { name: /open/i }));
+    expect(api.openCurrentResume).toHaveBeenCalled();
+    await userEvent.click(within(card).getByRole('button', { name: /upload a new version/i }));
+    expect(api.uploadNewResume).toHaveBeenCalled();
+    expect(await within(card).findByText(/applications already marked applied keep/i)).toBeInTheDocument();
   });
 
   it('bullets are edited one per line', async () => {

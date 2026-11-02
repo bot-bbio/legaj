@@ -1,13 +1,14 @@
 <script lang="ts">
   /**
-   * "Deleted N applications. Undo" for the backend's 10-second undo window
-   * (R13). The toast closes when the window ends, since the rows are then
-   * purged.
+   * "Deleted N applications. Undo" (R13). The backend purges 10 s after the
+   * delete commits; the toast appears a little later (one round trip), so
+   * it closes after 9.5 s and never offers an Undo that can no longer work.
+   * A note about a partial undo stays until the user closes it.
    */
   import { api, type DeleteResult } from '../lib/api';
   import { errorMessage } from '../lib/errors';
 
-  const UNDO_WINDOW_MS = 10_000; // matches pipeline.UndoWindow in Go
+  const OFFER_MS = 9_500; // under pipeline.UndoWindow (10 s) in Go
 
   let { result, onclose }: { result: DeleteResult; onclose: () => void } = $props();
 
@@ -15,7 +16,8 @@
   let note = $state('');
 
   $effect(() => {
-    const timer = setTimeout(onclose, UNDO_WINDOW_MS);
+    if (note) return; // a note waits for the user, not a timer
+    const timer = setTimeout(onclose, OFFER_MS);
     return () => clearTimeout(timer);
   });
 
@@ -24,7 +26,10 @@
     try {
       const r = await api.undoDelete(result.undoId);
       if (r.skipped.length > 0) {
-        note = `${r.skipped.length} couldn’t be restored because the same job was added again.`;
+        const n = r.skipped.length;
+        note =
+          `${n} couldn’t be restored because you added the same job again; ` +
+          `${n === 1 ? 'its' : 'their'} letters, interview rounds and history moved to the job you added again.`;
         return;
       }
       onclose();
@@ -50,17 +55,18 @@
 
 <style>
   .toast {
-    position: fixed;
-    left: 50%;
-    bottom: 1.5rem;
-    transform: translateX(-50%);
     display: flex;
     align-items: center;
     gap: 1rem;
+    max-width: 40rem;
     padding: 0.7rem 1rem;
     border-radius: 8px;
     background: var(--text);
     color: var(--bg);
     box-shadow: 0 6px 24px rgb(0 0 0 / 0.25);
+  }
+  .toast .secondary {
+    color: var(--bg);
+    border-color: var(--bg);
   }
 </style>

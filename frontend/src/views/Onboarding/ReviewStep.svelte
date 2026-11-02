@@ -9,21 +9,29 @@
   import { api, type Profile } from '../../lib/api';
   import { formatYearMonth } from '../../lib/dates';
   import { errorMessage } from '../../lib/errors';
+  import { mergeDraft, replacesHistory } from '../../lib/profileMerge';
 
   let { draft, onnext }: { draft: Profile | null; onnext: () => void } = $props();
 
   let base = $state<Profile | null>(null);
   let failure = $state('');
   let busy = $state(false);
+  let replacing = $state(false);
 
+  // A new resume is merged into what's saved, never pasted over it: the
+  // user may have filled the profile by hand before uploading (gate CR1).
   onMount(() => {
-    if (draft) {
-      base = $state.snapshot(draft);
-      return;
-    }
     api
       .getProfile()
-      .then((p) => (base = p))
+      .then((saved) => {
+        if (draft) {
+          const d = $state.snapshot(draft);
+          replacing = replacesHistory(saved, d);
+          base = mergeDraft(saved, d);
+        } else {
+          base = saved;
+        }
+      })
       .catch((err: unknown) => (failure = errorMessage(err)));
   });
 
@@ -53,6 +61,12 @@
     {draft ? 'This is what Gemini read from your resume.' : 'Fill in the basics now; the rest can wait.'} You can edit
     everything later on the Profile page.
   </p>
+  {#if replacing}
+    <p class="notice" role="note">
+      Saving replaces the experience, education or skills on your Profile page with what Gemini read. Your target role,
+      links and anything the resume doesn’t mention are kept.
+    </p>
+  {/if}
   <form onsubmit={save}>
     <div class="cols">
       <label class="field"><span>Full name</span><input type="text" bind:value={base.fullName} /></label>

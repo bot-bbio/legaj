@@ -14,11 +14,24 @@
     rowHeight?: number;
     height?: number;
     overscan?: number;
+    /** When set, the table scrolls so this row is in view. */
+    scrollToId?: number | null;
   }
 
-  let { rows, label, header, row, rowHeight = 36, height = 560, overscan = 8 }: Props = $props();
+  let { rows, label, header, row, rowHeight = 36, height = 560, overscan = 8, scrollToId = null }: Props = $props();
 
   let scrollTop = $state(0);
+  let viewport = $state<HTMLDivElement | null>(null);
+
+  $effect(() => {
+    if (scrollToId === null || !viewport) return;
+    const index = rows.findIndex((r) => r.id === scrollToId);
+    if (index < 0) return;
+    // Put the row a couple of lines below the top edge.
+    const top = Math.max(0, (index - 2) * rowHeight);
+    viewport.scrollTop = top;
+    scrollTop = top;
+  });
   const start = $derived(Math.max(0, Math.floor(scrollTop / rowHeight) - overscan));
   const end = $derived(Math.min(rows.length, Math.ceil((scrollTop + height) / rowHeight) + overscan));
   const visible = $derived(rows.slice(start, end));
@@ -31,6 +44,7 @@
     </div>
   </div>
   <div
+    bind:this={viewport}
     class="viewport"
     data-testid="virtual-viewport"
     style:height="{height}px"

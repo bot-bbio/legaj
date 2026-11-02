@@ -37,6 +37,7 @@ const api = {
   parseResume: vi.fn<(id: number) => Promise<ResumeImport>>(),
   finishOnboarding: vi.fn(() => Promise.resolve()),
   getProfile: vi.fn(() => Promise.resolve(savedProfile)),
+  currentResume: vi.fn(() => Promise.resolve({ id: 0, fileName: '', sizeBytes: 0, uploadedAt: '' })),
   saveProfile: vi.fn((p: Profile) => {
     savedProfile = p;
     return Promise.resolve(p);
@@ -143,6 +144,39 @@ describe('R7 onboarding', () => {
     await userEvent.click(screen.getByRole('button', { name: /try reading it again/i }));
     expect(api.parseResume).toHaveBeenCalledWith(7);
     expect(await screen.findByDisplayValue('Ada Lovelace')).toBeInTheDocument();
+  });
+
+  it('a resume uploaded from the checklist merges into the saved profile instead of replacing it (gate CR1)', async () => {
+    savedProfile = {
+      ...emptyProfile(),
+      fullName: 'Ada Lovelace',
+      summary: 'Hand-written summary.',
+      targetRole: 'Junior Data Engineer',
+      links: [{ label: 'Site', url: 'https://ada.example' }],
+      skills: [{ category: 'Math', items: ['Calculus'] }],
+    };
+    api.onboardingState.mockResolvedValue({ ...fresh(), finished: true, steps: [{ id: 'key', done: true }, { id: 'resume', done: false }, { id: 'profile', done: true }, { id: 'clipper', done: true }] });
+    api.uploadResume.mockResolvedValue({
+      cancelled: false,
+      file: { id: 1, fileName: 'cv.pdf', sizeBytes: 10, uploadedAt: '2026-11-01T09:00:00Z' },
+      draft: parsed(),
+      parseError: '',
+    });
+    render(App);
+    const checklist = await screen.findByRole('complementary', { name: /finish setting up/i });
+    await userEvent.click(within(checklist).getByRole('button', { name: /upload your resume/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /choose resume file/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /save profile/i }));
+
+    expect(api.saveProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetRole: 'Junior Data Engineer',
+        summary: 'Hand-written summary.',
+        links: [{ label: 'Site', url: 'https://ada.example' }],
+        skills: [{ category: 'Math', items: ['Calculus'] }],
+        experiences: parsed().experiences,
+      }),
+    );
   });
 
   it('does not open when setup was already finished', async () => {

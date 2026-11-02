@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bot-bbio/legaj/internal/apperr"
+	"github.com/bot-bbio/legaj/internal/events"
 	"github.com/bot-bbio/legaj/internal/store"
 )
 
@@ -57,6 +58,51 @@ func TestR10_ResumePinnedOnlyAtFirstApply(t *testing.T) {
 	_, err := sf.svc.ResumeFor(ctx, id)
 	if apperr.CodeOf(err) != apperr.CodeNotFound {
 		t.Fatalf("err = %v; LeGaJ must say it doesn't know which resume was sent", err)
+	}
+}
+
+func TestR13_UndoMergeKeepsTheLiveRowConsistentAndAnnounced(t *testing.T) {
+	sf := newSvc(t)
+	const u = "https://jobs.example/10"
+	first := sf.add(t, "Acme", "Dev", u)
+	if _, err := sf.svc.SetStage(ctx, []int64{first}, store.StageApplied); err != nil {
+		t.Fatal(err)
+	}
+	sf.round(t, first, sf.t0.Add(48*time.Hour))
+	res, err := sf.svc.Delete(ctx, []int64{first})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := sf.add(t, "Acme", "Dev", u)
+	before := len(sf.rec.Events())
+
+	if _, err := sf.svc.Undo(ctx, res.UndoID); err != nil {
+		t.Fatal(err)
+	}
+	// The live row now owns an interview round, so it moved to Interviewing
+	// through the state machine, as adding a round does (R30)...
+	a, err := sf.svc.Get(ctx, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Stage != store.StageInterviewing {
+		t.Fatalf("live row stage = %s, want interviewing", a.Stage)
+	}
+	// ...without importing the old row's contradictory history.
+	if n := count(t, sf.db, `SELECT count(*) FROM stage_events WHERE application_id = ? AND from_stage IS NULL`, second); n != 1 {
+		t.Fatalf("live row has %d creation events, want 1", n)
+	}
+	// And open views of the live row hear about it.
+	found := false
+	for _, e := range sf.rec.Events()[before:] {
+		for _, id := range e.Payload.(events.Changed).IDs {
+			if id == second {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no change event for the row that received the merged children")
 	}
 }
 

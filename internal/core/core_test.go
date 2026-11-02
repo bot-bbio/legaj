@@ -25,8 +25,9 @@ var ctx = context.Background()
 // noAutostart stands in for the registry; tests never touch HKCU.
 type noAutostart struct{}
 
-func (noAutostart) Enable(string) error { return nil }
-func (noAutostart) Disable() error      { return nil }
+func (noAutostart) Enable(string) error            { return nil }
+func (noAutostart) Disable() error                 { return nil }
+func (noAutostart) Current() (string, bool, error) { return "", false, nil }
 
 // noLaunch never opens anything: tests must not pop up a browser.
 type noLaunch struct{}
@@ -233,6 +234,12 @@ func (r *recordingAutostart) Disable() error {
 	defer r.mu.Unlock()
 	r.enabled, r.calls = false, r.calls+1
 	return nil
+}
+
+func (r *recordingAutostart) Current() (string, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return "", r.enabled, nil
 }
 
 func TestR37_BootReconcilesStartWithWindows(t *testing.T) {

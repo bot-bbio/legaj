@@ -375,7 +375,7 @@ func (s *Service) Undo(ctx context.Context, token string) (UndoResult, error) {
 					return storageErr(err)
 				}
 				if err == nil {
-					if err := moveChildren(ctx, tx, p.id, live); err != nil {
+					if err := s.moveChildren(ctx, tx, p.id, live); err != nil {
 						return err
 					}
 					res.Skipped = append(res.Skipped, p.id)
@@ -394,16 +394,19 @@ func (s *Service) Undo(ctx context.Context, token string) (UndoResult, error) {
 	if err != nil {
 		return UndoResult{}, err
 	}
-	if len(res.IDs) > 0 {
-		s.cfg.Bus.Emit(s.changed(res.IDs...))
+	if touched := append(slices.Clone(res.IDs), res.MergedInto...); len(touched) > 0 {
+		s.cfg.Bus.Emit(s.changed(touched...))
 	}
 	return res, nil
 }
 
-// moveChildren re-parents everything a soft-deleted row owns onto the live
-// row that replaced it, so the coming purge removes only the empty shell.
-// Approved letter versions are renumbered after the live row's own.
-func moveChildren(ctx context.Context, tx *sql.Tx, from, to int64) error {
+// moveChildren re-parents the work a soft-deleted row owns (letters,
+// interview rounds, answers, follow-ups) onto the live row that replaced
+// it, so the coming purge removes only the empty shell. Approved letter
+// versions are renumbered after the live row's own. Stage history stays
+// with the old row: copied over, it would contradict the live row's own.
+// Moved rounds advance the live row exactly as adding a round does (R30).
+func (s *Service) moveChildren(ctx context.Context, tx *sql.Tx, from, to int64) error {
 	rows, err := tx.QueryContext(ctx, `SELECT id, kind FROM documents
 		WHERE application_id = ? AND version IS NOT NULL ORDER BY kind, version`, from)
 	if err != nil {
@@ -433,9 +436,19 @@ func moveChildren(ctx context.Context, tx *sql.Tx, from, to int64) error {
 			return storageErr(err)
 		}
 	}
-	for _, table := range []string{"documents", "rounds", "followups", "answers", "stage_events"} {
-		if _, err := tx.ExecContext(ctx, `UPDATE `+table+` SET application_id = ? WHERE application_id = ?`, to, from); err != nil {
+	movedRounds := int64(0)
+	for _, table := range []string{"documents", "rounds", "followups", "answers"} {
+		r, err := tx.ExecContext(ctx, `UPDATE `+table+` SET application_id = ? WHERE application_id = ?`, to, from)
+		if err != nil {
 			return storageErr(err)
+		}
+		if table == "rounds" {
+			movedRounds, _ = r.RowsAffected()
+		}
+	}
+	if movedRounds > 0 {
+		if _, err := s.cfg.Machine.AutoAdvance(ctx, tx, to, RuleRoundAdded); err != nil {
+			return err
 		}
 	}
 	return nil

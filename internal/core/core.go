@@ -227,11 +227,15 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 	if err := svc.Settings.Reconcile(ctx); err != nil {
 		c.Log.Warn("start-with-Windows reconcile failed", "err", err)
 	}
+	// Publish the services and register the backup loop in one critical
+	// section, so a concurrent Close always sees and stops the loop.
+	stop := make(chan struct{})
 	c.mu.Lock()
 	c.svc = svc
-	c.stopLoop = make(chan struct{})
+	c.stopLoop = stop
+	c.loopDone.Add(1)
 	c.mu.Unlock()
-	c.startBackupLoop(db, c.stopLoop)
+	c.startBackupLoop(db, stop)
 	c.Log.Info("database ready")
 	return st, nil
 }
@@ -243,9 +247,8 @@ func (c *Core) startBackupLoop(db *store.DB, stop <-chan struct{}) {
 	if every <= 0 {
 		every = time.Hour
 	}
-	c.loopDone.Add(1)
 	go func() {
-		defer c.loopDone.Done()
+		defer c.loopDone.Done() // Add(1) happened under c.mu in open
 		t := time.NewTicker(every)
 		defer t.Stop()
 		for {

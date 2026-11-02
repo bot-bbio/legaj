@@ -41,6 +41,10 @@ func (f *fakeAutostart) Disable() error {
 	return nil
 }
 
+func (f *fakeAutostart) Current() (string, bool, error) {
+	return f.command, f.enabled, nil
+}
+
 type fixture struct {
 	svc  *settings.Service
 	rec  *events.Recorder
@@ -172,6 +176,35 @@ func TestR37_ReconcileAppliesStoredSetting(t *testing.T) {
 	}
 	if f.auto.enabled {
 		t.Fatal("Reconcile left a Run entry the setting says shouldn't exist")
+	}
+}
+
+func TestR37_ReconcileOnlyRepairsAMismatch(t *testing.T) {
+	f := newFixture(t)
+	s := settings.Defaults()
+	s.StartWithWindows = true
+	if _, err := f.svc.Save(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+
+	// Another copy of LeGaJ (an installed build vs a dev build) owns the
+	// entry: starting this one must not take autostart over.
+	f.auto.command = `"D:\other\legaj.exe"`
+	f.auto.calls = nil
+	if err := f.svc.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.auto.calls) != 0 || f.auto.command != `"D:\other\legaj.exe"` {
+		t.Fatalf("Reconcile rewrote a matching entry: calls %v, command %q", f.auto.calls, f.auto.command)
+	}
+
+	// The entry vanished while the setting is on: put it back.
+	f.auto.enabled, f.auto.command = false, ""
+	if err := f.svc.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !f.auto.enabled {
+		t.Fatal("Reconcile didn't restore a missing entry")
 	}
 }
 

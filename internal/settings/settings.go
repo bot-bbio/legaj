@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/bot-bbio/legaj/internal/ai/gemini"
 	"github.com/bot-bbio/legaj/internal/apperr"
@@ -84,10 +85,13 @@ func Validate(s Settings) error {
 type Autostart interface {
 	Enable(command string) error
 	Disable() error
+	// Current reports the entry's command and whether it exists.
+	Current() (command string, enabled bool, err error)
 }
 
 // Service reads and writes settings.
 type Service struct {
+	saveMu    sync.Mutex // one Save at a time: a revert must not undo another save
 	db        *store.DB
 	bus       *events.Bus
 	autostart Autostart
@@ -130,13 +134,17 @@ func (s *Service) Get(ctx context.Context) (Settings, error) {
 	return out, nil
 }
 
-// Save validates and stores the settings, applying Start with Windows to
-// the registry in the same step: if the registry write fails, nothing is
-// saved. It emits a settings change on success (R3).
+// Save validates and stores the settings, then applies Start with Windows
+// to the registry. If the registry refuses, the previous settings are put
+// back and an error returned, so the setting and Windows agree. Saves are
+// serialized, so that revert can never undo another save. Emits a settings
+// change (R3).
 func (s *Service) Save(ctx context.Context, in Settings) (Settings, error) {
 	if err := Validate(in); err != nil {
 		return Settings{}, err
 	}
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
 	current, err := s.Get(ctx)
 	if err != nil {
 		return Settings{}, err
@@ -149,7 +157,10 @@ func (s *Service) Save(ctx context.Context, in Settings) (Settings, error) {
 	}
 	if in.StartWithWindows != current.StartWithWindows {
 		if err := s.applyAutostart(in.StartWithWindows); err != nil {
-			_ = s.store(ctx, current)
+			if revertErr := s.store(ctx, current); revertErr != nil {
+				// Reconcile at the next start re-applies the stored value.
+				return Settings{}, errors.Join(err, revertErr)
+			}
 			return Settings{}, err
 		}
 	}
@@ -173,12 +184,21 @@ func (s *Service) store(ctx context.Context, in Settings) error {
 	})
 }
 
-// Reconcile makes the HKCU Run entry match the saved setting. Run at
-// startup, it heals any save that changed one but not the other.
+// Reconcile repairs a mismatch between the saved setting and the HKCU Run
+// entry, at startup: it adds a missing entry or removes an unwanted one.
+// An existing entry is never rewritten, so starting a second copy of
+// LeGaJ (say, a dev build) can't take autostart over.
 func (s *Service) Reconcile(ctx context.Context) error {
 	cur, err := s.Get(ctx)
 	if err != nil {
 		return err
+	}
+	_, enabled, err := s.autostart.Current()
+	if err != nil {
+		return err
+	}
+	if enabled == cur.StartWithWindows {
+		return nil
 	}
 	return s.applyAutostart(cur.StartWithWindows)
 }

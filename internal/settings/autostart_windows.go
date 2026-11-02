@@ -43,3 +43,23 @@ func (RegistryAutostart) Disable() error {
 	}
 	return nil
 }
+
+// Current reports the Run entry's command and whether it exists.
+func (RegistryAutostart) Current() (string, bool, error) {
+	k, err := registry.OpenKey(registry.CURRENT_USER, runKey, registry.QUERY_VALUE)
+	if errors.Is(err, registry.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	defer k.Close()
+	v, _, err := k.GetStringValue(runValue)
+	if errors.Is(err, registry.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return v, true, nil
+}

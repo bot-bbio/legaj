@@ -24,8 +24,9 @@ const sentinelKey = "AIzaSyD-SENTINEL-KEY-0123456789abcdWXYZ"
 
 type noAutostart struct{}
 
-func (noAutostart) Enable(string) error { return nil }
-func (noAutostart) Disable() error      { return nil }
+func (noAutostart) Enable(string) error            { return nil }
+func (noAutostart) Disable() error                 { return nil }
+func (noAutostart) Current() (string, bool, error) { return "", false, nil }
 
 // launches records what would have been opened; tests never open anything.
 type launches struct{ targets []string }

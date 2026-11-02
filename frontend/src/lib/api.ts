@@ -36,6 +36,8 @@ export type StageResult = Plain<pipeline.StageResult>;
 export type DeleteResult = Plain<pipeline.DeleteResult>;
 export type UndoResult = Plain<pipeline.UndoResult>;
 export type StatsView = Plain<main.StatsView>;
+export type PasteInput = Plain<pipeline.PasteInput>;
+export type PasteResult = Plain<pipeline.PasteResult>;
 export type Stage = 'lead' | 'ready' | 'applied' | 'interviewing' | 'offer' | 'rejected' | 'withdrawn';
 
 export const api = {
@@ -63,4 +65,5 @@ export const api = {
   deleteApplications: (ids: number[]): Promise<DeleteResult> => PipelineAPI.DeleteApplications(ids),
   undoDelete: (undoId: string): Promise<UndoResult> => PipelineAPI.UndoDelete(undoId),
   pipelineStats: (): Promise<StatsView> => PipelineAPI.PipelineStats(),
+  pasteJob: (input: PasteInput): Promise<PasteResult> => PipelineAPI.PasteJob(input),
 };

@@ -38,6 +38,17 @@ func toRow(a store.Application) ApplicationRow {
 	return r
 }
 
+// PasteJob adds a Lead entered by hand, or names the row that already has
+// the same posting (R15).
+func (p *PipelineAPI) PasteJob(in pipeline.PasteInput) (pipeline.PasteResult, error) {
+	_, svc, err := p.app.services()
+	if err != nil {
+		return pipeline.PasteResult{}, err
+	}
+	res, err := svc.Pipeline.PasteJob(p.app.ctx, in)
+	return res, apperr.Public(err)
+}
+
 // SetStage moves exactly the given applications to a stage (R12).
 func (p *PipelineAPI) SetStage(ids []int64, stage string) (pipeline.StageResult, error) {
 	_, svc, err := p.app.services()

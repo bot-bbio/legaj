@@ -1,5 +1,6 @@
 <script lang="ts">
   import BulkBar from '../components/BulkBar.svelte';
+  import PasteJob from '../components/PasteJob.svelte';
   import StatsHeader from '../components/StatsHeader.svelte';
   import UndoToast from '../components/UndoToast.svelte';
   import VirtualTable from '../components/VirtualTable.svelte';
@@ -15,6 +16,15 @@
   function deleted(result: DeleteResult): void {
     selected = new Set();
     lastDelete = result;
+  }
+
+  let pasting = $state(false);
+
+  /** Shows an existing row: clears the filters and selects only that row. */
+  function show(id: number): void {
+    pasting = false;
+    filter = { stage: 'all', query: '' };
+    selected = new Set([id]);
   }
 
   const rows = $derived($applicationsStore.status === 'ready' ? $applicationsStore.data : []);
@@ -42,7 +52,16 @@
   const rowLabel = (r: ApplicationRow): string => `Select ${r.company || 'row'}, ${r.role || 'no role'}`;
 </script>
 
-<h1>Pipeline</h1>
+<div class="title">
+  <h1>Pipeline</h1>
+  {#if !pasting}
+    <button type="button" onclick={() => (pasting = true)}>Paste job</button>
+  {/if}
+</div>
+
+{#if pasting}
+  <PasteJob onclose={() => (pasting = false)} onshow={show} />
+{/if}
 
 <StatsHeader />
 
@@ -123,6 +142,11 @@
 {/if}
 
 <style>
+  .title {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+  }
   .toolbar {
     display: flex;
     align-items: flex-end;

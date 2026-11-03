@@ -337,9 +337,20 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
-// RemoveFromBank takes an answer out of the bank; the application keeps it.
+// RemoveFromBank takes an answer out of the bank; its application keeps
+// it. An answer whose application is gone has nowhere left to show, so it
+// is deleted.
 func (s *Service) RemoveFromBank(ctx context.Context, id int64) error {
 	err := events.Mutate(ctx, s.cfg.DB, s.cfg.Bus, events.Change(events.EntityAnswer), func(tx *sql.Tx) error {
+		del, err := tx.ExecContext(ctx, `DELETE FROM answers WHERE id = ? AND application_id IS NULL`, id)
+		if err != nil {
+			return writeErr(err)
+		}
+		if n, err := del.RowsAffected(); err != nil {
+			return writeErr(err)
+		} else if n > 0 {
+			return nil
+		}
 		res, err := tx.ExecContext(ctx, `UPDATE answers SET in_bank = 0 WHERE id = ?`, id)
 		if err != nil {
 			return writeErr(err)

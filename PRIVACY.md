@@ -46,6 +46,6 @@ LeGaJ never sends email. For a follow-up it opens a draft in Gmail, Outlook or y
 
 ## Removing your data
 
-- Delete an application in Pipeline and, after the 10-second undo window, it is removed with its letters, rounds and follow-ups. Answers you approved stay in your answer bank until you remove them there.
+- Delete an application in Pipeline and, after the 10-second undo window, it is removed with its letters (the PDF files too), interview rounds and their calendar files, follow-ups and draft answers. Answers you approved stay in your answer bank until you remove them there.
 - **Remove** in Settings deletes the Gemini key from Credential Manager.
 - When you uninstall, LeGaJ asks **"Keep your applications and documents?"**. **No** deletes `%LOCALAPPDATA%\LeGaJ`, the WebView2 profile and the saved key.

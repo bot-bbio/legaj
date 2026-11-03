@@ -12,9 +12,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/bot-bbio/legaj/internal/apperr"
@@ -172,4 +175,28 @@ func exists(p string) bool {
 
 func storageErr(err error) error {
 	return apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't save the letter. Try again.")
+}
+
+// RemoveFiles deletes the letter folders of applications that were purged
+// for good (R13, PRIVACY.md). It runs after the purge commits, so it's best
+// effort: errors are returned for the log, and nothing is retried.
+func (s *Service) RemoveFiles(appIDs []int64) error {
+	root := filepath.Join(s.dir, Folder)
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, id := range appIDs {
+		prefix := fmt.Sprintf("%d_", id)
+		for _, e := range entries {
+			if e.IsDir() && strings.HasPrefix(e.Name(), prefix) {
+				errs = append(errs, os.RemoveAll(filepath.Join(root, e.Name())))
+			}
+		}
+	}
+	return errors.Join(errs...)
 }

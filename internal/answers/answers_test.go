@@ -359,3 +359,32 @@ func TestR25_DeletedApplicationGetsNoAnswers(t *testing.T) {
 		t.Fatalf("made %d AI calls for a deleted row", n)
 	}
 }
+
+func TestR13_RemovingAnUnlinkedAnswerFromTheBankDeletesIt(t *testing.T) {
+	f := newFixture(t)
+	id := f.app(t, "Acme", "JD", store.MaterialsLetter)
+	f.ai.Push(reply(t, words(120, "Acme"), words(120, "Acme"), words(120, "Acme")))
+	a, err := f.svc.Generate(ctx, id, "Why us?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.Approve(ctx, a.ID, a.Options[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.Tx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `DELETE FROM applications WHERE id = ?`, id)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.RemoveFromBank(ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := f.db.Reader().QueryRowContext(ctx, `SELECT count(*) FROM answers`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("%d answer rows left; an unlinked answer removed from the bank must be deleted", n)
+	}
+}

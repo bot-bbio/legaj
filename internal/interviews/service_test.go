@@ -286,3 +286,26 @@ func TestR31_ExportWritesTheRoundsCalendarFile(t *testing.T) {
 		t.Fatalf("missing round: %v", err)
 	}
 }
+
+func TestR13_PurgedApplicationsLoseTheirCalendarFiles(t *testing.T) {
+	f := newFixture(t)
+	dir := t.TempDir()
+	gone, kept := f.app(t, store.StageApplied), f.app(t, store.StageApplied)
+	var paths = map[int64]string{}
+	for _, id := range []int64{gone, kept} {
+		r, err := f.svc.Add(ctx, round(id, "2026-11-03T18:00"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if paths[id], err = f.svc.Export(ctx, r.ID, dir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.svc.RemoveExports(dir, []int64{gone})
+	if _, err := os.Stat(paths[gone]); !os.IsNotExist(err) {
+		t.Fatalf("the purged application's calendar file is still there: %v", err)
+	}
+	if _, err := os.Stat(paths[kept]); err != nil {
+		t.Fatalf("another application's calendar file was removed: %v", err)
+	}
+}

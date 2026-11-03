@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,7 +117,7 @@ func (s *Service) Export(ctx context.Context, id int64, dataDir string) (string,
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", exportErr(err)
 	}
-	path := filepath.Join(dir, fmt.Sprintf("interview-%d.ics", r.ID))
+	path := filepath.Join(dir, exportName(r.AppID, r.ID))
 	tmp, err := os.CreateTemp(dir, ".interview-*.tmp")
 	if err != nil {
 		return "", exportErr(err)
@@ -132,6 +133,35 @@ func (s *Service) Export(ctx context.Context, id int64, dataDir string) (string,
 		return "", exportErr(err)
 	}
 	return path, nil
+}
+
+// exportName names a round's calendar file; the application ID comes
+// first so a purge can find every file of that application.
+func exportName(appID, roundID int64) string {
+	return fmt.Sprintf("interview-%d-%d.ics", appID, roundID)
+}
+
+// RemoveExports deletes the calendar files of applications that were
+// purged for good (R13). Best effort, like documents.RemoveFiles.
+func (s *Service) RemoveExports(dataDir string, appIDs []int64) error {
+	dir := filepath.Join(dataDir, ExportFolder)
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, id := range appIDs {
+		prefix := fmt.Sprintf("interview-%d-", id)
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasPrefix(e.Name(), prefix) && strings.HasSuffix(e.Name(), ".ics") {
+				errs = append(errs, os.Remove(filepath.Join(dir, e.Name())))
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func exportErr(err error) error {

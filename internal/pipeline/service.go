@@ -42,6 +42,7 @@ type Service struct {
 
 	mu       sync.Mutex
 	onDelete []func(ids []int64)
+	onPurge  []func(ids []int64)
 }
 
 // NewService creates the service.
@@ -61,6 +62,16 @@ func (s *Service) OnDelete(hook func(ids []int64)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onDelete = append(s.onDelete, hook)
+}
+
+// OnPurge registers a hook called with the IDs of applications that were
+// purged for good (after the undo window, or at startup), after the purge
+// commits. Their files on disk (letter PDFs, calendar exports) are removed
+// through it.
+func (s *Service) OnPurge(hook func(ids []int64)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onPurge = append(s.onPurge, hook)
 }
 
 func (s *Service) changed(ids ...int64) events.Changed {
@@ -466,19 +477,47 @@ func (s *Service) PurgeDeleted(ctx context.Context) (int64, error) {
 	return s.purge(ctx, `1 = 1`)
 }
 
-// purge hard-deletes soft-deleted rows matching where; children cascade.
+// purge hard-deletes soft-deleted rows matching where. Letters, rounds and
+// follow-ups cascade; answers not in the bank are deleted (banked ones
+// stay, unlinked). The purge hooks then remove the rows' files.
 func (s *Service) purge(ctx context.Context, where string, args ...any) (int64, error) {
-	var n int64
+	var ids []int64
 	err := s.cfg.DB.Tx(ctx, func(tx *sql.Tx) error {
-		r, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM applications WHERE deleted_at IS NOT NULL AND %s`, where), args...)
+		rows, err := tx.QueryContext(ctx, fmt.Sprintf(`SELECT id FROM applications WHERE deleted_at IS NOT NULL AND %s ORDER BY id`, where), args...)
 		if err != nil {
 			return err
 		}
-		n, err = r.RowsAffected()
-		return err
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM answers WHERE application_id = ? AND in_bank = 0`, id); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM applications WHERE id = ?`, id); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return 0, storageErr(err)
 	}
-	return n, nil
+	if len(ids) > 0 {
+		s.mu.Lock()
+		hooks := slices.Clone(s.onPurge)
+		s.mu.Unlock()
+		for _, h := range hooks {
+			h(ids)
+		}
+	}
+	return int64(len(ids)), nil
 }

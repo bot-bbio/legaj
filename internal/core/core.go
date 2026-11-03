@@ -284,6 +284,17 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 	svc.Jobs.Start(context.Background())
 	// Deleting rows cancels their queued and running generation (R13).
 	svc.Pipeline.OnDelete(svc.Jobs.CancelApps)
+	// A purged application's files go too: its letter PDFs and calendar
+	// exports (R13, PRIVACY.md). Registered before the startup purge.
+	dir, logger := c.Dir, c.Log
+	svc.Pipeline.OnPurge(func(ids []int64) {
+		if err := svc.Documents.RemoveFiles(ids); err != nil {
+			logger.Warn("removing purged letters failed", "err", err)
+		}
+		if err := svc.Interviews.RemoveExports(dir, ids); err != nil {
+			logger.Warn("removing purged calendar files failed", "err", err)
+		}
+	})
 	// Rows deleted in a previous session are past their undo window (R13).
 	if n, err := svc.Pipeline.PurgeDeleted(ctx); err != nil {
 		c.Log.Error("purge of deleted applications failed", "err", err)

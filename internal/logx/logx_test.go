@@ -152,3 +152,25 @@ func TestR34_AIBodiesNeverLogged(t *testing.T) {
 		t.Fatalf("AI call log keys = %v, want %v", keys, want)
 	}
 }
+
+func TestR34_TimestampsSurviveRedaction(t *testing.T) {
+	// slog's default RFC 3339 nanosecond time ("…:28.1234567-05:00") holds
+	// 11 digits in a row, which the phone rule would redact, corrupting
+	// every log line's time.
+	var buf bytes.Buffer
+	l := logx.New(&buf, logx.NewRedactor(), slog.LevelInfo)
+	for range 20 {
+		l.Info("tick")
+	}
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		var rec struct {
+			Time string `json:"time"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("not JSON: %s", line)
+		}
+		if _, err := time.Parse("2006-01-02T15:04:05.000Z07:00", rec.Time); err != nil || strings.Contains(rec.Time, "[") {
+			t.Fatalf("time field %q was mangled or isn't UTC milliseconds: %v", rec.Time, err)
+		}
+	}
+}

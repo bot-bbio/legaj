@@ -24,8 +24,19 @@ import (
 
 // New returns a JSON logger writing to w through the redactor.
 func New(w io.Writer, r *Redactor, level slog.Level) *slog.Logger {
-	inner := slog.NewJSONHandler(&redactWriter{w: w, r: r}, &slog.HandlerOptions{Level: level})
+	inner := slog.NewJSONHandler(&redactWriter{w: w, r: r}, &slog.HandlerOptions{Level: level, ReplaceAttr: utcMillis})
 	return slog.New(&handler{inner: inner, r: r})
+}
+
+// utcMillis writes the record time as UTC with milliseconds. slog's
+// default nanosecond, local-offset form ("28.1234567-05") has enough
+// digits in a row for the phone rule to redact it, which mangled every
+// line's time; UTC also makes lines comparable across clock changes.
+func utcMillis(groups []string, a slog.Attr) slog.Attr {
+	if len(groups) == 0 && a.Key == slog.TimeKey && a.Value.Kind() == slog.KindTime {
+		a.Value = slog.StringValue(a.Value.Time().UTC().Format("2006-01-02T15:04:05.000Z"))
+	}
+	return a
 }
 
 // Log file location and rotation.

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import About from '../components/About.svelte';
   import { api, type Settings } from '../lib/api';
   import { errorMessage } from '../lib/errors';
   import { settingsStore } from '../lib/stores/settings';
@@ -148,6 +149,8 @@
     </section>
   {/if}
 {/if}
+
+<About />
 
 <style>
   section {

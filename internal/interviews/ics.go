@@ -1,10 +1,16 @@
 package interviews
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/bot-bbio/legaj/internal/apperr"
 )
 
 // ICS renders a round as an RFC 5545 calendar file (R31): CRLF line ends,
@@ -93,4 +99,41 @@ func fold(b *strings.Builder, line string) {
 		n += size
 	}
 	b.WriteString("\r\n")
+}
+
+// ExportFolder holds exported calendar files inside the data folder.
+const ExportFolder = "exports"
+
+// Export writes a round's calendar file to <dataDir>/exports and returns
+// its path. The name depends only on the round, so exporting again
+// replaces the file (and the stable UID updates the calendar event).
+func (s *Service) Export(ctx context.Context, id int64, dataDir string) (string, error) {
+	r, err := s.Get(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(dataDir, ExportFolder)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", exportErr(err)
+	}
+	path := filepath.Join(dir, fmt.Sprintf("interview-%d.ics", r.ID))
+	tmp, err := os.CreateTemp(dir, ".interview-*.tmp")
+	if err != nil {
+		return "", exportErr(err)
+	}
+	_, werr := tmp.Write(ICS(r, s.cfg.Now()))
+	cerr := tmp.Close()
+	if werr != nil || cerr != nil {
+		_ = os.Remove(tmp.Name())
+		return "", exportErr(errors.Join(werr, cerr))
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		_ = os.Remove(tmp.Name())
+		return "", exportErr(err)
+	}
+	return path, nil
+}
+
+func exportErr(err error) error {
+	return apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't write the calendar file.")
 }

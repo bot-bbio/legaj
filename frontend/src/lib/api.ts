@@ -6,6 +6,7 @@
 import * as AnswersAPI from '../../wailsjs/go/main/AnswersAPI';
 import * as App from '../../wailsjs/go/main/App';
 import * as FollowupsAPI from '../../wailsjs/go/main/FollowupsAPI';
+import * as InterviewsAPI from '../../wailsjs/go/main/InterviewsAPI';
 import * as LettersAPI from '../../wailsjs/go/main/LettersAPI';
 import * as OnboardingAPI from '../../wailsjs/go/main/OnboardingAPI';
 import * as PipelineAPI from '../../wailsjs/go/main/PipelineAPI';
@@ -14,6 +15,7 @@ import * as SettingsAPI from '../../wailsjs/go/main/SettingsAPI';
 import { ClipboardSetText } from '../../wailsjs/runtime/runtime';
 import {
   followups,
+  interviews,
   letters,
   profile,
   type answers,
@@ -22,6 +24,7 @@ import {
   type onboarding,
   type pipeline,
   type settings,
+  type store,
 } from '../../wailsjs/go/models';
 
 /** The data fields of a generated model class (deeply), without its helper methods. */
@@ -65,6 +68,10 @@ export type FollowupDraft = Plain<followups.DraftView>;
 export type FollowupInput = Plain<followups.DraftInput>;
 export type FollowupKind = 'applied_nudge' | 'thank_you';
 export type MailClient = 'gmail' | 'outlook' | 'outlook365' | 'mailto';
+export type RoundView = Plain<main.RoundView>;
+export type RoundLists = Plain<main.RoundLists>;
+export type RoundInput = Plain<interviews.RoundInput>;
+export type Interviewer = Plain<store.Interviewer>;
 export type PasteInput = Plain<pipeline.PasteInput>;
 export type PasteResult = Plain<pipeline.PasteResult>;
 export type Stage = 'lead' | 'ready' | 'applied' | 'interviewing' | 'offer' | 'rejected' | 'withdrawn';
@@ -132,6 +139,14 @@ export const api = {
     FollowupsAPI.OpenCompose(followups.DraftInput.createFrom(d), client),
   logFollowup: (d: FollowupInput, status: 'sent' | 'skipped'): Promise<void> =>
     FollowupsAPI.Log(followups.DraftInput.createFrom(d), status),
+
+  interviewLists: (): Promise<RoundLists> => InterviewsAPI.Lists(),
+  addRound: (r: RoundInput): Promise<RoundView> => InterviewsAPI.Add(interviews.RoundInput.createFrom(r)),
+  updateRound: (id: number, r: RoundInput): Promise<RoundView> =>
+    InterviewsAPI.Update(id, interviews.RoundInput.createFrom(r)),
+  deleteRound: (id: number): Promise<void> => InterviewsAPI.Delete(id),
+  /** Writes the round's .ics file and opens it in the default calendar app (R31). */
+  addToCalendar: (id: number): Promise<void> => InterviewsAPI.AddToCalendar(id),
 
   /** Puts text on the system clipboard through the Wails runtime. */
   copyText: async (text: string): Promise<void> => {

@@ -1,8 +1,11 @@
 package interviews_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -249,5 +252,37 @@ func TestR28_RoundInOtherZoneDueAtCorrectLocalTime(t *testing.T) {
 	now = time.Date(2026, 11, 4, 1, 0, 0, 0, warsaw)
 	if items, _ := fu.Due(ctx); len(items) != 1 {
 		t.Fatalf("not due at 01:00 Warsaw: %+v", items)
+	}
+}
+
+func TestR31_ExportWritesTheRoundsCalendarFile(t *testing.T) {
+	f := newFixture(t)
+	id := f.app(t, store.StageApplied)
+	r, err := f.svc.Add(ctx, round(id, "2026-11-03T18:00"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	path, err := f.svc.Export(ctx, r.ID, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(path) != filepath.Join(dir, interviews.ExportFolder) || filepath.Ext(path) != ".ics" {
+		t.Fatalf("export path = %s", path)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := f.svc.Get(ctx, r.ID)
+	if want := interviews.ICS(stored, f.now); !bytes.Equal(got, want) {
+		t.Fatalf("exported file differs from ICS():\n%s", got)
+	}
+	// Exporting again overwrites the same file (same UID, same name).
+	if again, err := f.svc.Export(ctx, r.ID, dir); err != nil || again != path {
+		t.Fatalf("second export: %s %v", again, err)
+	}
+	if _, err := f.svc.Export(ctx, 999, dir); apperr.CodeOf(err) != apperr.CodeNotFound {
+		t.Fatalf("missing round: %v", err)
 	}
 }

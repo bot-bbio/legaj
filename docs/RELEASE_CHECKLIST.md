@@ -13,3 +13,7 @@ Run these on a clean Windows 10 or 11 machine with the built installer before a 
 ## Single instance (R42)
 - [ ] Launch LeGaJ, then minimize it. Launch it again from the Start menu: no second window appears, and the first window is restored and focused.
 - [ ] Launch LeGaJ twice in quick succession, as with a double-click on the shortcut: only one window ever appears.
+
+## Calendar export (R31)
+- [ ] Add a round (18:00, America/New_York) and use **Add to calendar**. The `.ics` opens in Outlook (desktop) at the right local time, with the link, interviewers and prep notes in the description.
+- [ ] Import the same file at calendar.google.com › Settings › Import & export. The event lands at the same time. Export again after editing the round and re-import: the event is updated, not duplicated.

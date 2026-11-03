@@ -1,0 +1,18 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//LeGaJ//Interviews//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:legaj-round-42@legaj.app
+DTSTAMP:20261102T120000Z
+DTSTART:20261103T230000Z
+DTEND:20261103T234500Z
+SUMMARY:Video interview: Acme\, Inc. (R&D Engineer\; Platform)
+LOCATION:Room 4\\B
+URL:https://meet.example.com/abc-def
+DESCRIPTION:Acme\, Inc. (R&D Engineer\; Platform)\nMeeting link: https://me
+ et.example.com/abc-def\nInterviewers: Grace Hopper (Admiral)\, Alan Turing
+ \n\nPrep notes:\nRead the JD.\nAsk about the team — Łódź office.
+END:VEVENT
+END:VCALENDAR

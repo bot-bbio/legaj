@@ -14,13 +14,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  # Builds and verifies with a read-only token that isn't left in
+  # .git/config, so no build tool or dependency can push or publish.
+  build:
     runs-on: windows-latest
     timeout-minutes: 40
     permissions:
-      contents: write # create the GitHub release
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Read the version from the tag
         id: version
@@ -109,22 +116,39 @@ jobs:
           "exe=$($exe.FullName)" >> $env:GITHUB_OUTPUT
           "sum=$sum" >> $env:GITHUB_OUTPUT
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: |
+            ${{ steps.installer.outputs.exe }}
+            ${{ steps.installer.outputs.sum }}
+          if-no-files-found: error
+
+  # Publishes only: no checkout, no project code or dependencies run here.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the GitHub release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer
+          path: dist
+
       - name: Check the checksum matches the installer
-        shell: pwsh
-        run: |
-          $line = (Get-Content '${{ steps.installer.outputs.sum }}' -Raw).Trim()
-          $want = $line.Split(' ')[0]
-          $got = (Get-FileHash '${{ steps.installer.outputs.exe }}' -Algorithm SHA256).Hash.ToLower()
-          if ($want -ne $got) { throw "checksum mismatch: $want vs $got" }
+        working-directory: dist
+        run: sha256sum -c ./*.sha256
 
       - name: Publish the release
-        shell: pwsh
+        working-directory: dist
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
         run: |
-          $ghArgs = @('release', 'create', '${{ github.ref_name }}',
-            '${{ steps.installer.outputs.exe }}', '${{ steps.installer.outputs.sum }}',
-            '--title', 'LeGaJ ${{ steps.version.outputs.version }}', '--generate-notes', '--verify-tag')
-          if ('${{ steps.version.outputs.prerelease }}' -eq 'true') { $ghArgs += '--prerelease' }
-          gh @ghArgs
-          if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$TAG" ./*.exe ./*.sha256 --repo "$GITHUB_REPOSITORY"             --title "LeGaJ $VERSION" --generate-notes --verify-tag "${flags[@]}"

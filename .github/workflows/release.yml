@@ -1,0 +1,130 @@
+name: release
+
+# A pushed tag vX.Y.Z (or vX.Y.Z-rc.N) builds, verifies and publishes the
+# installer, its SHA-256 checksum and release notes (R39).
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write # create the GitHub release
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Read the version from the tag
+        id: version
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          if ($tag -notmatch '^v(\d+\.\d+\.\d+)(-[0-9A-Za-z.-]+)?$') { throw "Tag $tag isn't vX.Y.Z or vX.Y.Z-pre." }
+          $base, $version = $Matches[1], $tag.Substring(1)
+          $product = (Get-Content wails.json -Raw | ConvertFrom-Json).info.productVersion
+          if ($product -ne $base) { throw "wails.json productVersion is $product but the tag is $tag." }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "prerelease=$($tag.Contains('-').ToString().ToLower())" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: UCRT64
+          update: false
+          install: mingw-w64-ucrt-x86_64-gcc
+
+      - name: Put gcc on PATH
+        shell: pwsh
+        run: Add-Content $env:GITHUB_PATH "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin"
+
+      - name: Install the Wails CLI at the version in go.mod
+        shell: pwsh
+        run: |
+          $v = go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2
+          go install "github.com/wailsapp/wails/v2/cmd/wails@$v"
+
+      - name: Ensure Inno Setup 6
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+
+      - name: Verify
+        shell: powershell
+        run: powershell -NoProfile -File scripts/verify.ps1
+
+      - name: Build the release exe with its version
+        shell: pwsh
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          wails build -s -m -skipbindings -trimpath -ldflags "-X main.version=$v"
+          if ($LASTEXITCODE -ne 0) { throw 'wails build failed' }
+
+      # The bootstrapper is Microsoft's small online installer. It's only
+      # used if a machine lacks WebView2, and its signature must check out.
+      - name: Download the WebView2 bootstrapper
+        id: webview2
+        shell: pwsh
+        run: |
+          $path = Join-Path $env:RUNNER_TEMP 'MicrosoftEdgeWebview2Setup.exe'
+          Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $path
+          $sig = Get-AuthenticodeSignature $path
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+            throw "WebView2 bootstrapper signature check failed: $($sig.Status) $($sig.SignerCertificate.Subject)"
+          }
+          "path=$path" >> $env:GITHUB_OUTPUT
+
+      - name: Build the installer and its checksum
+        id: installer
+        shell: pwsh
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Q "/DMyAppVersion=$v" "/DWebView2Bootstrapper=${{ steps.webview2.outputs.path }}" packaging\legaj.iss
+          if ($LASTEXITCODE -ne 0) { throw 'ISCC failed' }
+          $exe = Get-Item "packaging\dist\LeGaJ-Setup-$v.exe"
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
+          # sha256sum format, so `sha256sum -c` and Get-FileHash both work.
+          $sum = "$($exe.FullName).sha256"
+          [IO.File]::WriteAllText($sum, "$hash  $($exe.Name)`n")
+          "exe=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+          "sum=$sum" >> $env:GITHUB_OUTPUT
+
+      - name: Check the checksum matches the installer
+        shell: pwsh
+        run: |
+          $line = (Get-Content '${{ steps.installer.outputs.sum }}' -Raw).Trim()
+          $want = $line.Split(' ')[0]
+          $got = (Get-FileHash '${{ steps.installer.outputs.exe }}' -Algorithm SHA256).Hash.ToLower()
+          if ($want -ne $got) { throw "checksum mismatch: $want vs $got" }
+
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ghArgs = @('release', 'create', '${{ github.ref_name }}',
+            '${{ steps.installer.outputs.exe }}', '${{ steps.installer.outputs.sum }}',
+            '--title', 'LeGaJ ${{ steps.version.outputs.version }}', '--generate-notes', '--verify-tag')
+          if ('${{ steps.version.outputs.prerelease }}' -eq 'true') { $ghArgs += '--prerelease' }
+          gh @ghArgs
+          if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }

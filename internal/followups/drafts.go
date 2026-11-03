@@ -3,7 +3,6 @@ package followups
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"strings"
 	"unicode/utf8"
@@ -61,7 +60,7 @@ func writeErr(err error) error {
 // subject is what a follow-up is about.
 type subject struct {
 	company, role string
-	interviewer   string
+	interviewer   store.Interviewer
 	daysSince     int
 }
 
@@ -104,10 +103,7 @@ func (s *Service) target(ctx context.Context, k Kind, appID, roundID int64) (sub
 		if err != nil {
 			return sub, readErr(err)
 		}
-		var names []string
-		if json.Unmarshal([]byte(interviewers), &names) == nil && len(names) > 0 {
-			sub.interviewer = names[0]
-		}
+		sub.interviewer = store.FirstInterviewer(interviewers)
 	}
 	return sub, nil
 }
@@ -160,9 +156,14 @@ func (s *Service) Draft(ctx context.Context, k Kind, appID, roundID int64) (Draf
 		}
 	}
 	r := Render(DefaultTemplate(k), Values{
-		Company: sub.company, Role: sub.role, Interviewer: sub.interviewer, DaysSince: sub.daysSince, Name: name,
+		Company: sub.company, Role: sub.role, Interviewer: sub.interviewer.Name, DaysSince: sub.daysSince, Name: name,
 	})
-	return view(DraftInput{Kind: k, AppID: appID, RoundID: roundID, Subject: r.Subject, Body: r.Body}), nil
+	// A thank-you goes to the interviewer when their address is known.
+	to := ""
+	if e := strings.TrimSpace(sub.interviewer.Email); recipientRE.MatchString(e) {
+		to = e
+	}
+	return view(DraftInput{Kind: k, AppID: appID, RoundID: roundID, To: to, Subject: r.Subject, Body: r.Body}), nil
 }
 
 func validate(in DraftInput) error {

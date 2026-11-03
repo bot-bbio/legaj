@@ -163,3 +163,21 @@ func TestR29_LoggingSentOrSkippedClearsDue(t *testing.T) {
 		t.Fatalf("logging a non-final status: %v", err)
 	}
 }
+
+func TestR29_ThankYouGoesToTheInterviewer(t *testing.T) {
+	loc := zone(t, "Europe/Warsaw")
+	f := newDue(t, loc)
+	f.withProfile(t, loc)
+	app := f.applied(t, "Acme", store.StageInterviewing, time.Date(2026, 11, 2, 9, 0, 0, 0, loc))
+	f.now = time.Date(2026, 11, 10, 9, 0, 0, 0, loc)
+	round := f.exec(t, `INSERT INTO rounds (application_id, starts_at, zone, duration_min, interviewers, created_at, updated_at)
+		VALUES (?, ?, 'Europe/Warsaw', 60, '[{"name":"Grace Hopper","title":"Admiral","email":"grace@example.com"}]', '', '')`,
+		app, store.FormatTime(f.now.Add(-2*time.Hour)))
+	d, err := f.svc.Draft(ctx, followups.KindThankYou, app, round)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.To != "grace@example.com" || !strings.Contains(d.Body, "Dear Grace Hopper,") || len(d.Problems) != 0 {
+		t.Fatalf("thank-you draft = %+v", d)
+	}
+}

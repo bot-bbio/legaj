@@ -177,7 +177,7 @@ func TestR28_ThankYouDueAtRoundEndAcrossZones(t *testing.T) {
 	id := f.applied(t, "Acme", store.StageInterviewing, time.Date(2026, 10, 20, 9, 0, 0, 0, warsaw))
 	start := time.Date(2026, 11, 3, 10, 0, 0, 0, ny) // entered in New York; stored as UTC
 	round := f.exec(t, `INSERT INTO rounds (application_id, starts_at, zone, duration_min, interviewers, created_at, updated_at)
-		VALUES (?, ?, 'America/New_York', 45, '["Grace Hopper","Alan Turing"]', '', '')`, id, store.FormatTime(start))
+		VALUES (?, ?, 'America/New_York', 45, '[{"name":"Grace Hopper","title":"Admiral","email":"grace@example.com"},{"name":"Alan Turing"}]', '', '')`, id, store.FormatTime(start))
 
 	f.now = start.Add(44 * time.Minute)
 	if got := f.due(t); len(got) != 0 {

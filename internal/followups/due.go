@@ -3,7 +3,6 @@ package followups
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"slices"
 	"time"
 
@@ -144,10 +143,7 @@ func (s *Service) Due(ctx context.Context) ([]DueItem, error) {
 		if now.Before(end) {
 			continue
 		}
-		var names []string
-		if json.Unmarshal([]byte(interviewers), &names) == nil && len(names) > 0 {
-			it.Interviewer = names[0]
-		}
+		it.Interviewer = store.FirstInterviewer(interviewers).Name
 		it.Kind, it.DueSince = KindThankYou, end
 		out = append(out, it)
 	}

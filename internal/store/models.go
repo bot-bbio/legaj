@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -93,6 +94,24 @@ type Application struct {
 	Notes        string     `json:"notes"`
 	CreatedAt    time.Time  `json:"createdAt"`
 	UpdatedAt    time.Time  `json:"updatedAt"`
+}
+
+// Interviewer is one person on an interview round (R30). Rounds store
+// them as a JSON array of these objects.
+type Interviewer struct {
+	Name  string `json:"name"`
+	Title string `json:"title"`
+	Email string `json:"email"`
+}
+
+// FirstInterviewer returns the first interviewer in a round's stored JSON,
+// or a zero value if there's none or the JSON can't be read.
+func FirstInterviewer(stored string) Interviewer {
+	var list []Interviewer
+	if json.Unmarshal([]byte(stored), &list) != nil || len(list) == 0 {
+		return Interviewer{}
+	}
+	return list[0]
 }
 
 // StageEvent is a row of the stage_events table.

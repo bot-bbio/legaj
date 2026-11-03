@@ -12,6 +12,9 @@ import (
 // overflows, it returns ErrDoesntFit: V1 silently produced two-page letters
 // (A12); a cover letter must be one page.
 func Fit(l Letter) ([]byte, Preset, error) {
+	if err := checkPrintable(l); err != nil {
+		return nil, Preset{}, err
+	}
 	for _, p := range Presets {
 		data, err := Render(l, p)
 		if err == nil {
@@ -36,6 +39,16 @@ func WriteLetter(l Letter, path string) (Preset, error) {
 		return Preset{}, apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't save the PDF.")
 	}
 	return preset, nil
+}
+
+// Save writes rendered PDF bytes to path atomically (temp file, then
+// rename). documents renders with Fit before its transaction, so only this
+// quick write happens while the database writer is held.
+func Save(path string, data []byte) error {
+	if err := writeAtomic(path, data); err != nil {
+		return apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't save the PDF.")
+	}
+	return nil
 }
 
 func writeAtomic(path string, data []byte) error {

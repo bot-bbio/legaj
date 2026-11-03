@@ -89,6 +89,12 @@ func (s *Service) ApproveDraft(ctx context.Context, appID, draftID, draftRev int
 }
 
 func (s *Service) write(ctx context.Context, appID, draftID, draftRev int64, l pdf.Letter) (Version, error) {
+	// Fit and render first: up to four full layouts, outside the write
+	// transaction, so the single database writer isn't held meanwhile.
+	data, _, err := pdf.Fit(l)
+	if err != nil {
+		return Version{}, err
+	}
 	body, err := json.Marshal(l)
 	if err != nil {
 		return Version{}, apperr.Wrap(err, apperr.CodeInternal, apperr.GenericMessage)
@@ -130,7 +136,7 @@ func (s *Service) write(ctx context.Context, appID, draftID, draftRev int64, l p
 			v++
 			rel = path.Join(folder, letterFile(appID, company, role, v))
 		}
-		if _, err := pdf.WriteLetter(l, s.abs(rel)); err != nil {
+		if err := pdf.Save(s.abs(rel), data); err != nil {
 			return err
 		}
 		now := store.FormatTime(s.now())

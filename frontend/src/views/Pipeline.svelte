@@ -1,4 +1,6 @@
 <script lang="ts">
+  import AnswerBank from '../components/AnswerBank.svelte';
+  import AnswersPanel from '../components/AnswersPanel.svelte';
   import BulkBar from '../components/BulkBar.svelte';
   import MaterialsChoice from '../components/MaterialsChoice.svelte';
   import PasteJob from '../components/PasteJob.svelte';
@@ -30,8 +32,16 @@
   let focusId = $state<number | null>(null);
 
   let pasting = $state(false);
-  let reviewing = $state(false);
   let openError = $state('');
+
+  // Pipeline's sub-views (R43): the table or the answer bank, never a nav section.
+  let tab = $state<'applications' | 'bank'>('applications');
+
+  // One side panel at a time, beside the table: the Review queue or a row's answers.
+  type Side = { kind: 'review' } | { kind: 'answers'; id: number };
+  let side = $state<Side | null>(null);
+  const reviewing = $derived(side?.kind === 'review');
+  const answersId = $derived(side?.kind === 'answers' ? side.id : null);
 
   /**
    * Queue letter generation and open the Review panel beside the table,
@@ -41,7 +51,7 @@
     openError = '';
     try {
       await api.generateLetters(ids);
-      reviewing = true;
+      side = { kind: 'review' };
     } catch (err) {
       openError = errorMessage(err);
     }
@@ -70,6 +80,8 @@
   }
 
   const rows = $derived($applicationsStore.status === 'ready' ? $applicationsStore.data : []);
+  // A deleted row's answers panel closes by itself.
+  const answersRow = $derived(answersId === null ? undefined : rows.find((r) => r.id === answersId));
   const visible = $derived(filterRows(rows, filter));
   const counts = $derived(
     rows.reduce<Record<string, number>>((acc, r) => ((acc[r.stage] = (acc[r.stage] ?? 0) + 1), acc), {}),
@@ -97,7 +109,12 @@
 <div class="title">
   <h1>Pipeline</h1>
   <div class="title-actions">
-    <button type="button" class="secondary" aria-pressed={reviewing} onclick={() => (reviewing = !reviewing)}>
+    <button
+      type="button"
+      class="secondary"
+      aria-pressed={reviewing}
+      onclick={() => (side = reviewing ? null : { kind: 'review' })}
+    >
       Review
     </button>
     {#if !pasting}
@@ -112,7 +129,37 @@
 
 <StatsHeader />
 
-<div class="layout" class:with-panel={reviewing}>
+<div class="tabs" role="tablist" aria-label="Pipeline views">
+  <button
+    type="button"
+    role="tab"
+    id="pipeline-tab-applications"
+    aria-selected={tab === 'applications'}
+    aria-controls="pipeline-panel-applications"
+    onclick={() => (tab = 'applications')}>Applications</button
+  >
+  <button
+    type="button"
+    role="tab"
+    id="pipeline-tab-bank"
+    aria-selected={tab === 'bank'}
+    aria-controls="pipeline-panel-bank"
+    onclick={() => (tab = 'bank')}>Answer bank</button
+  >
+</div>
+
+{#if tab === 'bank'}
+  <div role="tabpanel" id="pipeline-panel-bank" aria-labelledby="pipeline-tab-bank">
+    <AnswerBank />
+  </div>
+{:else}
+<div
+  class="layout"
+  class:with-panel={reviewing || answersRow !== undefined}
+  role="tabpanel"
+  id="pipeline-panel-applications"
+  aria-labelledby="pipeline-tab-applications"
+>
   <div class="main">
 {#if $applicationsStore.status === 'loading'}
   <p class="muted">Loading…</p>
@@ -184,6 +231,12 @@
         <span role="cell" class="clip muted">{r.location}</span>
         <span role="cell" class="muted">{added(r.createdAt)}</span>
         <span role="cell" class="links">
+          <button
+            type="button"
+            class="link"
+            aria-label="Answers for {r.company || r.role || 'row'}"
+            onclick={() => (side = { kind: 'answers', id: r.id })}>Answers</button
+          >
           {#if canGenerate(r)}
             <button
               type="button"
@@ -203,9 +256,14 @@
 {/if}
   </div>
   {#if reviewing}
-    <ReviewPanel onclose={() => (reviewing = false)} />
+    <ReviewPanel onclose={() => (side = null)} />
+  {:else if answersRow}
+    {#key answersRow.id}
+      <AnswersPanel row={answersRow} onclose={() => (side = null)} />
+    {/key}
   {/if}
 </div>
+{/if}
 
 {#if deletes.length > 0}
   <div class="toasts">
@@ -235,6 +293,24 @@
     display: flex;
     gap: 0.5rem;
   }
+  .tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .tabs [role='tab'] {
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: none;
+    color: var(--muted);
+    padding: 0.4rem 0.75rem;
+  }
+  .tabs [role='tab'][aria-selected='true'] {
+    border-bottom-color: var(--accent);
+    color: inherit;
+  }
   .layout.with-panel {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(20rem, 26rem);
@@ -256,7 +332,7 @@
   }
   :global(.grid-row) {
     display: grid;
-    grid-template-columns: 2.5rem minmax(8rem, 1fr) minmax(10rem, 1.5fr) 8rem 6.5rem minmax(6rem, 1fr) 7rem 12rem;
+    grid-template-columns: 2.5rem minmax(8rem, 1fr) minmax(10rem, 1.5fr) 8rem 6.5rem minmax(6rem, 1fr) 7rem 15rem;
     align-items: center;
     gap: 0.75rem;
     padding: 0 0.75rem;

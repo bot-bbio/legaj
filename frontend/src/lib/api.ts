@@ -3,15 +3,18 @@
  * `api`, so tests mock this one module. Types come from the Wails-generated
  * bindings (C13), minus the generated helper methods.
  */
+import * as AnswersAPI from '../../wailsjs/go/main/AnswersAPI';
 import * as App from '../../wailsjs/go/main/App';
 import * as LettersAPI from '../../wailsjs/go/main/LettersAPI';
 import * as OnboardingAPI from '../../wailsjs/go/main/OnboardingAPI';
 import * as PipelineAPI from '../../wailsjs/go/main/PipelineAPI';
 import * as ProfileAPI from '../../wailsjs/go/main/ProfileAPI';
 import * as SettingsAPI from '../../wailsjs/go/main/SettingsAPI';
+import { ClipboardSetText } from '../../wailsjs/runtime/runtime';
 import {
   letters,
   profile,
+  type answers,
   type documents,
   type main,
   type onboarding,
@@ -53,6 +56,8 @@ export type ReviewItem = Plain<main.ReviewItem>;
 export type ReviewStatus = 'queued' | 'running' | 'draft' | 'failed';
 export type GenerateResult = Plain<main.GenerateResult>;
 export type ApproveAllResult = Plain<letters.ApproveAllResult>;
+export type Answer = Plain<answers.Answer>;
+export type Suggestion = Plain<answers.Suggestion>;
 export type PasteInput = Plain<pipeline.PasteInput>;
 export type PasteResult = Plain<pipeline.PasteResult>;
 export type Stage = 'lead' | 'ready' | 'applied' | 'interviewing' | 'offer' | 'rejected' | 'withdrawn';
@@ -101,4 +106,17 @@ export const api = {
   reviewQueue: (): Promise<ReviewItem[]> => LettersAPI.ReviewQueue(),
   dismissJob: (appId: number): Promise<void> => LettersAPI.Dismiss(appId),
   setMaterials: (id: number, materials: Materials): Promise<ApplicationRow> => PipelineAPI.SetMaterials(id, materials),
+
+  generateAnswers: (appId: number, question: string): Promise<Answer> => AnswersAPI.Generate(appId, question),
+  listAnswers: (appId: number): Promise<Answer[]> => AnswersAPI.List(appId),
+  approveAnswer: (id: number, text: string): Promise<Answer> => AnswersAPI.Approve(id, text),
+  deleteAnswer: (id: number): Promise<void> => AnswersAPI.Delete(id),
+  answerBank: (): Promise<Answer[]> => AnswersAPI.Bank(),
+  suggestAnswers: (question: string): Promise<Suggestion[]> => AnswersAPI.Suggest(question),
+  removeFromBank: (id: number): Promise<void> => AnswersAPI.RemoveFromBank(id),
+
+  /** Puts text on the system clipboard through the Wails runtime. */
+  copyText: async (text: string): Promise<void> => {
+    if (!(await ClipboardSetText(text))) throw new Error('LeGaJ couldn’t copy to the clipboard.');
+  },
 };

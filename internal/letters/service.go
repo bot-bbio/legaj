@@ -4,9 +4,11 @@ package letters
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"strings"
 	"time"
 
@@ -22,6 +24,12 @@ import (
 // Draft is a letter awaiting review: the user picks one of the three why
 // paragraphs, edits, and approves (R22).
 type Draft struct {
+	// Rev identifies the generation this draft came from: a random number
+	// made when the draft is generated and kept through edits. A save must
+	// name the current revision, so an edit can never bring back a draft
+	// that was approved or replaced meanwhile. (Row IDs can't do this:
+	// SQLite reuses a deleted draft's ID for the next one.)
+	Rev        int64    `json:"rev"`
 	Style      string   `json:"style"`
 	Salutation string   `json:"salutation"`
 	Opening    string   `json:"opening"`
@@ -109,9 +117,11 @@ func (s *Service) Draft(ctx context.Context, appID int64) (Draft, error) {
 		Style: style.ID, Salutation: a.Salutation, Opening: a.Opening, WhyOptions: a.WhyOptions,
 		Body: a.Body, Closing: a.Closing, SignOff: a.SignOff,
 	}
-	if err := s.saveDraft(ctx, appID, d); err != nil {
+	rev, err := s.saveDraft(ctx, appID, d)
+	if err != nil {
 		return Draft{}, err
 	}
+	d.Rev = rev
 	return d, nil
 }
 
@@ -141,13 +151,18 @@ func (s *Service) attempt(ctx context.Context, app store.Application, p profile.
 }
 
 // saveDraft stores d as the application's only current draft.
-func (s *Service) saveDraft(ctx context.Context, appID int64, d Draft) error {
+func (s *Service) saveDraft(ctx context.Context, appID int64, d Draft) (int64, error) {
+	rev, err := newRev()
+	if err != nil {
+		return 0, apperr.Wrap(err, apperr.CodeInternal, apperr.GenericMessage)
+	}
+	d.Rev = rev
 	body, err := json.Marshal(d)
 	if err != nil {
-		return apperr.Wrap(err, apperr.CodeInternal, apperr.GenericMessage)
+		return 0, apperr.Wrap(err, apperr.CodeInternal, apperr.GenericMessage)
 	}
 	now := store.FormatTime(s.cfg.Now())
-	return events.Mutate(ctx, s.cfg.DB, s.cfg.Bus, events.Change(events.EntityDocument, appID), func(tx *sql.Tx) error {
+	err = events.Mutate(ctx, s.cfg.DB, s.cfg.Bus, events.Change(events.EntityDocument, appID), func(tx *sql.Tx) error {
 		var live int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM applications WHERE id = ? AND deleted_at IS NULL`, appID).Scan(&live); err != nil {
 			return apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't save the draft.")
@@ -165,6 +180,74 @@ func (s *Service) saveDraft(ctx context.Context, appID int64, d Draft) error {
 		}
 		return nil
 	})
+	return rev, err
+}
+
+// newRev returns a random revision that survives a round trip through
+// JavaScript numbers (at most 2^53 - 1).
+func newRev() (int64, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(1<<53-1))
+	if err != nil {
+		return 0, err
+	}
+	return n.Int64() + 1, nil
+}
+
+// effectiveRev is a stored draft's revision; drafts saved before
+// revisions existed use their row ID.
+func effectiveRev(rowID int64, d Draft) int64 {
+	if d.Rev > 0 {
+		return d.Rev
+	}
+	return rowID
+}
+
+var errDraftChanged = apperr.New(apperr.CodeConflict,
+	"This draft was approved or replaced by a newer one. Reopen the review to see the latest.")
+
+// updateDraft changes the stored draft rev in place: mutate sees the draft
+// as stored now, so concurrent edits to other paragraphs survive. If that
+// draft was approved or replaced, nothing is written (a conflict).
+func (s *Service) updateDraft(ctx context.Context, appID, rev int64, mutate func(*Draft) error) (Draft, error) {
+	var out Draft
+	err := events.Mutate(ctx, s.cfg.DB, s.cfg.Bus, events.Change(events.EntityDocument, appID), func(tx *sql.Tx) error {
+		var rowID int64
+		var body string
+		err := tx.QueryRowContext(ctx, `SELECT d.id, d.body FROM documents d JOIN applications a ON a.id = d.application_id
+			WHERE d.application_id = ? AND d.kind = 'letter' AND d.status = 'draft' AND a.deleted_at IS NULL
+			ORDER BY d.id DESC LIMIT 1`, appID).Scan(&rowID, &body)
+		if errors.Is(err, sql.ErrNoRows) {
+			return errDraftChanged
+		}
+		if err != nil {
+			return apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't save the draft.")
+		}
+		var cur Draft
+		if err := json.Unmarshal([]byte(body), &cur); err != nil {
+			return apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't read the draft.")
+		}
+		if effectiveRev(rowID, cur) != rev {
+			return errDraftChanged
+		}
+		if err := mutate(&cur); err != nil {
+			return err
+		}
+		cur.Rev = rev // edits keep the generation's revision
+		next, err := json.Marshal(cur)
+		if err != nil {
+			return apperr.Wrap(err, apperr.CodeInternal, apperr.GenericMessage)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE documents SET body = ?, updated_at = ? WHERE id = ?`,
+			string(next), store.FormatTime(s.cfg.Now()), rowID); err != nil {
+			return apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't save the draft.")
+		}
+		out = cur
+		return nil
+	})
+	if err != nil {
+		return Draft{}, apperr.Public(err)
+	}
+	return out, nil
 }
 
 // CurrentDraft returns the application's draft awaiting review.
@@ -190,6 +273,7 @@ func (s *Service) currentDraft(ctx context.Context, appID int64) (int64, Draft, 
 	if err := json.Unmarshal([]byte(body), &d); err != nil {
 		return 0, Draft{}, apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't read the draft.")
 	}
+	d.Rev = effectiveRev(id, d)
 	return id, d, nil
 }
 

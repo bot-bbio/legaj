@@ -310,8 +310,8 @@ func TestR22_RegenerateParagraphReplacesOnlyThat(t *testing.T) {
 		t.Fatal("the rewrite request must carry the current draft as context")
 	}
 	stored, _ := f.svc.CurrentDraft(ctx, id)
-	if stored.WhyOptions[1] != after.WhyOptions[1] && stored.WhyOptions[1] != "Acme's compiler team is where I can do my best work." {
-		t.Fatal("the regenerated paragraph wasn't saved")
+	if stored.WhyOptions[1] != "Acme's compiler team is where I can do my best work." {
+		t.Fatalf("the regenerated paragraph wasn't saved: stored why[1] = %q", stored.WhyOptions[1])
 	}
 }
 

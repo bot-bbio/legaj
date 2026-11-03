@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DocumentVersion, Draft, DraftPart } from '../lib/api';
 
 const draft = (): Draft => ({
+  rev: 1,
   style: 'direct',
   salutation: 'Dear Hiring Team,',
   opening: 'I am applying to Acme.',

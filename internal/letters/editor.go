@@ -53,15 +53,20 @@ func validateEdit(d Draft) error {
 	return nil
 }
 
-// SaveDraft stores the user's edits to the current draft.
+// SaveDraft stores the user's edits over the draft revision they were made
+// on (d.Rev). If that draft was approved or replaced meanwhile, nothing is
+// saved and the user is told to reopen it.
 func (s *Service) SaveDraft(ctx context.Context, appID int64, d Draft) (Draft, error) {
 	if err := validateEdit(d); err != nil {
 		return Draft{}, err
 	}
-	if err := s.saveDraft(ctx, appID, d); err != nil {
-		return Draft{}, err
+	if d.Rev <= 0 {
+		return Draft{}, errDraftChanged
 	}
-	return d, nil
+	return s.updateDraft(ctx, appID, d.Rev, func(cur *Draft) error {
+		*cur = d
+		return nil
+	})
 }
 
 // paragraphSchema is the answer to a one-paragraph rewrite.
@@ -90,10 +95,11 @@ func target(d *Draft, part Part, i int) (*string, error) {
 // RegenerateParagraph rewrites one paragraph and leaves every other one
 // exactly as it was (R22). The model sees the whole draft for context.
 func (s *Service) RegenerateParagraph(ctx context.Context, appID int64, part Part, index int) (Draft, error) {
-	d, err := s.CurrentDraft(ctx, appID)
+	_, d, err := s.currentDraft(ctx, appID)
 	if err != nil {
 		return Draft{}, err
 	}
+	rev := d.Rev
 	slot, err := target(&d, part, index)
 	if err != nil {
 		return Draft{}, err
@@ -106,10 +112,15 @@ func (s *Service) RegenerateParagraph(ctx context.Context, appID int64, part Par
 	if err != nil {
 		return Draft{}, err
 	}
-	current, err := json.Marshal(d)
-	if err != nil {
+	// No HTML escaping: "AT&T" must reach the model as written (A10).
+	var ctxJSON bytes.Buffer
+	enc := json.NewEncoder(&ctxJSON)
+	enc.SetEscapeHTML(false)
+	d.Rev = 0
+	if err := enc.Encode(d); err != nil {
 		return Draft{}, apperr.Wrap(err, apperr.CodeInternal, apperr.GenericMessage)
 	}
+	current := bytes.TrimSpace(ctxJSON.Bytes())
 	reason := ""
 	for attempt := 1; attempt <= 2; attempt++ {
 		base, err := userPrompt(app, p, Style{Instruction: StyleInstruction(d.Style)}, reason)
@@ -143,11 +154,18 @@ func (s *Service) RegenerateParagraph(ctx context.Context, appID int64, part Par
 			reason = "it contained the placeholder " + strconvQuote(m) + "."
 			continue
 		}
-		*slot = strings.TrimSpace(out.Paragraph)
-		if err := s.saveDraft(ctx, appID, d); err != nil {
-			return Draft{}, err
-		}
-		return d, nil
+		paragraph := strings.TrimSpace(out.Paragraph)
+		// Write only this paragraph into the draft as stored now: edits made
+		// while Gemini worked survive, and an approved or replaced draft is
+		// left alone.
+		return s.updateDraft(ctx, appID, rev, func(cur *Draft) error {
+			at, err := target(cur, part, index)
+			if err != nil {
+				return err
+			}
+			*at = paragraph
+			return nil
+		})
 	}
 	return Draft{}, apperr.Wrap(errors.New("paragraph rewrite rejected twice: "+reason), apperr.CodeAIInvalidOutput,
 		"Gemini's rewrite didn't pass LeGaJ's checks twice. Try again or edit it yourself.")
@@ -174,5 +192,5 @@ func (s *Service) Approve(ctx context.Context, appID int64) (documents.Version, 
 	if err != nil {
 		return documents.Version{}, err
 	}
-	return s.cfg.Documents.ApproveDraft(ctx, appID, draftID, ToPDF(d, p, app, s.cfg.Now()))
+	return s.cfg.Documents.ApproveDraft(ctx, appID, draftID, d.Rev, ToPDF(d, p, app, s.cfg.Now()))
 }

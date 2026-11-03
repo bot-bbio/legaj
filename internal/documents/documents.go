@@ -68,21 +68,24 @@ var errDraftGone = apperr.New(apperr.CodeConflict, "This draft was already appro
 // nothing is recorded. A letter that doesn't fit on one page fails before
 // any file is written (R24).
 func (s *Service) WriteLetter(ctx context.Context, appID int64, l pdf.Letter) (Version, error) {
-	return s.write(ctx, appID, 0, l)
+	return s.write(ctx, appID, 0, 0, l)
 }
 
 // ApproveDraft is WriteLetter for a reviewed draft: in the same
 // transaction it retires the draft row, so a draft becomes exactly one
 // version even if Approve is clicked twice or Approve all races a single
-// Approve. A draft that's gone or was replaced is a conflict.
-func (s *Service) ApproveDraft(ctx context.Context, appID, draftID int64, l pdf.Letter) (Version, error) {
-	if draftID <= 0 {
+// Approve. The row must still hold the same draft revision (draftRev, the
+// "rev" in its body, or its row ID for drafts saved before revisions):
+// a draft that's gone or was replaced, even under a reused row ID, is a
+// conflict.
+func (s *Service) ApproveDraft(ctx context.Context, appID, draftID, draftRev int64, l pdf.Letter) (Version, error) {
+	if draftID <= 0 || draftRev <= 0 {
 		return Version{}, errDraftGone
 	}
-	return s.write(ctx, appID, draftID, l)
+	return s.write(ctx, appID, draftID, draftRev, l)
 }
 
-func (s *Service) write(ctx context.Context, appID, draftID int64, l pdf.Letter) (Version, error) {
+func (s *Service) write(ctx context.Context, appID, draftID, draftRev int64, l pdf.Letter) (Version, error) {
 	body, err := json.Marshal(l)
 	if err != nil {
 		return Version{}, apperr.Wrap(err, apperr.CodeInternal, apperr.GenericMessage)
@@ -99,7 +102,8 @@ func (s *Service) write(ctx context.Context, appID, draftID int64, l pdf.Letter)
 		}
 		if draftID > 0 {
 			res, err := tx.ExecContext(ctx, `DELETE FROM documents
-				WHERE id = ? AND application_id = ? AND kind = 'letter' AND status = 'draft'`, draftID, appID)
+				WHERE id = ? AND application_id = ? AND kind = 'letter' AND status = 'draft'
+				  AND coalesce(nullif(json_extract(body, '$.rev'), 0), id) = ?`, draftID, appID, draftRev)
 			if err != nil {
 				return storageErr(err)
 			}

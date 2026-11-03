@@ -66,6 +66,8 @@ type Round struct {
 	StartsAt  time.Time `json:"startsAt"` // UTC
 	EndsAt    time.Time `json:"endsAt"`
 	Questions []string  `json:"questions"` // questions to ask (R32)
+	Created   time.Time `json:"created"`
+	Updated   time.Time `json:"updated"`
 }
 
 // Lists are the Interviews view's two lists (R30).
@@ -277,13 +279,13 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 }
 
 const roundColumns = `r.id, r.application_id, a.company, a.role, a.stage, r.starts_at, r.zone, r.duration_min, r.kind,
-	r.location, r.link, r.interviewers, r.prep_notes, r.post_notes, r.outcome, r.questions`
+	r.location, r.link, r.interviewers, r.prep_notes, r.post_notes, r.outcome, r.questions, r.created_at, r.updated_at`
 
 func scan(row interface{ Scan(dest ...any) error }) (Round, error) {
 	var r Round
-	var starts, people, questions string
+	var starts, people, questions, created, updated string
 	if err := row.Scan(&r.ID, &r.AppID, &r.Company, &r.Role, &r.Stage, &starts, &r.Zone, &r.DurationMin, &r.Kind,
-		&r.Location, &r.Link, &people, &r.PrepNotes, &r.PostNotes, &r.Outcome, &questions); err != nil {
+		&r.Location, &r.Link, &people, &r.PrepNotes, &r.PostNotes, &r.Outcome, &questions, &created, &updated); err != nil {
 		return r, err
 	}
 	var err error
@@ -291,6 +293,10 @@ func scan(row interface{ Scan(dest ...any) error }) (Round, error) {
 		return r, err
 	}
 	r.EndsAt = r.StartsAt.Add(time.Duration(r.DurationMin) * time.Minute)
+	// Timestamps only feed the calendar export's identity; a row written
+	// without them still loads.
+	r.Created, _ = store.ParseTime(created)
+	r.Updated, _ = store.ParseTime(updated)
 	loc, err := time.LoadLocation(r.Zone)
 	if err != nil {
 		loc = time.UTC

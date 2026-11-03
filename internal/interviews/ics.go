@@ -16,9 +16,11 @@ import (
 
 // ICS renders a round as an RFC 5545 calendar file (R31): CRLF line ends,
 // lines folded at 75 octets without splitting a character, escaped text,
-// UTC start and end, and a UID that's the same on every export, so
-// importing it again updates the event instead of duplicating it. stamp is
-// the export time (DTSTAMP).
+// UTC start and end. The UID is the same on every export of a round and
+// includes its creation time, so it stays unique even when a reinstall
+// reuses row IDs; SEQUENCE (seconds from creation to the last edit) and
+// LAST-MODIFIED rise with each edit, so a re-import updates the event
+// instead of duplicating or ignoring it. stamp is the export time.
 func ICS(r Round, stamp time.Time) []byte {
 	const utc = "20060102T150405Z"
 	about := r.Company
@@ -58,8 +60,10 @@ func ICS(r Round, stamp time.Time) []byte {
 		"CALSCALE:GREGORIAN",
 		"METHOD:PUBLISH",
 		"BEGIN:VEVENT",
-		fmt.Sprintf("UID:legaj-round-%d@legaj.app", r.ID),
+		fmt.Sprintf("UID:legaj-round-%d-%d@legaj.app", r.ID, r.Created.UnixMilli()),
 		"DTSTAMP:" + stamp.UTC().Format(utc),
+		fmt.Sprintf("SEQUENCE:%d", max(0, int64(r.Updated.Sub(r.Created)/time.Second))),
+		"LAST-MODIFIED:" + r.Updated.UTC().Format(utc),
 		"DTSTART:" + r.StartsAt.UTC().Format(utc),
 		"DTEND:" + r.EndsAt.UTC().Format(utc),
 		"SUMMARY:" + summary + escapeText(about),

@@ -117,6 +117,27 @@ if ($SkipAppBuild) {
     # Frontend and bindings were built above: -s skips the frontend build,
     # -skipbindings the regeneration, -m the mod tidy (checked above).
     Invoke-Step 'wails build' { & $wails build -s -m -skipbindings -trimpath }
+
+    # The installer must compile (R38). Locally it's skipped with a notice
+    # if Inno Setup isn't installed; in CI it's required.
+    $iscc = Get-Command 'ISCC.exe' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
+    if (-not $iscc) {
+        $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+    }
+    if ($iscc) {
+        $version = (Get-Content (Join-Path $root 'wails.json') -Raw | ConvertFrom-Json).info.productVersion
+        $out = Join-Path ([IO.Path]::GetTempPath()) 'legaj-verify-installer'
+        Invoke-Step 'installer (iscc)' {
+            & $iscc /Q "/O$out" "/DMyAppVersion=$version-verify" (Join-Path $root 'packaging\legaj.iss')
+            if ($LASTEXITCODE -eq 0) { Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue }
+        }
+    } elseif ($env:CI) {
+        Write-Host 'verify: Inno Setup (ISCC.exe) is required in CI.' -ForegroundColor Red
+        exit 1
+    } else {
+        Write-Host 'skip installer (iscc): Inno Setup 6 is not installed' -ForegroundColor Yellow
+    }
 }
 
 Write-Host 'verify: all green' -ForegroundColor Green

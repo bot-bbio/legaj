@@ -17,3 +17,10 @@ Run these on a clean Windows 10 or 11 machine with the built installer before a 
 ## Calendar export (R31)
 - [ ] Add a round (18:00, America/New_York) and use **Add to calendar**. The `.ics` opens in Outlook (desktop) at the right local time, with the link, interviewers and prep notes in the description.
 - [ ] Import the same file at calendar.google.com › Settings › Import & export. The event lands at the same time. Export again after editing the round and re-import: the event is updated, not duplicated.
+
+## Installer (R38)
+- [ ] On a standard (non-admin) account, run `LeGaJ-Setup-<version>.exe`: no UAC prompt; it installs to `%LOCALAPPDATA%\Programs\LeGaJ` and adds a Start menu entry.
+- [ ] On a machine without WebView2 (or with it removed), the installer installs it first; on a machine that has it, no WebView2 step runs.
+- [ ] With LeGaJ running, start the installer or uninstaller: it asks you to close LeGaJ first.
+- [ ] Uninstall and answer **Yes** to "Keep your applications and documents?": `%LOCALAPPDATA%\LeGaJ` is still there; reinstall and the data is back.
+- [ ] Uninstall and answer **No**: `%LOCALAPPDATA%\LeGaJ`, `%APPDATA%\legaj.exe` and the **LeGaJ:gemini-api-key** credential are gone. In both cases the `LeGaJ` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` is gone.

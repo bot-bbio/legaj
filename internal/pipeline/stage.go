@@ -155,6 +155,8 @@ type NewLead struct {
 	Description  string
 	Source       store.Source
 	// Materials is the row's materials choice (R26); MaterialsNone means none.
+	// CreateLead stores it as given: creation paths go through Service.Create
+	// or PasteJob, which apply the Settings default (D28).
 	Materials store.Materials
 }
 

@@ -28,7 +28,6 @@ Run these on a clean Windows 10 or 11 machine with the built installer before a 
 ## Release sweep (item 45)
 Automated in `scripts/verify.ps1`: `TestR4_R34_SentinelScan` runs onboarding, a forced Gemini 400, profile, a job, letter generation and approval and form answers with sentinel values, then byte-scans the data folder (no key anywhere; no email, phone or resume line in the logs or in tables that shouldn't hold them).
 
-- [ ] `powershell -NoProfile -File scripts/audit-regressions.ps1` lists no gaps: every V1 bug in the PRD map has a named test.
 - [ ] Live Gemini smoke with your own key (it never runs in CI): `$env:LEGAJ_HOME = "$env:TEMP\legaj-live"; $env:LEGAJ_LIVE_GEMINI_KEY = '<key>'; go test -tags live -count=1 ./internal/smoke/`, then `Remove-Item Env:LEGAJ_LIVE_GEMINI_KEY`.
 - [ ] On a clean Windows 10 VM: install, finish onboarding with **made-up** sentinel values (a throwaway key that you revoke afterwards, a fake email, phone and resume line), paste and clip jobs, generate and approve a letter, draft answers, open a follow-up, add a round. Close LeGaJ, then run `powershell -NoProfile -File scripts/scan-sentinels.ps1 -Key ... -Email ... -Phone ... -ResumeLine ...`. It must report nothing, including in the WebView2 folder.
 - [ ] Generate 10 letters while another app has focus: LeGaJ never steals focus and no console window flashes (R6).

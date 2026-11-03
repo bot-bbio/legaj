@@ -5,6 +5,7 @@
  */
 import * as AnswersAPI from '../../wailsjs/go/main/AnswersAPI';
 import * as App from '../../wailsjs/go/main/App';
+import * as FollowupsAPI from '../../wailsjs/go/main/FollowupsAPI';
 import * as LettersAPI from '../../wailsjs/go/main/LettersAPI';
 import * as OnboardingAPI from '../../wailsjs/go/main/OnboardingAPI';
 import * as PipelineAPI from '../../wailsjs/go/main/PipelineAPI';
@@ -58,6 +59,7 @@ export type GenerateResult = Plain<main.GenerateResult>;
 export type ApproveAllResult = Plain<letters.ApproveAllResult>;
 export type Answer = Plain<answers.Answer>;
 export type Suggestion = Plain<answers.Suggestion>;
+export type DueView = Plain<main.DueView>;
 export type PasteInput = Plain<pipeline.PasteInput>;
 export type PasteResult = Plain<pipeline.PasteResult>;
 export type Stage = 'lead' | 'ready' | 'applied' | 'interviewing' | 'offer' | 'rejected' | 'withdrawn';
@@ -114,6 +116,8 @@ export const api = {
   answerBank: (): Promise<Answer[]> => AnswersAPI.Bank(),
   suggestAnswers: (question: string): Promise<Suggestion[]> => AnswersAPI.Suggest(question),
   removeFromBank: (id: number): Promise<void> => AnswersAPI.RemoveFromBank(id),
+
+  followupsDue: (): Promise<DueView[]> => FollowupsAPI.Due(),
 
   /** Puts text on the system clipboard through the Wails runtime. */
   copyText: async (text: string): Promise<void> => {

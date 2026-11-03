@@ -20,6 +20,7 @@ import (
 	"github.com/bot-bbio/legaj/internal/apperr"
 	"github.com/bot-bbio/legaj/internal/documents"
 	"github.com/bot-bbio/legaj/internal/events"
+	"github.com/bot-bbio/legaj/internal/followups"
 	"github.com/bot-bbio/legaj/internal/jobs"
 	"github.com/bot-bbio/legaj/internal/letters"
 	"github.com/bot-bbio/legaj/internal/logx"
@@ -97,6 +98,8 @@ type Services struct {
 	Jobs *jobs.Queue
 	// Answers drafts form answers and keeps the answer bank (R25).
 	Answers *answers.Service
+	// Followups decides what's due and records what was sent (R27-R29).
+	Followups *followups.Service
 }
 
 // geminiKeyTester makes one tiny call with the candidate key. Any 200
@@ -133,6 +136,15 @@ func (s *Services) defaultMaterials(ctx context.Context) store.Materials {
 		return store.MaterialsLetter
 	}
 	return st.DefaultMaterials
+}
+
+// followUpDays is the Settings delay before an applied nudge is due (R28).
+func (s *Services) followUpDays(ctx context.Context) int {
+	st, err := s.Settings.Get(ctx)
+	if err != nil {
+		return settings.Defaults().FollowUpDays
+	}
+	return st.FollowUpDays
 }
 
 // skipReview reports the Skip-review setting (R23). If settings can't be
@@ -259,6 +271,9 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 	svc.Jobs = jobs.New(jobs.Config{Bus: c.Bus, Work: svc.Letters.Generate})
 	svc.Answers = answers.NewService(answers.Config{
 		DB: db, Bus: c.Bus, AI: c.AI, Profile: svc.Profile, Machine: svc.Stages, Model: svc.model, Now: c.Now,
+	})
+	svc.Followups = followups.NewService(followups.Config{
+		DB: db, Bus: c.Bus, Now: c.Now, Days: svc.followUpDays, Profile: svc.Profile,
 	})
 	svc.Jobs.Start(context.Background())
 	// Deleting rows cancels their queued and running generation (R13).

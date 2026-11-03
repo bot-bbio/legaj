@@ -147,6 +147,7 @@ export const api = {
   deleteRound: (id: number): Promise<void> => InterviewsAPI.Delete(id),
   /** Writes the round's .ics file and opens it in the default calendar app (R31). */
   addToCalendar: (id: number): Promise<void> => InterviewsAPI.AddToCalendar(id),
+  suggestQuestions: (roundId: number): Promise<RoundView> => InterviewsAPI.SuggestQuestions(roundId),
 
   /** Puts text on the system clipboard through the Wails runtime. */
   copyText: async (text: string): Promise<void> => {

@@ -16,6 +16,7 @@ type RoundView struct {
 	AppID        int64               `json:"appId"`
 	Company      string              `json:"company"`
 	Role         string              `json:"role"`
+	Stage        string              `json:"stage"` // the application's stage
 	Local        string              `json:"local"` // wall-clock start in Zone
 	Zone         string              `json:"zone"`
 	StartsAt     string              `json:"startsAt"`
@@ -39,7 +40,7 @@ type RoundLists struct {
 
 func toRoundView(r interviews.Round) RoundView {
 	return RoundView{
-		ID: r.ID, AppID: r.AppID, Company: r.Company, Role: r.Role, Local: r.Local, Zone: r.Zone,
+		ID: r.ID, AppID: r.AppID, Company: r.Company, Role: r.Role, Stage: r.Stage, Local: r.Local, Zone: r.Zone,
 		StartsAt: apiTime(r.StartsAt), EndsAt: apiTime(r.EndsAt), DurationMin: r.DurationMin, Kind: r.Kind,
 		Location: r.Location, Link: r.Link, Interviewers: r.Interviewers, PrepNotes: r.PrepNotes,
 		PostNotes: r.PostNotes, Outcome: r.Outcome, Questions: r.Questions,
@@ -114,4 +115,18 @@ func (i *InterviewsAPI) AddToCalendar(id int64) error {
 		return i.app.public("InterviewsAPI.AddToCalendar", err)
 	}
 	return i.app.public("InterviewsAPI.AddToCalendar", c.Opener.OpenFile(path))
+}
+
+// SuggestQuestions drafts 8-12 questions to ask for a round and saves them
+// on it (R32). Only applications in Interviewing qualify.
+func (i *InterviewsAPI) SuggestQuestions(id int64) (RoundView, error) {
+	_, svc, err := i.app.services()
+	if err != nil {
+		return RoundView{}, err
+	}
+	r, err := svc.Interviews.SuggestQuestions(i.app.ctx, id)
+	if err != nil {
+		return RoundView{}, i.app.public("InterviewsAPI.SuggestQuestions", err)
+	}
+	return toRoundView(r), nil
 }

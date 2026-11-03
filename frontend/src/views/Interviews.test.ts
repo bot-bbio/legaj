@@ -24,6 +24,7 @@ const view = (r: RoundInput, id = 31): RoundView => ({
   id,
   company: 'Acme',
   role: 'Dev',
+  stage: 'interviewing',
   startsAt: '2026-11-03T23:00:00Z',
   endsAt: '2026-11-04T00:00:00Z',
   durationMin: r.durationMin || 60,

@@ -18,9 +18,11 @@ import (
 	_ "time/tzdata" // IANA zones on Windows machines without Go installed
 	"unicode/utf8"
 
+	"github.com/bot-bbio/legaj/internal/ai"
 	"github.com/bot-bbio/legaj/internal/apperr"
 	"github.com/bot-bbio/legaj/internal/events"
 	"github.com/bot-bbio/legaj/internal/pipeline"
+	"github.com/bot-bbio/legaj/internal/profile"
 	"github.com/bot-bbio/legaj/internal/store"
 )
 
@@ -60,6 +62,7 @@ type Round struct {
 	ID        int64     `json:"id"`
 	Company   string    `json:"company"`
 	Role      string    `json:"role"`
+	Stage     string    `json:"stage"`    // the application's stage
 	StartsAt  time.Time `json:"startsAt"` // UTC
 	EndsAt    time.Time `json:"endsAt"`
 	Questions []string  `json:"questions"` // questions to ask (R32)
@@ -77,6 +80,10 @@ type Config struct {
 	Bus     *events.Bus
 	Machine *pipeline.Machine
 	Now     func() time.Time
+	// AI, Profile and Model draft questions to ask (R32).
+	AI      ai.Provider
+	Profile *profile.Service
+	Model   func(ctx context.Context) string
 }
 
 // Service manages rounds.
@@ -269,13 +276,13 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
-const roundColumns = `r.id, r.application_id, a.company, a.role, r.starts_at, r.zone, r.duration_min, r.kind,
+const roundColumns = `r.id, r.application_id, a.company, a.role, a.stage, r.starts_at, r.zone, r.duration_min, r.kind,
 	r.location, r.link, r.interviewers, r.prep_notes, r.post_notes, r.outcome, r.questions`
 
 func scan(row interface{ Scan(dest ...any) error }) (Round, error) {
 	var r Round
 	var starts, people, questions string
-	if err := row.Scan(&r.ID, &r.AppID, &r.Company, &r.Role, &starts, &r.Zone, &r.DurationMin, &r.Kind,
+	if err := row.Scan(&r.ID, &r.AppID, &r.Company, &r.Role, &r.Stage, &starts, &r.Zone, &r.DurationMin, &r.Kind,
 		&r.Location, &r.Link, &people, &r.PrepNotes, &r.PostNotes, &r.Outcome, &questions); err != nil {
 		return r, err
 	}

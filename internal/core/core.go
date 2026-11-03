@@ -278,7 +278,9 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 	svc.Followups = followups.NewService(followups.Config{
 		DB: db, Bus: c.Bus, Now: c.Now, Days: svc.followUpDays, Profile: svc.Profile,
 	})
-	svc.Interviews = interviews.NewService(interviews.Config{DB: db, Bus: c.Bus, Machine: svc.Stages, Now: c.Now})
+	svc.Interviews = interviews.NewService(interviews.Config{
+		DB: db, Bus: c.Bus, Machine: svc.Stages, Now: c.Now, AI: c.AI, Profile: svc.Profile, Model: svc.model,
+	})
 	svc.Jobs.Start(context.Background())
 	// Deleting rows cancels their queued and running generation (R13).
 	svc.Pipeline.OnDelete(svc.Jobs.CancelApps)

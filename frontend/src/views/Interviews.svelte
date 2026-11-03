@@ -4,6 +4,7 @@
    * applications. Each round shows its time in its own zone, and in the
    * user's when they differ; Add to calendar exports an .ics file.
    */
+  import QuestionsPanel from '../components/QuestionsPanel.svelte';
   import RoundEditor from '../components/RoundEditor.svelte';
   import { api, type RoundView } from '../lib/api';
   import { errorMessage } from '../lib/errors';
@@ -92,6 +93,7 @@
           <button type="button" class="secondary" onclick={() => (confirmDelete = r.id)}>Delete…</button>
         {/if}
       </div>
+      <QuestionsPanel round={r} />
     {/if}
   </article>
 {/snippet}

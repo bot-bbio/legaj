@@ -46,18 +46,21 @@ func decodeAnswer(text string) (answer, error) {
 	return a, nil
 }
 
-// placeholder matches template leftovers: [brackets], <Company>-style tags,
-// {{mustaches}} and "Hiring Manager Name" (U7, A10).
-var placeholder = regexp.MustCompile(`[\[\]]|\{\{|\}\}|<[^<>\n]{1,40}>|(?i)hiring manager name`)
+// placeholder matches template leftovers (U7, A10): words in square
+// brackets ("[Hiring Manager]"), capitalised tags ("<Company>",
+// "<Your Name>"), {{mustaches}} and "Hiring Manager Name". Technical text
+// such as "std::vector<int>", "<10ms" or a "[1]" citation isn't one.
+var placeholder = regexp.MustCompile(`\[[A-Za-z][^\[\]\n]{0,40}\]|\{\{|\}\}|<[A-Z][A-Za-z .'-]{1,40}>|(?i)hiring manager name`)
 
-// check rejects drafts with placeholders, or that never name the company
-// they're for (a letter written for the wrong company). It returns a reason
-// suitable for the retry note, or "" when the draft is acceptable.
 // FindPlaceholder returns the first template leftover in s, or "". Form
 // answers (R25) use the same rule as letters.
 func FindPlaceholder(s string) string { return placeholder.FindString(s) }
 
-func check(a answer, company string) string {
+// check rejects drafts with placeholders, that never name the company
+// they're for, or that name another company from the pipeline (a letter
+// written for the wrong company, R21). It returns a reason suitable for the
+// retry note, or "" when the draft is acceptable.
+func check(a answer, company string, rule CompanyRule) string {
 	all := append([]string{a.Salutation, a.Opening, a.Closing, a.SignOff}, append(a.WhyOptions, a.Body...)...)
 	for _, s := range all {
 		if m := placeholder.FindString(s); m != "" {
@@ -65,9 +68,13 @@ func check(a answer, company string) string {
 		}
 	}
 	if company = strings.TrimSpace(company); company != "" {
-		mentions := strings.ToLower(strings.Join(append([]string{a.Opening}, a.WhyOptions...), "\n"))
-		if !strings.Contains(mentions, strings.ToLower(company)) {
+		if !rule.Names(strings.Join(append([]string{a.Opening}, a.WhyOptions...), "\n")) {
 			return "it never named the company " + strconvQuote(company) + " in the opening or the why paragraphs."
+		}
+	}
+	for _, s := range all {
+		if other := rule.Wrong(s); other != "" {
+			return "it named another company, " + strconvQuote(other) + ", instead of " + strconvQuote(company) + "."
 		}
 	}
 	return ""

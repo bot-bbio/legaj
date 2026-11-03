@@ -121,6 +121,10 @@ func (s *Service) RegenerateParagraph(ctx context.Context, appID int64, part Par
 		return Draft{}, apperr.Wrap(err, apperr.CodeInternal, apperr.GenericMessage)
 	}
 	current := bytes.TrimSpace(ctxJSON.Bytes())
+	rule, err := LoadCompanyRule(ctx, s.cfg.DB, app, p)
+	if err != nil {
+		return Draft{}, err
+	}
 	reason := ""
 	for attempt := 1; attempt <= 2; attempt++ {
 		base, err := userPrompt(app, p, Style{Instruction: StyleInstruction(d.Style)}, reason)
@@ -152,6 +156,10 @@ func (s *Service) RegenerateParagraph(ctx context.Context, appID int64, part Par
 		}
 		if m := placeholder.FindString(out.Paragraph); m != "" {
 			reason = "it contained the placeholder " + strconvQuote(m) + "."
+			continue
+		}
+		if other := rule.Wrong(out.Paragraph); other != "" {
+			reason = "it named another company, " + strconvQuote(other) + ", instead of " + strconvQuote(app.Company) + "."
 			continue
 		}
 		paragraph := strings.TrimSpace(out.Paragraph)

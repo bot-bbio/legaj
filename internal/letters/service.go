@@ -147,7 +147,11 @@ func (s *Service) attempt(ctx context.Context, app store.Application, p profile.
 	if err != nil {
 		return answer{}, "it wasn't the expected JSON.", nil
 	}
-	return a, check(a, app.Company), nil
+	rule, err := LoadCompanyRule(ctx, s.cfg.DB, app, p)
+	if err != nil {
+		return answer{}, "", err
+	}
+	return a, check(a, app.Company, rule), nil
 }
 
 // saveDraft stores d as the application's only current draft.

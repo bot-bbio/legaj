@@ -420,3 +420,7 @@ func TestR21_ToPDFUsesChosenWhyAndProfile(t *testing.T) {
 		t.Fatalf("recipient = %q", l.Recipient)
 	}
 }
+
+func containsFold(s, sub string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(sub))
+}

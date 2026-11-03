@@ -388,3 +388,36 @@ func TestR13_RemovingAnUnlinkedAnswerFromTheBankDeletesIt(t *testing.T) {
 		t.Fatalf("%d answer rows left; an unlinked answer removed from the bank must be deleted", n)
 	}
 }
+
+func TestR25_AnswerNamingAnotherPipelineCompanyIsRetried(t *testing.T) {
+	f := newFixture(t)
+	f.app(t, "Globex", "JD", store.MaterialsLetter)
+	id := f.app(t, "Acme", "JD", store.MaterialsAnswers)
+	f.ai.Push(reply(t, words(120, "Acme"), words(120, "Globex"), words(120, "Acme")))
+	f.ai.Push(reply(t, words(120, "Acme"), words(120, "Acme"), words(120, "Acme")))
+	a, err := f.svc.Generate(ctx, id, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(f.ai.Requests()); n != 2 {
+		t.Fatalf("%d requests; an answer about another pipeline company must be retried", n)
+	}
+	for _, o := range a.Options {
+		if strings.Contains(o, "Globex") {
+			t.Fatalf("accepted an answer about Globex: %.40q", o)
+		}
+	}
+}
+
+func TestR25_TechnicalTextIsNotAPlaceholder(t *testing.T) {
+	f := newFixture(t)
+	id := f.app(t, "Acme", "JD", store.MaterialsAnswers)
+	f.ai.Push(reply(t, words(120, "Acme"), words(120, "Acme"), words(120, "Acme")))
+	a, err := f.svc.Generate(ctx, id, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.Approve(ctx, a.ID, "I write C++ like std::vector<int> daily at Acme."); err != nil {
+		t.Fatalf("technical text refused as a placeholder: %v", err)
+	}
+}

@@ -156,6 +156,11 @@ func (s *Service) Generate(ctx context.Context, appID int64, question string) (A
 	if err != nil {
 		return Answer{}, apperr.Wrap(err, apperr.CodeInternal, apperr.GenericMessage)
 	}
+	app.ID = appID
+	rule, err := letters.LoadCompanyRule(ctx, s.cfg.DB, app, p)
+	if err != nil {
+		return Answer{}, err
+	}
 
 	reason := ""
 	for attempt := 1; attempt <= 2; attempt++ {
@@ -179,7 +184,7 @@ func (s *Service) Generate(ctx context.Context, appID int64, question string) (A
 		if err != nil {
 			return Answer{}, err
 		}
-		options, why := check(resp.Text)
+		options, why := check(resp.Text, rule)
 		if why != "" {
 			reason = why
 			continue
@@ -192,7 +197,7 @@ func (s *Service) Generate(ctx context.Context, appID int64, question string) (A
 
 // check decodes and validates the model's output. It returns the reason
 // for a rejection, phrased for the retry prompt.
-func check(text string) ([]string, string) {
+func check(text string, rule letters.CompanyRule) ([]string, string) {
 	var out struct {
 		Answers []string `json:"answers"`
 	}
@@ -209,6 +214,9 @@ func check(text string) ([]string, string) {
 		}
 		if m := letters.FindPlaceholder(a); m != "" {
 			return nil, fmt.Sprintf("answer %d contained the placeholder %q.", i+1, m)
+		}
+		if other := rule.Wrong(a); other != "" {
+			return nil, fmt.Sprintf("answer %d named another company, %q.", i+1, other)
 		}
 	}
 	return out.Answers, ""

@@ -55,6 +55,11 @@ type Config struct {
 	BaseBackoff time.Duration
 }
 
+// MaxFinished is how many done or cancelled jobs the queue remembers; older
+// ones are forgotten (their drafts are in the database). Failures are kept
+// until retried or dismissed.
+const MaxFinished = 200
+
 // maxAttempts bounds retries of a rate-limited job (the Gemini client has
 // already retried each call before the queue sees the error).
 const maxAttempts = 4
@@ -218,6 +223,28 @@ func (q *Queue) Dismiss(appIDs []int64) {
 	q.emit(appIDs...)
 }
 
+// pruneLocked forgets the oldest done and cancelled jobs beyond
+// MaxFinished. q.mu must be held.
+func (q *Queue) pruneLocked() {
+	finished := 0
+	for _, j := range q.jobs {
+		if j.Status == Done || j.Status == Cancelled {
+			finished++
+		}
+	}
+	drop := finished - MaxFinished
+	if drop <= 0 {
+		return
+	}
+	q.jobs = slices.DeleteFunc(q.jobs, func(j *Job) bool {
+		if drop > 0 && (j.Status == Done || j.Status == Cancelled) {
+			drop--
+			return true
+		}
+		return false
+	})
+}
+
 // next blocks until a job is pending or the queue closes.
 func (q *Queue) next() (*Job, context.Context, bool) {
 	q.mu.Lock()
@@ -260,6 +287,7 @@ func (q *Queue) worker() {
 		}
 		q.cancels[j.ID]()
 		delete(q.cancels, j.ID)
+		q.pruneLocked()
 		q.mu.Unlock()
 		q.emit(j.AppID)
 	}

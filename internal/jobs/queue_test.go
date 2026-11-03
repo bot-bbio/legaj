@@ -298,3 +298,33 @@ func TestR23_DismissForgetsFinishedJobsOnly(t *testing.T) {
 	close(release)
 	waitIdle(t, q)
 }
+
+func TestR23_FinishedJobsDontPileUp(t *testing.T) {
+	q := newQueue(t, func(ctx context.Context, appID int64) error {
+		if appID%100 == 0 {
+			return apperr.New(apperr.CodeAIUnavailable, "Gemini is unavailable.")
+		}
+		return nil
+	}, &events.Recorder{})
+	for batch := 0; batch < 6; batch++ {
+		var ids []int64
+		for i := int64(1); i <= 100; i++ {
+			ids = append(ids, int64(batch)*100+i)
+		}
+		q.Enqueue(ids)
+		waitIdle(t, q)
+	}
+	all := q.List()
+	failed := 0
+	for _, j := range all {
+		if j.Status == jobs.Failed {
+			failed++
+		}
+	}
+	if failed != 6 {
+		t.Fatalf("%d failures kept, want all 6 (they stay until retried or dismissed)", failed)
+	}
+	if len(all)-failed > jobs.MaxFinished {
+		t.Fatalf("%d finished jobs kept, want at most %d", len(all)-failed, jobs.MaxFinished)
+	}
+}

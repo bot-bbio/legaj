@@ -237,6 +237,14 @@
             aria-label="Answers for {r.company || r.role || 'row'}"
             onclick={() => (side = { kind: 'answers', id: r.id })}>Answers</button
           >
+          {#if r.letterVersion > 0}
+            <button
+              type="button"
+              class="link"
+              aria-label="Open letter for {r.company || r.role || 'row'}"
+              onclick={() => open(() => api.openLetter(r.id))}>Letter</button
+            >
+          {/if}
           {#if canGenerate(r)}
             <button
               type="button"
@@ -332,7 +340,7 @@
   }
   :global(.grid-row) {
     display: grid;
-    grid-template-columns: 2.5rem minmax(8rem, 1fr) minmax(10rem, 1.5fr) 8rem 6.5rem minmax(6rem, 1fr) 7rem 15rem;
+    grid-template-columns: 2.5rem minmax(8rem, 1fr) minmax(10rem, 1.5fr) 8rem 6.5rem minmax(6rem, 1fr) 7rem 18rem;
     align-items: center;
     gap: 0.75rem;
     padding: 0 0.75rem;

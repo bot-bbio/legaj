@@ -125,3 +125,34 @@ func TestR33_RejectsFilesOutsideDataDirOrOfUnsafeType(t *testing.T) {
 		t.Fatalf("launched %q", rec.launched)
 	}
 }
+
+func TestR33_OpenFolderOnlyInsideTheDataDir(t *testing.T) {
+	o, rec, dir := newOpener(t)
+	inside := filepath.Join(dir, "documents", "12_Acme")
+	if err := os.MkdirAll(inside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(inside, "letter.pdf")
+	if err := os.WriteFile(file, []byte("%PDF-"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.OpenFolder(inside); err != nil {
+		t.Fatalf("a folder inside the data dir: %v", err)
+	}
+	for _, bad := range []string{
+		dir,                           // the data folder itself
+		filepath.Dir(dir),             // outside
+		file,                          // a file, not a folder
+		filepath.Join(inside, "nope"), // missing
+		filepath.Join(inside, "..", "..", "..", "Windows"),
+		"documents",                 // relative
+		inside + `\..\..\..` + `\x`, // escapes after cleaning
+	} {
+		if err := o.OpenFolder(bad); err == nil {
+			t.Errorf("OpenFolder(%q) accepted", bad)
+		}
+	}
+	if len(rec.launched) != 1 || rec.launched[0] != filepath.Clean(inside) {
+		t.Fatalf("launched %v", rec.launched)
+	}
+}

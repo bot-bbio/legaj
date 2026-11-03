@@ -15,6 +15,7 @@ const acme: ApplicationRow = {
   stage: 'applied',
   source: 'clip',
   materials: 'letter',
+  letterVersion: 0,
   createdAt: '2026-11-01T09:00:00Z',
   appliedAt: '2026-11-01T09:00:00Z',
 };

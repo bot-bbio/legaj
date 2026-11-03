@@ -200,3 +200,50 @@ func (s *Service) RemoveFiles(appIDs []int64) error {
 	}
 	return errors.Join(errs...)
 }
+
+// Latest returns each live application's newest approved letter version.
+func (s *Service) Latest(ctx context.Context) (map[int64]Version, error) {
+	rows, err := s.db.Reader().QueryContext(ctx, `SELECT d.id, d.application_id, d.version, d.file_path
+		FROM documents d JOIN applications a ON a.id = d.application_id
+		WHERE d.kind = 'letter' AND d.status = 'approved' AND a.deleted_at IS NULL
+		  AND d.version = (SELECT max(version) FROM documents x
+		                   WHERE x.application_id = d.application_id AND x.kind = 'letter' AND x.status = 'approved')`)
+	if err != nil {
+		return nil, readErr(err)
+	}
+	defer rows.Close()
+	out := map[int64]Version{}
+	for rows.Next() {
+		var v Version
+		var path sql.NullString
+		if err := rows.Scan(&v.DocumentID, &v.AppID, &v.Version, &path); err != nil {
+			return nil, readErr(err)
+		}
+		v.Path = path.String
+		out[v.AppID] = v
+	}
+	if err := rows.Err(); err != nil {
+		return nil, readErr(err)
+	}
+	return out, nil
+}
+
+var errNoLetter = apperr.New(apperr.CodeNotFound, "This application has no approved letter yet.")
+
+// LatestFor returns an application's newest approved letter as an
+// absolute path, for opening it or its folder.
+func (s *Service) LatestFor(ctx context.Context, appID int64) (string, error) {
+	all, err := s.Latest(ctx)
+	if err != nil {
+		return "", err
+	}
+	v, ok := all[appID]
+	if !ok || v.Path == "" {
+		return "", errNoLetter
+	}
+	return s.abs(v.Path), nil
+}
+
+func readErr(err error) error {
+	return apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't read your letters.")
+}

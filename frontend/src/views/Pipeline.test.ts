@@ -15,6 +15,7 @@ const row = (id: number, company: string, stage: string): ApplicationRow => ({
   stage,
   source: 'paste',
   materials: 'letter',
+  letterVersion: 0,
   createdAt: '2026-11-01T09:00:00Z',
   appliedAt: '',
 });

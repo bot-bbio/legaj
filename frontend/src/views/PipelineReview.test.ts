@@ -34,6 +34,7 @@ const row = (id: number, company: string, stage: string, materials: Materials = 
   stage,
   source: 'clip',
   materials,
+  letterVersion: 0,
   createdAt: '2026-11-01T09:00:00Z',
   appliedAt: '',
 });
@@ -54,6 +55,8 @@ const api = {
   approveAll: vi.fn<(ids: number[]) => Promise<ApproveAllResult>>(),
   dismissJob: vi.fn<(id: number) => Promise<void>>(() => Promise.resolve()),
   setMaterials: vi.fn<(id: number, m: Materials) => Promise<ApplicationRow>>(),
+  openLetter: vi.fn<(id: number) => Promise<void>>(() => Promise.resolve()),
+  showLetterFolder: vi.fn<(id: number) => Promise<void>>(() => Promise.resolve()),
 };
 vi.mock('../lib/api', () => ({ api }));
 
@@ -150,5 +153,24 @@ describe('R23/R43 generate and review inside Pipeline', () => {
     expect(choice).toHaveValue('letter');
     await user.selectOptions(choice, 'both');
     expect(api.setMaterials).toHaveBeenCalledWith(7, 'both');
+  });
+
+  it('R22 an approved letter can be opened from its row and right after approval', async () => {
+    const user = userEvent.setup();
+    api.listApplications.mockResolvedValue([{ ...row(7, 'Acme', 'ready'), letterVersion: 2 }, row(8, 'Globex', 'lead')]);
+    api.reviewQueue.mockResolvedValue([item(8, 'Globex', 'draft')]);
+    render(Pipeline);
+    await user.click(await screen.findByRole('button', { name: /open letter for acme/i }));
+    expect(api.openLetter).toHaveBeenCalledWith(7);
+    expect(screen.queryByRole('button', { name: /open letter for globex/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^review/i }));
+    const panel = await screen.findByRole('complementary', { name: /review/i });
+    const entry = await within(panel).findByRole('listitem', { name: /globex/i });
+    await user.click(within(entry).getByRole('button', { name: /^approve$/i }));
+    await user.click(await within(panel).findByRole('button', { name: /^open$/i }));
+    expect(api.openLetter).toHaveBeenLastCalledWith(8);
+    await user.click(within(panel).getByRole('button', { name: /show in folder/i }));
+    expect(api.showLetterFolder).toHaveBeenCalledWith(8);
   });
 });

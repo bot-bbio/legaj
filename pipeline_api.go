@@ -23,8 +23,10 @@ type ApplicationRow struct {
 	Stage     string `json:"stage"`
 	Source    string `json:"source"`
 	Materials string `json:"materials"` // letter | answers | both ("" = none chosen)
-	CreatedAt string `json:"createdAt"` // RFC 3339, UTC
-	AppliedAt string `json:"appliedAt"` // "" when not applied
+	// LetterVersion is the newest approved letter's version; 0 means none.
+	LetterVersion int    `json:"letterVersion"`
+	CreatedAt     string `json:"createdAt"` // RFC 3339, UTC
+	AppliedAt     string `json:"appliedAt"` // "" when not applied
 }
 
 func toRow(a store.Application) ApplicationRow {
@@ -200,9 +202,14 @@ func (p *PipelineAPI) ListApplications() ([]ApplicationRow, error) {
 	if err != nil {
 		return nil, p.app.public("PipelineAPI.ListApplications", err)
 	}
+	letters, err := svc.Documents.Latest(p.app.ctx)
+	if err != nil {
+		return nil, p.app.public("PipelineAPI.ListApplications", err)
+	}
 	rows := make([]ApplicationRow, len(apps))
 	for i, a := range apps {
 		rows[i] = toRow(a)
+		rows[i].LetterVersion = letters[a.ID].Version
 	}
 	return rows, nil
 }

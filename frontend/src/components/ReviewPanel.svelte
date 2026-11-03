@@ -17,6 +17,8 @@
   // Outcomes of the latest actions; items themselves leave the list once approved.
   let notices = $state<string[]>([]);
   let failures = $state<string[]>([]);
+  // The application whose letter was just approved: offer to open it (R22).
+  let justApproved = $state<number | null>(null);
 
   const items = $derived($reviewStore.status === 'ready' ? $reviewStore.data : []);
   const drafts = $derived(items.filter((i) => i.status === 'draft'));
@@ -27,11 +29,13 @@
   function report(item: ReviewItem, v: DocumentVersion): void {
     notices = [`${name(item)}: saved as version ${v.version}.`];
     failures = [];
+    justApproved = item.appId;
     if (editing === item.appId) editing = null;
   }
 
   async function act(fn: () => Promise<void>): Promise<void> {
     busy = true;
+    justApproved = null;
     try {
       await fn();
     } catch (err) {
@@ -40,6 +44,16 @@
     } finally {
       busy = false;
     }
+  }
+
+  /** Acts on the just-approved letter; the ID is read now, before act() clears it. */
+  function withApproved(fn: (appId: number) => Promise<void>): void {
+    const id = justApproved;
+    if (id === null) return;
+    void act(async () => {
+      await fn(id);
+      justApproved = id; // keep the buttons after opening
+    });
   }
 
   const approve = (item: ReviewItem): Promise<void> =>
@@ -77,6 +91,14 @@
   {#if notices.length > 0 || failures.length > 0}
     <div role="status">
       {#each notices as n, i (i)}<p class="notice">{n}</p>{/each}
+      {#if justApproved !== null}
+        <div class="actions">
+          <button type="button" class="secondary" onclick={() => withApproved(api.openLetter)}>Open</button>
+          <button type="button" class="secondary" onclick={() => withApproved(api.showLetterFolder)}>
+            Show in folder
+          </button>
+        </div>
+      {/if}
       {#each failures as f, i (i)}<p class="error">{f}</p>{/each}
     </div>
   {/if}

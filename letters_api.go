@@ -1,6 +1,8 @@
 package main
 
 import (
+	"path/filepath"
+
 	"github.com/bot-bbio/legaj/internal/apperr"
 	"github.com/bot-bbio/legaj/internal/documents"
 	"github.com/bot-bbio/legaj/internal/jobs"
@@ -187,4 +189,32 @@ func (l *LettersAPI) Dismiss(appID int64) error {
 	}
 	svc.Jobs.Dismiss([]int64{appID})
 	return nil
+}
+
+// OpenLetter opens an application's newest approved letter in the PDF
+// viewer (R22).
+func (l *LettersAPI) OpenLetter(appID int64) error {
+	c, svc, err := l.app.services()
+	if err != nil {
+		return err
+	}
+	path, err := svc.Documents.LatestFor(l.app.ctx, appID)
+	if err != nil {
+		return l.app.public("LettersAPI.OpenLetter", err)
+	}
+	return l.app.public("LettersAPI.OpenLetter", c.Opener.OpenFile(path))
+}
+
+// ShowLetterFolder opens the folder holding an application's letters in
+// File Explorer, ready to attach on an employer's site.
+func (l *LettersAPI) ShowLetterFolder(appID int64) error {
+	c, svc, err := l.app.services()
+	if err != nil {
+		return err
+	}
+	path, err := svc.Documents.LatestFor(l.app.ctx, appID)
+	if err != nil {
+		return l.app.public("LettersAPI.ShowLetterFolder", err)
+	}
+	return l.app.public("LettersAPI.ShowLetterFolder", c.Opener.OpenFolder(filepath.Dir(path)))
 }

@@ -119,6 +119,10 @@ export const api = {
   regenerateParagraph: (appId: number, part: DraftPart, index: number): Promise<Draft> =>
     LettersAPI.RegenerateParagraph(appId, part, index),
   approveLetter: (appId: number): Promise<DocumentVersion> => LettersAPI.ApproveLetter(appId),
+  /** Opens the newest approved letter (PDF) in the default viewer. */
+  openLetter: (appId: number): Promise<void> => LettersAPI.OpenLetter(appId),
+  /** Opens the folder holding an application's letters, to attach one on a job site. */
+  showLetterFolder: (appId: number): Promise<void> => LettersAPI.ShowLetterFolder(appId),
   generateLetters: (appIds: number[]): Promise<GenerateResult> => LettersAPI.Generate(appIds),
   approveAll: (appIds: number[]): Promise<ApproveAllResult> => LettersAPI.ApproveAll(appIds),
   reviewQueue: (): Promise<ReviewItem[]> => LettersAPI.ReviewQueue(),

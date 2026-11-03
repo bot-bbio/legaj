@@ -94,6 +94,23 @@ func (o *Opener) OpenFile(path string) error {
 	return o.run(path)
 }
 
+// OpenFolder opens a folder inside the data folder in File Explorer, so the
+// user can attach a letter on an employer's site (R22).
+func (o *Opener) OpenFolder(path string) error {
+	if !filepath.IsAbs(path) {
+		return badFile()
+	}
+	path = filepath.Clean(path)
+	if !apphome.Within(path, o.dataDir) || strings.EqualFold(path, filepath.Clean(o.dataDir)) {
+		return badFile()
+	}
+	fi, err := os.Stat(path)
+	if err != nil || !fi.IsDir() {
+		return apperr.New(apperr.CodeNotFound, "That folder is no longer in LeGaJ's folder.")
+	}
+	return o.run(path)
+}
+
 func (o *Opener) run(target string) error {
 	if err := o.launch.Launch(target); err != nil {
 		return apperr.Wrap(err, apperr.CodeInternal, "Windows couldn't open that. Check that a browser or PDF viewer is installed.")

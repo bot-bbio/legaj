@@ -44,3 +44,46 @@ func (f *FollowupsAPI) Due() ([]DueView, error) {
 	}
 	return out, nil
 }
+
+// Draft returns the saved or freshly rendered draft for a follow-up (R27).
+func (f *FollowupsAPI) Draft(kind string, appID, roundID int64) (followups.DraftView, error) {
+	_, svc, err := f.app.services()
+	if err != nil {
+		return followups.DraftView{}, err
+	}
+	d, err := svc.Followups.Draft(f.app.ctx, followups.Kind(kind), appID, roundID)
+	return d, f.app.public("FollowupsAPI.Draft", err)
+}
+
+// SaveDraft stores the user's edits and re-checks the draft.
+func (f *FollowupsAPI) SaveDraft(in followups.DraftInput) (followups.DraftView, error) {
+	_, svc, err := f.app.services()
+	if err != nil {
+		return followups.DraftView{}, err
+	}
+	d, err := svc.Followups.SaveDraft(f.app.ctx, in)
+	return d, f.app.public("FollowupsAPI.SaveDraft", err)
+}
+
+// OpenCompose saves the draft and opens a compose window in the chosen
+// mail client (R29). Nothing is sent: the user presses Send there.
+func (f *FollowupsAPI) OpenCompose(in followups.DraftInput, client string) error {
+	c, svc, err := f.app.services()
+	if err != nil {
+		return err
+	}
+	link, err := svc.Followups.Compose(f.app.ctx, in, followups.Client(client))
+	if err != nil {
+		return f.app.public("FollowupsAPI.OpenCompose", err)
+	}
+	return f.app.public("FollowupsAPI.OpenCompose", c.Opener.OpenURL(link))
+}
+
+// Log records the answer to "Sent?": sent or skipped (R29).
+func (f *FollowupsAPI) Log(in followups.DraftInput, status string) error {
+	_, svc, err := f.app.services()
+	if err != nil {
+		return err
+	}
+	return f.app.public("FollowupsAPI.Log", svc.Followups.Log(f.app.ctx, in, status))
+}

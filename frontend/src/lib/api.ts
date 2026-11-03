@@ -13,6 +13,7 @@ import * as ProfileAPI from '../../wailsjs/go/main/ProfileAPI';
 import * as SettingsAPI from '../../wailsjs/go/main/SettingsAPI';
 import { ClipboardSetText } from '../../wailsjs/runtime/runtime';
 import {
+  followups,
   letters,
   profile,
   type answers,
@@ -60,6 +61,10 @@ export type ApproveAllResult = Plain<letters.ApproveAllResult>;
 export type Answer = Plain<answers.Answer>;
 export type Suggestion = Plain<answers.Suggestion>;
 export type DueView = Plain<main.DueView>;
+export type FollowupDraft = Plain<followups.DraftView>;
+export type FollowupInput = Plain<followups.DraftInput>;
+export type FollowupKind = 'applied_nudge' | 'thank_you';
+export type MailClient = 'gmail' | 'outlook' | 'outlook365' | 'mailto';
 export type PasteInput = Plain<pipeline.PasteInput>;
 export type PasteResult = Plain<pipeline.PasteResult>;
 export type Stage = 'lead' | 'ready' | 'applied' | 'interviewing' | 'offer' | 'rejected' | 'withdrawn';
@@ -118,6 +123,15 @@ export const api = {
   removeFromBank: (id: number): Promise<void> => AnswersAPI.RemoveFromBank(id),
 
   followupsDue: (): Promise<DueView[]> => FollowupsAPI.Due(),
+  followupDraft: (kind: FollowupKind, appId: number, roundId: number): Promise<FollowupDraft> =>
+    FollowupsAPI.Draft(kind, appId, roundId),
+  saveFollowupDraft: (d: FollowupInput): Promise<FollowupDraft> =>
+    FollowupsAPI.SaveDraft(followups.DraftInput.createFrom(d)),
+  /** Opens a compose window in the user's mail client; nothing is sent from LeGaJ (D10). */
+  openCompose: (d: FollowupInput, client: MailClient): Promise<void> =>
+    FollowupsAPI.OpenCompose(followups.DraftInput.createFrom(d), client),
+  logFollowup: (d: FollowupInput, status: 'sent' | 'skipped'): Promise<void> =>
+    FollowupsAPI.Log(followups.DraftInput.createFrom(d), status),
 
   /** Puts text on the system clipboard through the Wails runtime. */
   copyText: async (text: string): Promise<void> => {

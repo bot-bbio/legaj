@@ -2,6 +2,7 @@
   import Nav from './components/Nav.svelte';
   import SetupChecklist from './components/SetupChecklist.svelte';
   import StartupGate from './components/StartupGate.svelte';
+  import UpdateBanner from './components/UpdateBanner.svelte';
   import { onboardingStore, openWizard, wizard } from './lib/stores/onboarding';
   import { navigate, route } from './lib/stores/route';
   import FollowUps from './views/FollowUps.svelte';
@@ -35,6 +36,7 @@
     <div class="shell">
       <Nav active={$route} onselect={navigate} />
       <main>
+        <UpdateBanner />
         <SetupChecklist />
         {#if $route === 'profile'}
           <Profile />

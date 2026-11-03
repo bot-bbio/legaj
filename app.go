@@ -13,6 +13,7 @@ import (
 	"github.com/bot-bbio/legaj/internal/apphome"
 	"github.com/bot-bbio/legaj/internal/core"
 	"github.com/bot-bbio/legaj/internal/store"
+	"github.com/bot-bbio/legaj/internal/update"
 )
 
 // version is overridden at release time with -ldflags "-X main.version=…".
@@ -25,6 +26,9 @@ type App struct {
 	booted chan struct{} // closed once startup has run
 	// pickFile shows the native open-file dialog; tests replace it.
 	pickFile func(ctx context.Context) (string, error)
+	// updates asks GitHub for a newer release (R40); tests replace it, so
+	// no test ever reaches the network.
+	updates updateChecker
 
 	mu    sync.Mutex
 	core  *core.Core
@@ -33,7 +37,9 @@ type App struct {
 
 // NewApp creates the bound app object.
 func NewApp() *App {
-	return &App{booted: make(chan struct{}), pickFile: pickResumeFile}
+	a := &App{booted: make(chan struct{}), pickFile: pickResumeFile}
+	a.updates = update.New(update.Config{Current: version, Enabled: a.updateEnabled})
+	return a
 }
 
 // log returns the core's logger, or a discarding one before boot.

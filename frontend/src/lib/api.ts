@@ -25,6 +25,7 @@ import {
   type pipeline,
   type settings,
   type store,
+  type update,
 } from '../../wailsjs/go/models';
 
 /** The data fields of a generated model class (deeply), without its helper methods. */
@@ -72,6 +73,7 @@ export type RoundView = Plain<main.RoundView>;
 export type RoundLists = Plain<main.RoundLists>;
 export type RoundInput = Plain<interviews.RoundInput>;
 export type Interviewer = Plain<store.Interviewer>;
+export type UpdateResult = Plain<update.Result>;
 export type PasteInput = Plain<pipeline.PasteInput>;
 export type PasteResult = Plain<pipeline.PasteResult>;
 export type Stage = 'lead' | 'ready' | 'applied' | 'interviewing' | 'offer' | 'rejected' | 'withdrawn';
@@ -82,6 +84,8 @@ export const api = {
   quit: (): Promise<void> => App.Quit(),
   version: (): Promise<string> => App.Version(),
   openURL: (link: string): Promise<void> => App.OpenURL(link),
+  /** Notify-only release check (R40); no request when Settings turns it off. */
+  checkForUpdate: (): Promise<UpdateResult> => App.CheckForUpdate(),
 
   getSettings: (): Promise<SettingsView> => SettingsAPI.GetSettings(),
   saveSettings: (s: Settings): Promise<SettingsView> => SettingsAPI.SaveSettings(s),

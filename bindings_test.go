@@ -16,6 +16,7 @@ import (
 	"github.com/bot-bbio/legaj/internal/pipeline"
 	"github.com/bot-bbio/legaj/internal/secrets"
 	"github.com/bot-bbio/legaj/internal/testenv"
+	"github.com/bot-bbio/legaj/internal/update"
 )
 
 func TestMain(m *testing.M) { testenv.Main(m) }
@@ -43,6 +44,11 @@ func newTestApp(t *testing.T) (*App, *secrets.Memory) {
 	return app, keys
 }
 
+// noUpdates is the update checker for tests: never a request, never an update.
+type noUpdates struct{}
+
+func (noUpdates) Check(context.Context) (update.Result, error) { return update.Result{}, nil }
+
 func newTestAppWithLaunches(t *testing.T) (*App, *secrets.Memory, *launches) {
 	t.Helper()
 	keys := secrets.NewMemory()
@@ -61,6 +67,8 @@ func newTestAppWithLaunches(t *testing.T) (*App, *secrets.Memory, *launches) {
 	app.ctx = context.Background()
 	// Never open a real Windows dialog from a test: "user cancelled".
 	app.pickFile = func(context.Context) (string, error) { return "", nil }
+	// Never reach GitHub from a test.
+	app.updates = noUpdates{}
 	app.setStartup(c, toStartupView(st))
 	close(app.booted)
 	return app, keys, opened

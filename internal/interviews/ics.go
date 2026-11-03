@@ -60,14 +60,18 @@ func ICS(r Round, stamp time.Time) []byte {
 		"CALSCALE:GREGORIAN",
 		"METHOD:PUBLISH",
 		"BEGIN:VEVENT",
-		fmt.Sprintf("UID:legaj-round-%d-%d@legaj.app", r.ID, r.Created.UnixMilli()),
+		uid(r),
 		"DTSTAMP:" + stamp.UTC().Format(utc),
-		fmt.Sprintf("SEQUENCE:%d", max(0, int64(r.Updated.Sub(r.Created)/time.Second))),
-		"LAST-MODIFIED:" + r.Updated.UTC().Format(utc),
-		"DTSTART:" + r.StartsAt.UTC().Format(utc),
-		"DTEND:" + r.EndsAt.UTC().Format(utc),
-		"SUMMARY:" + summary + escapeText(about),
+		fmt.Sprintf("SEQUENCE:%d", sequence(r)),
 	}
+	if !r.Updated.IsZero() {
+		lines = append(lines, "LAST-MODIFIED:"+r.Updated.UTC().Format(utc))
+	}
+	lines = append(lines,
+		"DTSTART:"+r.StartsAt.UTC().Format(utc),
+		"DTEND:"+r.EndsAt.UTC().Format(utc),
+		"SUMMARY:"+summary+escapeText(about),
+	)
 	if r.Location != "" {
 		lines = append(lines, "LOCATION:"+escapeText(r.Location))
 	}
@@ -81,6 +85,23 @@ func ICS(r Round, stamp time.Time) []byte {
 		fold(&b, l)
 	}
 	return []byte(b.String())
+}
+
+// uid is the round's stable calendar identity. A round without a creation
+// time (written before timestamps were kept) uses its row ID alone.
+func uid(r Round) string {
+	if r.Created.IsZero() {
+		return fmt.Sprintf("UID:legaj-round-%d@legaj.app", r.ID)
+	}
+	return fmt.Sprintf("UID:legaj-round-%d-%d@legaj.app", r.ID, r.Created.UnixMilli())
+}
+
+// sequence rises with each edit: seconds from creation to the last edit.
+func sequence(r Round) int64 {
+	if r.Created.IsZero() || r.Updated.IsZero() {
+		return 0
+	}
+	return max(0, int64(r.Updated.Sub(r.Created)/time.Second))
 }
 
 // escapeText escapes a TEXT value (RFC 5545 3.3.11).

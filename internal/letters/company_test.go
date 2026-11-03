@@ -96,3 +96,34 @@ func TestR21_PlaceholderRuleLeavesTechnicalTextAlone(t *testing.T) {
 		}
 	}
 }
+
+func TestR21_CommonWordCompaniesDontTripOrdinaryProse(t *testing.T) {
+	rule := letters.NewCompanyRule("Acme", []string{"Ramp", "Box", "Notion"}, nil)
+	for _, ok := range []string{
+		"I can ramp up quickly at Acme.",
+		"I think out of the box.",
+		"The notion of craft matters to me.",
+	} {
+		if w := rule.Wrong(ok); w != "" {
+			t.Errorf("%q flagged as naming %q", ok, w)
+		}
+	}
+	for _, bad := range []string{"Ramp's product drew me in.", "I'd love to join Box.", "At Notion, docs are the product."} {
+		if rule.Wrong(bad) == "" {
+			t.Errorf("%q not flagged", bad)
+		}
+	}
+}
+
+func TestR21_LowercaseTemplateTagsAreStillPlaceholders(t *testing.T) {
+	for _, bad := range []string{"Dear <hiring manager>,", "I want to join <company name>.", "Regards, <your name>"} {
+		if letters.FindPlaceholder(bad) == "" {
+			t.Errorf("%q not flagged", bad)
+		}
+	}
+	for _, ok := range []string{"std::vector<int>", "map<string, int>", "<10ms"} {
+		if m := letters.FindPlaceholder(ok); m != "" {
+			t.Errorf("%q flagged %q", ok, m)
+		}
+	}
+}

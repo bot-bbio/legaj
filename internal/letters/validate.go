@@ -48,9 +48,12 @@ func decodeAnswer(text string) (answer, error) {
 
 // placeholder matches template leftovers (U7, A10): words in square
 // brackets ("[Hiring Manager]"), capitalised tags ("<Company>",
-// "<Your Name>"), {{mustaches}} and "Hiring Manager Name". Technical text
+// "<Your Name>"), lower-case tags of template words ("<hiring manager>",
+// "<company name>"), {{mustaches}} and "Hiring Manager Name". Technical text
 // such as "std::vector<int>", "<10ms" or a "[1]" citation isn't one.
-var placeholder = regexp.MustCompile(`\[[A-Za-z][^\[\]\n]{0,40}\]|\{\{|\}\}|<[A-Z][A-Za-z .'-]{1,40}>|(?i)hiring manager name`)
+var placeholder = regexp.MustCompile(`\[[A-Za-z][^\[\]\n]{0,40}\]|\{\{|\}\}|<[A-Z][A-Za-z .'-]{1,40}>|` +
+	`(?i:<[a-z .'-]{0,30}\b(?:company|name|position|role|title|manager|recipient|date|address|city|hiring|your|job)\b[a-z .'-]{0,30}>)|` +
+	`(?i:hiring manager name)`)
 
 // FindPlaceholder returns the first template leftover in s, or "". Form
 // answers (R25) use the same rule as letters.

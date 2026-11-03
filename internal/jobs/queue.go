@@ -186,6 +186,7 @@ func (q *Queue) CancelApps(appIDs []int64) {
 		}
 	}
 	q.pending = slices.DeleteFunc(q.pending, func(j *Job) bool { return j.Status == Cancelled })
+	q.pruneLocked()
 	q.mu.Unlock()
 	if len(touched) > 0 {
 		q.emit(touched...)

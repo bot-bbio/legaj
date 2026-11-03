@@ -239,15 +239,18 @@ var errNoLetter = apperr.New(apperr.CodeNotFound, "This application has no appro
 // LatestFor returns an application's newest approved letter as an
 // absolute path, for opening it or its folder.
 func (s *Service) LatestFor(ctx context.Context, appID int64) (string, error) {
-	all, err := s.Latest(ctx)
-	if err != nil {
-		return "", err
-	}
-	v, ok := all[appID]
-	if !ok || v.Path == "" {
+	var path sql.NullString
+	err := s.db.Reader().QueryRowContext(ctx, `SELECT d.file_path FROM documents d
+		JOIN applications a ON a.id = d.application_id
+		WHERE d.application_id = ? AND d.kind = 'letter' AND d.status = 'approved' AND a.deleted_at IS NULL
+		ORDER BY d.version DESC LIMIT 1`, appID).Scan(&path)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && path.String == "") {
 		return "", errNoLetter
 	}
-	return s.abs(v.Path), nil
+	if err != nil {
+		return "", readErr(err)
+	}
+	return s.abs(path.String), nil
 }
 
 func readErr(err error) error {

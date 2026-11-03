@@ -2,8 +2,7 @@ package letters
 
 import (
 	"context"
-	"database/sql"
-	"errors"
+	"encoding/json"
 	"time"
 
 	"github.com/bot-bbio/legaj/internal/apperr"
@@ -106,20 +105,42 @@ func readErr(err error) error {
 func (s *Service) Eligible(ctx context.Context, appIDs []int64) ([]int64, []Failure, error) {
 	ok := []int64{}
 	skipped := []Failure{}
+	type row struct{ stage, materials string }
+	found := map[int64]row{}
+	if len(appIDs) > 0 {
+		ids, err := json.Marshal(appIDs)
+		if err != nil {
+			return nil, nil, apperr.Wrap(err, apperr.CodeInternal, apperr.GenericMessage)
+		}
+		rows, err := s.cfg.DB.Reader().QueryContext(ctx, `SELECT id, stage, materials FROM applications
+			WHERE deleted_at IS NULL AND id IN (SELECT value FROM json_each(?))`, string(ids))
+		if err != nil {
+			return nil, nil, readErr(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id int64
+			var r row
+			if err := rows.Scan(&id, &r.stage, &r.materials); err != nil {
+				return nil, nil, readErr(err)
+			}
+			found[id] = r
+		}
+		if err := rows.Err(); err != nil {
+			return nil, nil, readErr(err)
+		}
+	}
 	seen := map[int64]bool{}
 	for _, id := range appIDs {
 		if seen[id] {
 			continue
 		}
 		seen[id] = true
-		var stage, materials string
-		err := s.cfg.DB.Reader().QueryRowContext(ctx, `SELECT stage, materials FROM applications
-			WHERE id = ? AND deleted_at IS NULL`, id).Scan(&stage, &materials)
+		r, live := found[id]
+		stage, materials := r.stage, r.materials
 		switch {
-		case errors.Is(err, sql.ErrNoRows):
+		case !live:
 			skipped = append(skipped, Failure{AppID: id, Reason: "That application no longer exists."})
-		case err != nil:
-			return nil, nil, readErr(err)
 		case stage != string(store.StageLead) && stage != string(store.StageReady):
 			skipped = append(skipped, Failure{AppID: id, Reason: "Letters are drafted for Lead and Ready applications only."})
 		case materials == string(store.MaterialsAnswers):

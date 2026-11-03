@@ -95,3 +95,12 @@ func TestR31_UIDIsUniqueAcrossReinstallsAndEditsRaiseSequence(t *testing.T) {
 		t.Fatal("an edit must raise SEQUENCE")
 	}
 }
+
+func TestR31_RoundWithoutTimestampsStillExportsSanely(t *testing.T) {
+	r := goldenRound()
+	r.Created, r.Updated = time.Time{}, time.Time{}
+	out := string(interviews.ICS(r, time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)))
+	if !strings.Contains(out, "UID:legaj-round-42@legaj.app\r\n") || !strings.Contains(out, "SEQUENCE:0\r\n") || strings.Contains(out, "LAST-MODIFIED:0001") {
+		t.Fatalf("export without timestamps:\n%s", out)
+	}
+}

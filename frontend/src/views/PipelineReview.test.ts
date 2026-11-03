@@ -174,3 +174,27 @@ describe('R23/R43 generate and review inside Pipeline', () => {
     expect(api.showLetterFolder).toHaveBeenCalledWith(8);
   });
 });
+
+describe('R22 open after approval', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    listeners.clear();
+    api.listApplications.mockResolvedValue([row(8, 'Globex', 'lead')]);
+    api.reviewQueue.mockResolvedValue([item(8, 'Globex', 'draft')]);
+    api.approveLetter.mockImplementation((id) => Promise.resolve({ documentId: 1, appId: id, version: 1, path: 'p' }));
+  });
+
+  it('keeps Open and Show in folder after a failed open, so the user can retry', async () => {
+    const user = userEvent.setup();
+    api.openLetter.mockRejectedValueOnce('Windows couldn’t open that. Check that a PDF viewer is installed.');
+    render(Pipeline);
+    await user.click(await screen.findByRole('button', { name: /^review/i }));
+    const panel = await screen.findByRole('complementary', { name: /review/i });
+    const entry = await within(panel).findByRole('listitem', { name: /globex/i });
+    await user.click(within(entry).getByRole('button', { name: /^approve$/i }));
+    await user.click(await within(panel).findByRole('button', { name: /^open$/i }));
+    expect(await within(panel).findByText(/pdf viewer/i)).toBeInTheDocument();
+    await user.click(within(panel).getByRole('button', { name: /^open$/i }));
+    expect(api.openLetter).toHaveBeenCalledTimes(2);
+  });
+});

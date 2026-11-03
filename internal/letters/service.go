@@ -98,10 +98,14 @@ func (s *Service) Draft(ctx context.Context, appID int64) (Draft, error) {
 		return Draft{}, apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't prepare the letter.")
 	}
 
+	rule, err := LoadCompanyRule(ctx, s.cfg.DB, app, p)
+	if err != nil {
+		return Draft{}, err
+	}
 	var a answer
 	reason := ""
 	for attempt := 1; attempt <= 2; attempt++ {
-		a, reason, err = s.attempt(ctx, app, p, style, reason)
+		a, reason, err = s.attempt(ctx, app, p, style, rule, reason)
 		if err != nil {
 			return Draft{}, err
 		}
@@ -127,7 +131,7 @@ func (s *Service) Draft(ctx context.Context, appID int64) (Draft, error) {
 
 // attempt makes one AI call. A schema failure or a failed check comes back
 // as a reason to retry; any other error is returned as is.
-func (s *Service) attempt(ctx context.Context, app store.Application, p profile.Profile, style Style, retryReason string) (answer, string, error) {
+func (s *Service) attempt(ctx context.Context, app store.Application, p profile.Profile, style Style, rule CompanyRule, retryReason string) (answer, string, error) {
 	prompt, err := userPrompt(app, p, style, retryReason)
 	if err != nil {
 		return answer{}, "", apperr.Wrap(err, apperr.CodeInternal, apperr.GenericMessage)
@@ -146,10 +150,6 @@ func (s *Service) attempt(ctx context.Context, app store.Application, p profile.
 	a, err := decodeAnswer(resp.Text)
 	if err != nil {
 		return answer{}, "it wasn't the expected JSON.", nil
-	}
-	rule, err := LoadCompanyRule(ctx, s.cfg.DB, app, p)
-	if err != nil {
-		return answer{}, "", err
 	}
 	return a, check(a, app.Company, rule), nil
 }

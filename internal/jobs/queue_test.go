@@ -328,3 +328,27 @@ func TestR23_FinishedJobsDontPileUp(t *testing.T) {
 		t.Fatalf("%d finished jobs kept, want at most %d", len(all)-failed, jobs.MaxFinished)
 	}
 }
+
+func TestR23_CancelledPendingJobsArePrunedToo(t *testing.T) {
+	block := make(chan struct{})
+	q := newQueue(t, func(ctx context.Context, appID int64) error {
+		select {
+		case <-block:
+		case <-ctx.Done():
+		}
+		return nil
+	}, &events.Recorder{})
+	for round := 0; round < 3; round++ {
+		var ids []int64
+		for i := int64(1); i <= 150; i++ {
+			ids = append(ids, int64(round)*1000+i)
+		}
+		q.Enqueue(ids)
+		q.CancelApps(ids)
+	}
+	close(block)
+	waitIdle(t, q)
+	if n := len(q.List()); n > jobs.MaxFinished {
+		t.Fatalf("%d jobs kept after cancelling pending ones, want at most %d", n, jobs.MaxFinished)
+	}
+}

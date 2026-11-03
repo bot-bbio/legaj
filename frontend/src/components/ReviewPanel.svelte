@@ -50,9 +50,10 @@
   function withApproved(fn: (appId: number) => Promise<void>): void {
     const id = justApproved;
     if (id === null) return;
-    void act(async () => {
-      await fn(id);
-      justApproved = id; // keep the buttons after opening
+    // act() clears justApproved first; bring the buttons back whatever
+    // happened, so a failed open can be retried.
+    void act(() => fn(id)).then(() => {
+      justApproved = id;
     });
   }
 

@@ -22,8 +22,11 @@ var legalSuffixes = map[string]bool{
 }
 
 // words splits text into lower-case words (runs of letters and digits).
-func words(s string) []string {
-	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+func words(s string) []string { return caseWords(strings.ToLower(s)) }
+
+// caseWords splits text into words, keeping their case.
+func caseWords(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
 }
@@ -68,7 +71,11 @@ type CompanyRule struct {
 
 type otherCompany struct {
 	name string
-	core []string
+	core []string // lower case, for comparing names
+	// exact is the core as written ("Ramp"): another company is only
+	// recognised as a proper noun, so "ramp up" or "out of the box" in
+	// ordinary prose never counts as naming Ramp or Box.
+	exact []string
 }
 
 // NewCompanyRule builds the rule. others are the pipeline's other company
@@ -104,7 +111,7 @@ func NewCompanyRule(company string, others, exempt []string) CompanyRule {
 			continue
 		}
 		seen[key] = true
-		r.others = append(r.others, otherCompany{name: strings.TrimSpace(name), core: c})
+		r.others = append(r.others, otherCompany{name: strings.TrimSpace(name), core: c, exact: caseWords(name)[:len(c)]})
 	}
 	return r
 }
@@ -115,11 +122,12 @@ func (r CompanyRule) Names(text string) bool {
 	return len(r.own) == 0 || contains(words(text), r.own)
 }
 
-// Wrong returns another pipeline company that text names, or "".
+// Wrong returns another pipeline company that text names, or "". The
+// name must appear as written (a proper noun), not just as lower-case words.
 func (r CompanyRule) Wrong(text string) string {
-	w := words(text)
+	w := caseWords(text)
 	for _, o := range r.others {
-		if contains(w, o.core) {
+		if contains(w, o.exact) {
 			return o.name
 		}
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/bot-bbio/legaj/internal/documents"
 	"github.com/bot-bbio/legaj/internal/events"
 	"github.com/bot-bbio/legaj/internal/followups"
+	"github.com/bot-bbio/legaj/internal/interviews"
 	"github.com/bot-bbio/legaj/internal/jobs"
 	"github.com/bot-bbio/legaj/internal/letters"
 	"github.com/bot-bbio/legaj/internal/logx"
@@ -100,6 +101,8 @@ type Services struct {
 	Answers *answers.Service
 	// Followups decides what's due and records what was sent (R27-R29).
 	Followups *followups.Service
+	// Interviews keeps interview rounds (R30-R32).
+	Interviews *interviews.Service
 }
 
 // geminiKeyTester makes one tiny call with the candidate key. Any 200
@@ -275,6 +278,7 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 	svc.Followups = followups.NewService(followups.Config{
 		DB: db, Bus: c.Bus, Now: c.Now, Days: svc.followUpDays, Profile: svc.Profile,
 	})
+	svc.Interviews = interviews.NewService(interviews.Config{DB: db, Bus: c.Bus, Machine: svc.Stages, Now: c.Now})
 	svc.Jobs.Start(context.Background())
 	// Deleting rows cancels their queued and running generation (R13).
 	svc.Pipeline.OnDelete(svc.Jobs.CancelApps)

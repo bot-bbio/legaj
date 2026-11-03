@@ -2,6 +2,8 @@ package letters
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/bot-bbio/legaj/internal/apperr"
@@ -96,4 +98,35 @@ func (s *Service) Pending(ctx context.Context) ([]Pending, error) {
 
 func readErr(err error) error {
 	return apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't read the review queue.")
+}
+
+// Eligible splits applications into those that get a letter generated and
+// those skipped, with the reason (R23): only live rows in Lead or Ready
+// whose materials include a letter, the same rule as the per-row button.
+func (s *Service) Eligible(ctx context.Context, appIDs []int64) ([]int64, []Failure, error) {
+	ok := []int64{}
+	skipped := []Failure{}
+	seen := map[int64]bool{}
+	for _, id := range appIDs {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		var stage, materials string
+		err := s.cfg.DB.Reader().QueryRowContext(ctx, `SELECT stage, materials FROM applications
+			WHERE id = ? AND deleted_at IS NULL`, id).Scan(&stage, &materials)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			skipped = append(skipped, Failure{AppID: id, Reason: "That application no longer exists."})
+		case err != nil:
+			return nil, nil, readErr(err)
+		case stage != string(store.StageLead) && stage != string(store.StageReady):
+			skipped = append(skipped, Failure{AppID: id, Reason: "Letters are drafted for Lead and Ready applications only."})
+		case materials == string(store.MaterialsAnswers):
+			skipped = append(skipped, Failure{AppID: id, Reason: "Its materials are form answers only, without a letter."})
+		default:
+			ok = append(ok, id)
+		}
+	}
+	return ok, skipped, nil
 }

@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
 	"github.com/bot-bbio/legaj/internal/jobs"
 	"github.com/bot-bbio/legaj/internal/letters"
+	"github.com/bot-bbio/legaj/internal/pipeline"
 	"github.com/bot-bbio/legaj/internal/store"
 )
 
@@ -36,5 +38,44 @@ func TestR23_ReviewQueueMergesJobsAndDrafts(t *testing.T) {
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("review items:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+func TestR23_BulkGenerateSkipsRowsThatDontNeedALetter(t *testing.T) {
+	app, _, _ := newTestAppWithLaunches(t)
+	_, svc, err := app.services()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	add := func(company string) int64 {
+		res, err := svc.Pipeline.PasteJob(ctx, pipeline.PasteInput{Company: company, Role: "Dev"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.ID
+	}
+	lead, applied, answersOnly := add("Acme"), add("Globex"), add("Initech")
+	if _, err := svc.Pipeline.SetStage(ctx, []int64{applied}, store.StageApplied); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Pipeline.SetMaterials(ctx, answersOnly, store.MaterialsAnswers); err != nil {
+		t.Fatal(err)
+	}
+	res, err := (&LettersAPI{app: app}).Generate([]int64{lead, applied, answersOnly, 999})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(res.Queued) != fmt.Sprint([]int64{lead}) {
+		t.Fatalf("queued %v, want only the Lead that needs a letter", res.Queued)
+	}
+	skipped := map[int64]string{}
+	for _, s := range res.Skipped {
+		skipped[s.AppID] = s.Reason
+	}
+	for _, id := range []int64{applied, answersOnly, 999} {
+		if skipped[id] == "" {
+			t.Errorf("row %d not reported as skipped: %+v", id, res.Skipped)
+		}
 	}
 }

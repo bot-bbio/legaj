@@ -61,3 +61,12 @@ func TestR29_LongBodyWarns(t *testing.T) {
 		t.Fatalf("2,001 characters: %v", w)
 	}
 }
+
+func TestR29_TooLongForALinkIsSaidPlainly(t *testing.T) {
+	// ~6,000 Polish letters percent-encode to well over the 32 KiB link limit.
+	m := followups.Message{Subject: "Hi", Body: strings.Repeat("żółć ", 1500)}
+	_, err := followups.ComposeURL(followups.Gmail, m)
+	if apperr.CodeOf(err) != apperr.CodeInvalid || !strings.Contains(err.Error(), "too long") {
+		t.Fatalf("err = %v, want a plain 'too long' message", err)
+	}
+}

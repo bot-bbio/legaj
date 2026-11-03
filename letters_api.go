@@ -139,9 +139,11 @@ func (l *LettersAPI) ReviewQueue() ([]ReviewItem, error) {
 }
 
 // GenerateResult names the applications that got a new generation job;
-// one that was already queued or running isn't queued twice (U6).
+// one that was already queued or running isn't queued twice (U6). Rows
+// that don't need a letter are skipped, each with the reason.
 type GenerateResult struct {
-	Queued []int64 `json:"queued"`
+	Queued  []int64           `json:"queued"`
+	Skipped []letters.Failure `json:"skipped"`
 }
 
 // maxBatch bounds one bulk request from the UI.
@@ -157,8 +159,12 @@ func (l *LettersAPI) Generate(appIDs []int64) (GenerateResult, error) {
 	if len(appIDs) > maxBatch {
 		return GenerateResult{}, apperr.New(apperr.CodeInvalid, "Select at most 1,000 applications at a time.")
 	}
-	res := GenerateResult{Queued: []int64{}}
-	for _, j := range svc.Jobs.Enqueue(appIDs) {
+	eligible, skipped, err := svc.Letters.Eligible(l.app.ctx, appIDs)
+	if err != nil {
+		return GenerateResult{}, l.app.public("LettersAPI.Generate", err)
+	}
+	res := GenerateResult{Queued: []int64{}, Skipped: skipped}
+	for _, j := range svc.Jobs.Enqueue(eligible) {
 		res.Queued = append(res.Queued, j.AppID)
 	}
 	return res, nil

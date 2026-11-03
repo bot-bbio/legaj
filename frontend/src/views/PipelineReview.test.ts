@@ -69,7 +69,7 @@ describe('R23/R43 generate and review inside Pipeline', () => {
     listeners.clear();
     api.listApplications.mockResolvedValue([row(7, 'Acme', 'lead'), row(8, 'Globex', 'lead', 'answers')]);
     api.reviewQueue.mockResolvedValue([]);
-    api.generateLetters.mockImplementation((ids) => Promise.resolve({ queued: ids }));
+    api.generateLetters.mockImplementation((ids) => Promise.resolve({ queued: ids, skipped: [] }));
     api.approveLetter.mockImplementation((id) =>
       Promise.resolve({ documentId: 1, appId: id, version: 1, path: `documents/${id}_Acme/Acme_Cover_Letter_v1.pdf` }),
     );

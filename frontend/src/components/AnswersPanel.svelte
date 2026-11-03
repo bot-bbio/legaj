@@ -25,7 +25,9 @@
   let message = $state('');
   let failure = $state('');
   let suggestions = $state<Suggestion[]>([]);
-  // Typed edits of draft options, by "<answer id>:<option index>".
+  // Typed edits of draft options, by "<answer id>:<updated>:<option index>".
+  // Regenerating a question updates the same answer, so its new options
+  // (a new updated time) never show an edit typed over the old ones.
   let edits = $state<Record<string, string>>({});
 
   const name = $derived(row.company || row.role || 'this application');
@@ -81,7 +83,7 @@
       message = 'Copied.';
     });
 
-  const key = (a: Answer, i: number): string => `${a.id}:${i}`;
+  const key = (a: Answer, i: number): string => `${a.id}:${a.updated}:${i}`;
   const optionText = (a: Answer, i: number): string => edits[key(a, i)] ?? a.options[i] ?? '';
 
   const approve = (a: Answer, i: number): Promise<void> =>

@@ -47,11 +47,18 @@
    * Queue letter generation and open the Review panel beside the table,
    * where the drafts arrive (R23). One click per row (U6, R43).
    */
+  let generateNote = $state('');
+
   async function generate(ids: number[]): Promise<void> {
     openError = '';
+    generateNote = '';
     try {
-      await api.generateLetters(ids);
-      side = { kind: 'review' };
+      const r = await api.generateLetters(ids);
+      if (r.skipped.length > 0) {
+        const reasons = [...new Set(r.skipped.map((s) => s.reason))].join(' ');
+        generateNote = `${r.skipped.length} skipped: ${reasons}`;
+      }
+      if (r.queued.length > 0) side = { kind: 'review' };
     } catch (err) {
       openError = errorMessage(err);
     }
@@ -189,6 +196,7 @@
     <BulkBar ids={[...selected]} ondeleted={deleted} ongenerate={generate} />
   {/if}
   {#if openError}<p class="error" role="alert">{openError}</p>{/if}
+  {#if generateNote}<p class="muted" role="status">{generateNote}</p>{/if}
 
   {#if rows.length === 0}
     <p class="muted">No applications yet. Clip a job from your browser, or use Paste job.</p>

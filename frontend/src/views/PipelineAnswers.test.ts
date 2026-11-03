@@ -133,3 +133,34 @@ describe('R25 answers inside Pipeline', () => {
     expect(NAV_SECTIONS.map((s) => s.label)).toEqual(['Profile', 'Pipeline', 'Follow-ups', 'Interviews', 'Settings']);
   });
 });
+
+describe('R25 regenerated answers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api.listApplications.mockResolvedValue([row(7, 'Acme')]);
+    api.answerBank.mockResolvedValue([]);
+    api.suggestAnswers.mockResolvedValue([]);
+  });
+
+  it('a regenerated question shows its new options, not edits of the old ones', async () => {
+    const user = userEvent.setup();
+    api.listAnswers.mockResolvedValue([draft]);
+    const regenerated: Answer = {
+      ...draft,
+      options: ['Fresh one.', 'Fresh two.', 'Fresh three.'],
+      updated: '2026-11-02T10:00:00Z',
+    };
+    api.generateAnswers.mockImplementation(() => {
+      api.listAnswers.mockResolvedValue([regenerated]);
+      return Promise.resolve(regenerated);
+    });
+    const panel = await openAnswers(user);
+    const box = await within(panel).findByRole('textbox', { name: /option 1/i });
+    await user.clear(box);
+    await user.type(box, 'My edit of the old option.');
+    await user.type(within(panel).getByRole('textbox', { name: /^question/i }), 'Why do you want to work at Acme?');
+    await user.click(within(panel).getByRole('button', { name: /generate answers/i }));
+    expect(await within(panel).findByDisplayValue('Fresh one.')).toBeInTheDocument();
+    expect(within(panel).queryByDisplayValue('My edit of the old option.')).not.toBeInTheDocument();
+  });
+});

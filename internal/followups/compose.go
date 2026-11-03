@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/bot-bbio/legaj/internal/apperr"
+	"github.com/bot-bbio/legaj/internal/opener"
 )
 
 // Client is where the user writes email (D10): LeGaJ opens a compose
@@ -52,6 +53,18 @@ func ComposeURL(c Client, m Message) (string, error) {
 	if to != "" && (len(to) > 254 || !recipientRE.MatchString(to)) {
 		return "", apperr.New(apperr.CodeInvalid, "Enter one email address, like name@example.com, or leave it empty.")
 	}
+	u, err := composeURL(c, to, m)
+	if err != nil {
+		return "", err
+	}
+	if len(u) > opener.MaxURL {
+		return "", apperr.New(apperr.CodeInvalid,
+			"This message is too long to open as a link in your mail client. Shorten it, or copy it into an email yourself.")
+	}
+	return u, nil
+}
+
+func composeURL(c Client, to string, m Message) (string, error) {
 	q := func(pairs ...string) string {
 		var parts []string
 		for i := 0; i+1 < len(pairs); i += 2 {

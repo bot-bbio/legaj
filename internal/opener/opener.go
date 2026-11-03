@@ -26,8 +26,8 @@ type Launcher interface {
 	Launch(target string) error
 }
 
-// maxURL allows long compose links (a follow-up body, percent-encoded).
-const maxURL = 32 << 10
+// MaxURL allows long compose links (a follow-up body, percent-encoded).
+const MaxURL = 32 << 10
 
 // openableExt are the file types LeGaJ writes or stores.
 var openableExt = map[string]bool{".pdf": true, ".docx": true, ".ics": true, ".txt": true}
@@ -53,7 +53,7 @@ func badFile() error {
 
 // OpenURL opens an http, https or mailto link in the user's default app.
 func (o *Opener) OpenURL(raw string) error {
-	if raw == "" || len(raw) > maxURL || strings.IndexFunc(raw, unicode.IsControl) >= 0 {
+	if raw == "" || len(raw) > MaxURL || strings.IndexFunc(raw, unicode.IsControl) >= 0 {
 		return badLink()
 	}
 	u, err := url.Parse(raw) // lower-cases the scheme

@@ -162,6 +162,30 @@ func fromMeta(p Page) candidates {
 	return c
 }
 
+// Company cleans a company name from another source (an AI answer) and
+// checks it as if it came from the page at pageURL: "" when it isn't a
+// plausible employer there.
+func Company(name, pageURL string) string {
+	host := hostOf(pageURL)
+	c := siteFor(host).fixCompany(cleanLine(name, false))
+	if !plausibleCompany(c, host) {
+		return ""
+	}
+	return c
+}
+
+// Role cleans and checks a role the same way: "" when it isn't plausible.
+func Role(role, company, pageURL string) string {
+	r := cleanLine(role, false)
+	if !plausibleRole(r, company, hostOf(pageURL)) {
+		return ""
+	}
+	return r
+}
+
+// Location cleans a location and bounds it to MaxDetail characters.
+func Location(loc string) string { return fitDetail(cleanLine(loc, false)) }
+
 // hostOf returns the lower-case host of a page URL without "www.", or "".
 func hostOf(raw string) string {
 	u, err := url.Parse(strings.TrimSpace(raw))

@@ -18,6 +18,7 @@ import (
 	"github.com/bot-bbio/legaj/internal/ai/gemini"
 	"github.com/bot-bbio/legaj/internal/answers"
 	"github.com/bot-bbio/legaj/internal/apperr"
+	"github.com/bot-bbio/legaj/internal/clip"
 	"github.com/bot-bbio/legaj/internal/documents"
 	"github.com/bot-bbio/legaj/internal/events"
 	"github.com/bot-bbio/legaj/internal/followups"
@@ -103,6 +104,9 @@ type Services struct {
 	Followups *followups.Service
 	// Interviews keeps interview rounds (R30-R32).
 	Interviews *interviews.Service
+	// Clip saves jobs clipped from web pages and fills in missing details
+	// in the background (R19, R20). The clip server feeds it.
+	Clip *clip.Ingester
 }
 
 // geminiKeyTester makes one tiny call with the candidate key. Any 200
@@ -281,6 +285,9 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 	svc.Interviews = interviews.NewService(interviews.Config{
 		DB: db, Bus: c.Bus, Machine: svc.Stages, Now: c.Now, AI: c.AI, Profile: svc.Profile, Model: svc.model,
 	})
+	svc.Clip = clip.New(clip.Config{
+		Pipeline: svc.Pipeline, AI: c.AI, Profile: svc.Profile, Model: svc.model, Log: c.Log,
+	})
 	svc.Jobs.Start(context.Background())
 	// Deleting rows cancels their queued and running generation (R13).
 	svc.Pipeline.OnDelete(svc.Jobs.CancelApps)
@@ -376,7 +383,8 @@ func (c *Core) Close() error {
 	c.loopDone.Wait() // no backup may run against a closing database
 	var errs []error
 	if svc != nil {
-		svc.Jobs.Close() // stop generation before its database goes away
+		svc.Clip.Close() // stop enrichment and generation before their database goes away
+		svc.Jobs.Close()
 		errs = append(errs, svc.DB.Close())
 	}
 	if c.logFile != nil {

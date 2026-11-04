@@ -19,6 +19,7 @@ import (
 	"github.com/bot-bbio/legaj/internal/ai"
 	"github.com/bot-bbio/legaj/internal/ai/aitest"
 	"github.com/bot-bbio/legaj/internal/apperr"
+	"github.com/bot-bbio/legaj/internal/clip/extract"
 	"github.com/bot-bbio/legaj/internal/core"
 	"github.com/bot-bbio/legaj/internal/events"
 	"github.com/bot-bbio/legaj/internal/pipeline"
@@ -160,6 +161,32 @@ func TestR4_R34_SentinelScan(t *testing.T) {
 	if _, err := (&AnswersAPI{app: app}).Generate(pasted.ID, ""); err != nil {
 		t.Fatal(err)
 	}
+
+	// A clip from a page the user is logged into: its header shows their
+	// email and phone, and with no JSON-LD the page text becomes the
+	// description. The company is unresolved, so enrichment runs and fails
+	// on the hostile 400, which is logged.
+	svc, err := c.Ready()
+	if err != nil {
+		t.Fatal(err)
+	}
+	clipped, err := svc.Clip.Save(context.Background(), extract.Page{
+		URL: "https://careers.example.com/jobs/7", Title: "Engineer",
+		Text: "Signed in as Ada Lovelace " + sentinelEmail + " " + sentinelPhone + "\nWe are hiring an Engineer to build turbines.",
+	})
+	if err != nil || !clipped.Enriching {
+		t.Fatalf("clip: %+v %v", clipped, err)
+	}
+	logPath := filepath.Join(dir, "logs", "legaj.log")
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		if data, _ := os.ReadFile(logPath); strings.Contains(string(data), "clip enrichment failed") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the clip's enrichment never ran")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	if err := c.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +226,7 @@ func TestR4_R34_SentinelScan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"op":"SettingsAPI.SaveAPIKey"`, `"op":"PipelineAPI.SetStage"`, "resume parse failed"} {
+	for _, want := range []string{`"op":"SettingsAPI.SaveAPIKey"`, `"op":"PipelineAPI.SetStage"`, "resume parse failed", "clip enrichment failed"} {
 		if !strings.Contains(string(logs), want) {
 			t.Fatalf("the log lacks %s, so the scan proves nothing", want)
 		}

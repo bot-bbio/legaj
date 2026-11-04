@@ -159,9 +159,11 @@ func linkedIn(p Page) candidates {
 }
 
 // careersTitle matches "<role> | <company> Careers" and similar. The
-// separator needs spaces around it, so hyphenated roles stay whole.
+// separator needs spaces around it, so hyphenated roles stay whole, and
+// the role group is greedy: "Engineer - Backend | Acme Careers" splits at
+// the last separator.
 var (
-	careersSuffix = regexp.MustCompile(`(?i)^(.+?)\s+[|·–—-]\s+(.+?)\s+(?:careers|jobs|career site|job board)$`)
+	careersSuffix = regexp.MustCompile(`(?i)^(.+)\s+[|·–—-]\s+(.+?)\s+(?:careers|jobs|career site|job board)$`)
 	careersAt     = regexp.MustCompile(`(?i)^(.+?)\s+[|·–—-]\s+(?:careers|jobs)\s+(?:at|@)\s+(.+)$`)
 )
 
@@ -186,45 +188,75 @@ var generic = []string{
 	"job opportunities", "home", "sign in", "log in", "join now", "page not found", "not found",
 }
 
-// platforms are job boards and applicant-tracking systems: the site, not
-// the employer.
-var platforms = []string{
-	"linkedin", "linkedin jobs", "indeed", "indeed.com", "glassdoor", "greenhouse", "lever", "ashby",
-	"workday", "icims", "smartrecruiters", "ziprecruiter", "monster", "google", "pracuj.pl", "justjoin.it",
+// boards are job boards and applicant-tracking systems, by name, with the
+// host labels of their own sites. On those sites the name is the site, not
+// the employer; elsewhere it can be a real employer (Workday hiring on
+// workday.com).
+var boards = map[string][]string{
+	"linkedin": {"linkedin"}, "linkedin jobs": {"linkedin"}, "indeed": {"indeed"}, "indeed.com": {"indeed"},
+	"glassdoor": {"glassdoor"}, "greenhouse": {"greenhouse"}, "lever": {"lever"}, "ashby": {"ashbyhq"},
+	"workday": {"myworkdayjobs", "myworkdaysite"}, "icims": {"icims"}, "smartrecruiters": {"smartrecruiters"},
+	"ziprecruiter": {"ziprecruiter"}, "monster": {"monster"}, "pracuj.pl": {"pracuj"}, "justjoin.it": {"justjoin"},
 }
 
-func isGeneric(s string) bool {
-	l := strings.ToLower(s)
-	return slices.Contains(generic, l) || slices.Contains(platforms, l)
+// boardRule says when a job board's name is page chrome.
+type boardRule int
+
+const (
+	// boardsAllowed: JSON-LD's hiringOrganization names the employer
+	// explicitly, even when it's the board itself (LinkedIn hiring on
+	// LinkedIn).
+	boardsAllowed boardRule = iota
+	// boardsOnTheirSite: on page text, a board's name is chrome only on
+	// that board's own site.
+	boardsOnTheirSite
+	// boardsNever: a model's answer never names a board as the employer.
+	boardsNever
+)
+
+// isBoard reports whether name is a job board's, under rule, for a page on host.
+func isBoard(name, host string, rule boardRule) bool {
+	labels, ok := boards[strings.ToLower(name)]
+	switch {
+	case !ok || rule == boardsAllowed:
+		return false
+	case rule == boardsNever:
+		return true
+	}
+	hostLabels := strings.Split(host, ".")
+	return slices.ContainsFunc(labels, func(l string) bool { return slices.Contains(hostLabels, l) })
 }
+
+func isGeneric(s string) bool { return slices.Contains(generic, strings.ToLower(s)) }
 
 // hasLetterOrDigit rejects candidates made only of punctuation.
 func hasLetterOrDigit(s string) bool {
 	return strings.IndexFunc(s, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }) >= 0
 }
 
-// plausibleCompany rejects empty, over-long or generic names, links, and
-// the page's own host.
-func plausibleCompany(c, host string) bool {
+// plausibleCompany rejects empty, over-long or generic names, links, job
+// boards (see boardRule) and the page's own host. A name that is a domain
+// ("Booking.com" on jobs.booking.com) is fine.
+func plausibleCompany(c, host string, rule boardRule) bool {
 	n := utf8.RuneCountInString(c)
 	l := strings.ToLower(c)
 	switch {
-	case n < 2 || n > MaxDetail || !hasLetterOrDigit(c) || isGeneric(c):
+	case n < 2 || n > MaxDetail || !hasLetterOrDigit(c) || isGeneric(c) || isBoard(c, host, rule):
 		return false
 	case strings.ContainsAny(c, `/\`), strings.HasPrefix(l, "http:"), strings.HasPrefix(l, "https:"), strings.HasPrefix(l, "www."):
 		return false
-	case host != "" && (l == host || onDomain(host, l)):
+	case host != "" && l == host:
 		return false
 	}
 	return true
 }
 
-// plausibleRole rejects empty, over-long or generic roles, and a role that
-// is just the company's name or the host.
+// plausibleRole rejects empty, over-long or generic roles, a board's name,
+// and a role that is just the company's name or the host.
 func plausibleRole(r, company, host string) bool {
 	n := utf8.RuneCountInString(r)
 	switch {
-	case n < 2 || n > MaxDetail || !hasLetterOrDigit(r) || isGeneric(r):
+	case n < 2 || n > MaxDetail || !hasLetterOrDigit(r) || isGeneric(r) || isBoard(r, host, boardsNever):
 		return false
 	case company != "" && strings.EqualFold(r, company):
 		return false

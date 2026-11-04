@@ -116,7 +116,10 @@ var errNothingFound = apperr.New(apperr.CodeInvalid, "LeGaJ couldn't find a job 
 // already holds the same posting. It returns before any AI call.
 func (in *Ingester) Save(ctx context.Context, p extract.Page) (SaveResult, error) {
 	r := extract.Extract(p)
-	scrub := in.scrubber(ctx)
+	scrub, err := in.scrubber(ctx)
+	if err != nil {
+		return SaveResult{}, err
+	}
 	r.Company, r.Role, r.Location, r.Description = scrub(r.Company), scrub(r.Role), scrub(r.Location), scrub(r.Description)
 	p.Title = scrub(p.Title)
 	if r.Company == "" && r.Role == "" && r.Description == "" {
@@ -130,56 +133,84 @@ func (in *Ingester) Save(ctx context.Context, p extract.Page) (SaveResult, error
 	}
 	out := SaveResult{Created: res.Created, ID: res.ID, DuplicateOf: res.DuplicateOf, Company: r.Company, Role: r.Role}
 	if !res.Created {
-		return out, nil
+		// Report the stored row, which the popup will show; this clip's
+		// own reading of the page isn't saved.
+		stored, err := in.cfg.Pipeline.Get(ctx, res.ID)
+		if err != nil {
+			return SaveResult{}, err
+		}
+		out.Company, out.Role = stored.Company, stored.Role
 	}
-	out.NeedsCompany = r.Company == ""
-	if r.Company == "" || r.Role == "" {
+	out.NeedsCompany = out.Company == ""
+	// A row still missing details gets another try, e.g. after the first
+	// attempt failed or found the queue full.
+	if out.Company == "" || out.Role == "" {
 		out.Enriching = in.enqueue(job{id: res.ID, url: p.URL, title: p.Title})
 	}
 	return out, nil
 }
 
 // phoneSeparator is what may sit between the digits of a written phone
-// number: "+48 600-700-800", "(600) 700 800".
+// number: "+48 600-700-800", "(555) 123-4567".
 const phoneSeparator = `[\s().\-/]*`
 
+// phoneExtension is an extension at the end of a profile phone number,
+// which pages rarely show: "x89", "ext. 12", "wew. 3".
+var phoneExtension = regexp.MustCompile(`(?i)\s*(?:x|ext\.?|extension|wew\.?|#)\s*\d+\s*$`)
+
+var errProfileUnreadable = apperr.New(apperr.CodeStorage, "LeGaJ couldn't read your profile, so it didn't save this clip. Try again.")
+
 // scrubber returns a function that removes the user's own email and phone
-// number from clipped text. Recruiters' contact details stay. If the
-// profile can't be read, the clip is saved as is.
-func (in *Ingester) scrubber(ctx context.Context) func(string) string {
+// number from clipped text; recruiters' contact details stay. It fails
+// closed: when the profile can't be read, the clip isn't saved.
+func (in *Ingester) scrubber(ctx context.Context) (func(string) string, error) {
 	keep := func(s string) string { return s }
 	if in.cfg.Profile == nil {
-		return keep
+		return keep, nil
 	}
 	pr, err := in.cfg.Profile.Get(ctx)
 	if err != nil {
-		in.cfg.Log.Warn("profile unreadable; clip saved without scrubbing", "err", err)
-		return keep
+		in.cfg.Log.Warn("profile unreadable; clip refused", "err", err)
+		return nil, errProfileUnreadable
 	}
 	var patterns []*regexp.Regexp
 	if email := strings.TrimSpace(pr.Email); strings.Contains(email, "@") {
 		patterns = append(patterns, regexp.MustCompile(`(?i)`+regexp.QuoteMeta(email)))
 	}
-	var digits []string
-	for _, r := range pr.Phone {
-		if r >= '0' && r <= '9' {
-			digits = append(digits, string(r))
-		}
-	}
-	if len(digits) >= 7 {
-		// The national number, however it's spaced; a country code left
-		// behind ("+48") identifies no one.
-		patterns = append(patterns, regexp.MustCompile(strings.Join(digits[max(len(digits)-9, 0):], phoneSeparator)))
+	if re := phonePattern(pr.Phone); re != nil {
+		patterns = append(patterns, re)
 	}
 	if len(patterns) == 0 {
-		return keep
+		return keep, nil
 	}
 	return func(s string) string {
 		for _, re := range patterns {
 			s = re.ReplaceAllString(s, "")
 		}
 		return s
+	}, nil
+}
+
+// phonePattern matches the profile's phone number as pages write it: any
+// spacing, with or without the country code (every ending of 9 or more
+// digits, longest first), and with a national trunk "0" ("020 7946 0958"
+// for +44 20 7946 0958). Word boundaries keep it from matching the digits
+// inside a longer number. nil for numbers under 7 digits.
+func phonePattern(phone string) *regexp.Regexp {
+	var digits []string
+	for _, r := range phoneExtension.ReplaceAllString(phone, "") {
+		if r >= '0' && r <= '9' {
+			digits = append(digits, string(r))
+		}
 	}
+	if len(digits) < 7 {
+		return nil
+	}
+	var alts []string
+	for start := 0; start == 0 || len(digits)-start >= 9; start++ {
+		alts = append(alts, strings.Join(digits[start:], phoneSeparator))
+	}
+	return regexp.MustCompile(`\b(?:0` + phoneSeparator + `)?(?:` + strings.Join(alts, "|") + `)\b`)
 }
 
 func (in *Ingester) enqueue(j job) bool {
@@ -238,23 +269,13 @@ func (in *Ingester) enrich(ctx context.Context, j job) {
 func postingText(title, description string) string {
 	title = strings.Join(strings.Fields(title), " ")
 	description = strings.TrimSpace(description)
-	if len(description) > maxPosting {
-		description = truncate(description, maxPosting)
-	}
+	description = extract.TruncateBytes(description, maxPosting)
 	var b strings.Builder
 	if title != "" {
 		fmt.Fprintf(&b, "Page title: %s\n\n", title)
 	}
 	b.WriteString(description)
 	return strings.TrimSpace(letters.StripMarkers(b.String()))
-}
-
-// truncate cuts s to at most max bytes without splitting a character.
-func truncate(s string, max int) string {
-	for max > 0 && max < len(s) && s[max]&0xC0 == 0x80 {
-		max--
-	}
-	return s[:max]
 }
 
 const systemPrompt = `You read one job posting and report three facts from it: the hiring company's name, the job title, and where the job is located.
@@ -296,24 +317,24 @@ func (in *Ingester) ask(ctx context.Context, pageURL, posting, company string) (
 	if err := json.Unmarshal([]byte(resp.Text), &out); err != nil {
 		return pipeline.Found{}, apperr.Wrap(err, apperr.CodeAIInvalidOutput, "Gemini's answer wasn't in the expected format.")
 	}
+	text := normalize(posting)
 	var f pipeline.Found
-	f.Company = grounded(extract.Company(out.Company, pageURL), posting)
+	f.Company = grounded(extract.Company(out.Company, pageURL), text)
 	if company == "" {
 		company = f.Company
 	}
-	f.Role = grounded(extract.Role(out.Role, company, pageURL), posting)
-	f.Location = grounded(extract.Location(out.Location), posting)
+	f.Role = grounded(extract.Role(out.Role, company, pageURL), text)
+	f.Location = grounded(extract.Location(out.Location), text)
 	return f, nil
 }
 
-// grounded returns v when the posting contains it (ignoring case and
-// spacing), else "": a value the posting doesn't state was invented.
-func grounded(v, posting string) string {
-	if v == "" {
-		return ""
-	}
-	norm := func(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), " ")) }
-	if !strings.Contains(norm(posting), norm(v)) {
+// normalize lower-cases s and collapses its whitespace, for containment checks.
+func normalize(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), " ")) }
+
+// grounded returns v when the normalized posting text contains it, else
+// "": a value the posting doesn't state was invented.
+func grounded(v, text string) string {
+	if v == "" || !strings.Contains(text, normalize(v)) {
 		return ""
 	}
 	return v

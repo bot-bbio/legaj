@@ -27,10 +27,11 @@ func TestMain(m *testing.M) { testenv.Main(m) }
 var ctx = context.Background()
 
 type fixture struct {
-	ai *aitest.Fake
-	db *store.DB
-	p  *pipeline.Service
-	in *clip.Ingester
+	ai   *aitest.Fake
+	db   *store.DB
+	p    *pipeline.Service
+	prof *profile.Service
+	in   *clip.Ingester
 }
 
 func newFixture(t *testing.T, queue int) *fixture {
@@ -43,12 +44,12 @@ func newFixture(t *testing.T, queue int) *fixture {
 	f := &fixture{ai: &aitest.Fake{}, db: db}
 	bus := events.NewBus(&events.Recorder{})
 	f.p = pipeline.NewService(pipeline.Config{DB: db, Bus: bus, Machine: pipeline.NewMachine(time.Now)})
-	prof := profile.NewService(db, bus, time.Now)
-	if _, err := prof.Save(ctx, profile.Profile{FullName: "Ada Lovelace", Email: "Ada.Sentinel@example.com", Phone: "+48 600 700 800"}); err != nil {
+	f.prof = profile.NewService(db, bus, time.Now)
+	if _, err := f.prof.Save(ctx, profile.Profile{FullName: "Ada Lovelace", Email: "Ada.Sentinel@example.com", Phone: "+48 600 700 800"}); err != nil {
 		t.Fatal(err)
 	}
 	f.in = clip.New(clip.Config{
-		Pipeline: f.p, AI: f.ai, Profile: prof, Model: func(context.Context) string { return "gemini-test" }, QueueSize: queue,
+		Pipeline: f.p, AI: f.ai, Profile: f.prof, Model: func(context.Context) string { return "gemini-test" }, QueueSize: queue,
 	})
 	t.Cleanup(f.in.Close) // runs before the DB closes (cleanups run last-in, first-out)
 	return f
@@ -131,17 +132,24 @@ func TestR19_UnresolvedCompanyFlagged(t *testing.T) {
 
 func TestR19_SameCanonicalURLOneClip(t *testing.T) {
 	f := newFixture(t, 0)
-	f.ai.Respond = func(ai.Request) (string, error) { return reply("Contoso Ltd", "", ""), nil }
-	first, err := f.in.Save(ctx, page("https://careers.example.com/42?utm_source=x"))
+	complete := func(url string) extract.Page {
+		p := page(url)
+		p.JSONLD = []string{`{"@type":"JobPosting","title":"Data Analyst","hiringOrganization":"Contoso Ltd"}`}
+		return p
+	}
+	first, err := f.in.Save(ctx, complete("https://careers.example.com/42?utm_source=x"))
 	if err != nil || !first.Created {
 		t.Fatalf("first: %+v %v", first, err)
 	}
-	again, err := f.in.Save(ctx, page("https://careers.example.com/42/"))
-	if err != nil || again.Created || again.DuplicateOf != first.ID {
+	// A posting clipped again is one row; the stored row is complete, so
+	// nothing is asked of the AI (TestR19_ReclipRetriesEnrichment covers
+	// an incomplete one).
+	again, err := f.in.Save(ctx, complete("https://careers.example.com/42/"))
+	if err != nil || again.Created || again.DuplicateOf != first.ID || again.Company != "Contoso Ltd" {
 		t.Fatalf("second: %+v %v", again, err)
 	}
-	if again.Enriching {
-		t.Fatal("a duplicate clip queued enrichment")
+	if again.Enriching || len(f.ai.Requests()) != 0 {
+		t.Fatal("a duplicate of a complete row queued enrichment")
 	}
 	apps, _ := f.p.List(ctx)
 	if len(apps) != 1 {
@@ -287,6 +295,97 @@ func TestR34_ClipDropsTheUsersOwnContactDetails(t *testing.T) {
 	eventually(t, "the AI call", func() bool { return len(f.ai.Requests()) == 1 })
 	if prompt := f.ai.Requests()[0].Parts[0].Text; strings.Contains(strings.ToLower(prompt), "sentinel@") || strings.Contains(prompt, "700") {
 		t.Fatalf("the user's details reached the prompt:\n%s", prompt)
+	}
+}
+
+func TestR34_PhoneScrubFormats(t *testing.T) {
+	cases := []struct {
+		name, profilePhone, text, mustLose, mustKeep string
+	}{
+		{"spaced", "+48 600 700 800", "Call me: 600-700-800.", "700", "Call me:"},
+		{"glued country code", "+48 600 700 800", "tel +48600700800 now", "600700800", "now"},
+		{"digits inside another number stay", "+48 600 700 800", "Req ID 1600700800 and 6007008001", "", "1600700800 and 6007008001"},
+		{"ten-digit national number", "+1 555 123 4567", "Phone (555) 123-4567 here", "5", "here"},
+		{"extension in the profile", "555-123-4567 x89", "Phone (555) 123-4567 here", "4567", "here"},
+		{"trunk zero on the page", "+44 20 7946 0958", "Call 020 7946 0958 today", "02", "today"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t, 0)
+			if _, err := f.prof.Save(ctx, profile.Profile{FullName: "Ada Lovelace", Phone: c.profilePhone}); err != nil {
+				t.Fatal(err)
+			}
+			f.ai.Respond = func(ai.Request) (string, error) { return reply("", "", ""), nil }
+			p := page("https://careers.example.com/1")
+			p.Text = "Contoso Ltd is hiring. " + c.text
+			res, err := f.in.Save(ctx, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := f.row(t, res.ID).Description
+			if c.mustLose != "" && strings.Contains(d, c.mustLose) {
+				t.Errorf("phone left in %q", d)
+			}
+			if !strings.Contains(d, c.mustKeep) {
+				t.Errorf("posting text lost from %q (want %q)", d, c.mustKeep)
+			}
+		})
+	}
+}
+
+type brokenProfile struct{}
+
+func (brokenProfile) Get(context.Context) (profile.Profile, error) {
+	return profile.Profile{}, apperr.New(apperr.CodeStorage, "LeGaJ couldn't read your profile.")
+}
+
+func TestR34_ClipRefusedWhenProfileUnreadable(t *testing.T) {
+	// Fail closed: without the profile LeGaJ can't remove the user's own
+	// details, so it doesn't store or send the page.
+	f := newFixture(t, 0)
+	in := clip.New(clip.Config{Pipeline: f.p, AI: f.ai, Profile: brokenProfile{}, Model: func(context.Context) string { return "m" }})
+	t.Cleanup(in.Close)
+	if _, err := in.Save(ctx, page("https://careers.example.com/1")); apperr.CodeOf(err) != apperr.CodeStorage {
+		t.Fatalf("err %v, want a storage error", err)
+	}
+	if apps, _ := f.p.List(ctx); len(apps) != 0 {
+		t.Fatalf("rows %v", apps)
+	}
+	if n := len(f.ai.Requests()); n != 0 {
+		t.Fatalf("%d AI calls", n)
+	}
+}
+
+func TestR19_ReclipRetriesEnrichment(t *testing.T) {
+	f := newFixture(t, 0)
+	var mu sync.Mutex
+	answer := func(ai.Request) (string, error) { return "", apperr.New(apperr.CodeAIUnavailable, "down") }
+	f.ai.Respond = func(r ai.Request) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return answer(r)
+	}
+	first, err := f.in.Save(ctx, page("https://careers.example.com/42"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the first attempt", func() bool { return len(f.ai.Requests()) == 1 })
+	mu.Lock()
+	answer = func(ai.Request) (string, error) { return reply("Contoso Ltd", "", ""), nil }
+	mu.Unlock()
+	// The second clip of the same posting reports the stored row and tries again.
+	again, err := f.in.Save(ctx, page("https://careers.example.com/42?ref=feed"))
+	if err != nil || again.Created || again.DuplicateOf != first.ID || !again.NeedsCompany || !again.Enriching || again.Role != "Data Analyst" {
+		t.Fatalf("re-clip: %+v %v", again, err)
+	}
+	eventually(t, "the company to be filled", func() bool { return f.row(t, first.ID).Company == "Contoso Ltd" })
+	// Once complete, a re-clip reports the stored row and asks nothing.
+	done, err := f.in.Save(ctx, page("https://careers.example.com/42"))
+	if err != nil || done.Enriching || done.NeedsCompany || done.Company != "Contoso Ltd" {
+		t.Fatalf("third clip: %+v %v", done, err)
+	}
+	if n := len(f.ai.Requests()); n != 2 {
+		t.Fatalf("%d AI calls, want 2", n)
 	}
 }
 

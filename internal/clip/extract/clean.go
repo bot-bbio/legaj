@@ -41,12 +41,15 @@ func fitDetail(s string) string {
 	return strings.TrimSpace(string(r))
 }
 
-// truncateBytes cuts s to at most max bytes without splitting a character.
-func truncateBytes(s string, max int) string {
-	if len(s) <= max {
+// TruncateBytes cuts s to at most limit bytes without splitting a
+// character, and trims the cut end.
+func TruncateBytes(s string, limit int) string { return truncateBytes(s, limit) }
+
+func truncateBytes(s string, limit int) string {
+	if len(s) <= limit {
 		return s
 	}
-	cut := max
+	cut := limit
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}

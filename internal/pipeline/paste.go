@@ -35,24 +35,32 @@ type PasteResult struct {
 // already has the same canonical URL. The check and the insert run in one
 // write transaction, so two simultaneous pastes can't both create a row.
 func (s *Service) PasteJob(ctx context.Context, in PasteInput) (PasteResult, error) {
-	in.Company, in.Role, in.Location = strings.TrimSpace(in.Company), strings.TrimSpace(in.Role), strings.TrimSpace(in.Location)
-	in.URL, in.Description = strings.TrimSpace(in.URL), strings.TrimSpace(in.Description)
-	switch {
-	case in.Company == "" && in.Role == "":
+	if strings.TrimSpace(in.Company) == "" && strings.TrimSpace(in.Role) == "" {
 		return PasteResult{}, apperr.New(apperr.CodeInvalid, "Enter at least the company or the role.")
-	case utf8.RuneCountInString(in.Company) > maxDetail || utf8.RuneCountInString(in.Role) > maxDetail || utf8.RuneCountInString(in.Location) > maxDetail:
-		return PasteResult{}, apperr.New(apperr.CodeInvalid, "Company, role and location must be under 200 characters.")
-	case len(in.Description) > MaxDescription:
-		return PasteResult{}, apperr.New(apperr.CodeInvalid, "That job description is too long (over 100,000 characters).")
 	}
-	canonical, err := CanonicalURL(in.URL)
+	lead, err := leadFrom(in.URL, in.Company, in.Role, in.Location, in.Description, store.SourcePaste)
 	if err != nil {
 		return PasteResult{}, err
 	}
-	return s.addLead(ctx, NewLead{
-		Company: in.Company, Role: in.Role, Location: in.Location,
-		URL: in.URL, CanonicalURL: canonical, Description: in.Description, Source: store.SourcePaste,
-	})
+	return s.addLead(ctx, lead)
+}
+
+// leadFrom trims a pasted or clipped job, checks its field limits and
+// canonicalizes its URL. Each caller checks its own required fields first.
+func leadFrom(url, company, role, location, description string, source store.Source) (NewLead, error) {
+	l := NewLead{
+		URL: strings.TrimSpace(url), Company: strings.TrimSpace(company), Role: strings.TrimSpace(role),
+		Location: strings.TrimSpace(location), Description: strings.TrimSpace(description), Source: source,
+	}
+	switch {
+	case utf8.RuneCountInString(l.Company) > maxDetail || utf8.RuneCountInString(l.Role) > maxDetail || utf8.RuneCountInString(l.Location) > maxDetail:
+		return l, apperr.New(apperr.CodeInvalid, "Company, role and location must be under 200 characters.")
+	case len(l.Description) > MaxDescription:
+		return l, apperr.New(apperr.CodeInvalid, "That job description is too long (over 100,000 characters).")
+	}
+	var err error
+	l.CanonicalURL, err = CanonicalURL(l.URL)
+	return l, err
 }
 
 // ClipInput is a job the clipper extracted from a web page (R19). Only the
@@ -68,24 +76,14 @@ type ClipInput struct {
 // AddClip adds a clipped job as a Lead, or reports the live row that
 // already has the same canonical URL (R19: one row per posting).
 func (s *Service) AddClip(ctx context.Context, in ClipInput) (PasteResult, error) {
-	in.Company, in.Role, in.Location = strings.TrimSpace(in.Company), strings.TrimSpace(in.Role), strings.TrimSpace(in.Location)
-	in.URL, in.Description = strings.TrimSpace(in.URL), strings.TrimSpace(in.Description)
-	switch {
-	case in.URL == "":
+	if strings.TrimSpace(in.URL) == "" {
 		return PasteResult{}, apperr.New(apperr.CodeInvalid, "The clip has no page address.")
-	case utf8.RuneCountInString(in.Company) > maxDetail || utf8.RuneCountInString(in.Role) > maxDetail || utf8.RuneCountInString(in.Location) > maxDetail:
-		return PasteResult{}, apperr.New(apperr.CodeInvalid, "Company, role and location must be under 200 characters.")
-	case len(in.Description) > MaxDescription:
-		return PasteResult{}, apperr.New(apperr.CodeInvalid, "That job description is too long (over 100,000 characters).")
 	}
-	canonical, err := CanonicalURL(in.URL)
+	lead, err := leadFrom(in.URL, in.Company, in.Role, in.Location, in.Description, store.SourceClip)
 	if err != nil {
 		return PasteResult{}, err
 	}
-	return s.addLead(ctx, NewLead{
-		Company: in.Company, Role: in.Role, Location: in.Location,
-		URL: in.URL, CanonicalURL: canonical, Description: in.Description, Source: store.SourceClip,
-	})
+	return s.addLead(ctx, lead)
 }
 
 // addLead creates lead with the Settings default materials (D28), unless a

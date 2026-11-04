@@ -106,9 +106,13 @@ func Extract(p Page) Result {
 // candidate.
 func (r *Result) offer(l Layer, c candidates, s *site, host string) {
 	if r.Company == "" {
+		rule := boardsOnTheirSite
+		if l == LayerJSONLD {
+			rule = boardsAllowed
+		}
 		for _, v := range c.company {
 			v = s.fixCompany(cleanLine(v, c.markup))
-			if plausibleCompany(v, host) {
+			if plausibleCompany(v, host, rule) {
 				r.Company, r.From.Company = v, l
 				break
 			}
@@ -163,12 +167,12 @@ func fromMeta(p Page) candidates {
 }
 
 // Company cleans a company name from another source (an AI answer) and
-// checks it as if it came from the page at pageURL: "" when it isn't a
-// plausible employer there.
+// checks it as if it came from the page at pageURL, more strictly: a job
+// board's name is never accepted. "" when it isn't a plausible employer.
 func Company(name, pageURL string) string {
 	host := hostOf(pageURL)
 	c := siteFor(host).fixCompany(cleanLine(name, false))
-	if !plausibleCompany(c, host) {
+	if !plausibleCompany(c, host, boardsNever) {
 		return ""
 	}
 	return c

@@ -96,6 +96,12 @@ func TestR19_LayerOrder(t *testing.T) {
 				From: extract.Sources{Company: extract.LayerMeta, Role: extract.LayerMeta}},
 		},
 		{
+			name: "careers title with a separator inside the role",
+			page: extract.Page{URL: "https://example.com/j", Title: "Senior Engineer - Backend | Acme Careers"},
+			want: extract.Result{Company: "Acme", Role: "Senior Engineer - Backend",
+				From: extract.Sources{Company: extract.LayerMeta, Role: extract.LayerMeta}},
+		},
+		{
 			name: "nothing found",
 			page: extract.Page{URL: "https://example.com/j"},
 			want: extract.Result{},
@@ -200,6 +206,11 @@ func TestR19_GenericNamesRejected(t *testing.T) {
 		{"url as company", extract.Page{URL: "https://example.com/j", JSONLD: []string{`{"@type":"JobPosting","hiringOrganization":"https://acme.example"}`}}, "", ""},
 		{"generic heading falls through to the title", extract.Page{URL: "https://example.com/j", H1: []string{"Job details"}, Title: "Data Analyst"}, "", "Data Analyst"},
 		{"role equal to company rejected", extract.Page{URL: "https://example.com/j", JSONLD: []string{`{"@type":"JobPosting","hiringOrganization":"Contoso"}`}, H1: []string{"Contoso"}, Title: "Data Analyst"}, "Contoso", "Data Analyst"},
+		// Review fixes: real employers that share a name with a job board or a domain.
+		{"employer named in JSON-LD on its own board", extract.Page{URL: "https://www.linkedin.com/jobs/view/1", JSONLD: []string{`{"@type":"JobPosting","title":"Engineer","hiringOrganization":"LinkedIn"}`}}, "LinkedIn", "Engineer"},
+		{"board name elsewhere is an employer", extract.Page{URL: "https://www.workday.com/en-us/company/careers/1", Meta: map[string]string{"og:site_name": "Workday"}, H1: []string{"Engineer"}}, "Workday", "Engineer"},
+		{"google careers", extract.Page{URL: "https://www.google.com/about/careers/applications/jobs/results/1", JSONLD: []string{`{"@type":"JobPosting","title":"SRE","hiringOrganization":{"name":"Google"}}`}}, "Google", "SRE"},
+		{"company named like its domain", extract.Page{URL: "https://jobs.booking.com/booking/jobs/1", JSONLD: []string{`{"@type":"JobPosting","title":"Engineer","hiringOrganization":"Booking.com"}`}}, "Booking.com", "Engineer"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -208,6 +219,24 @@ func TestR19_GenericNamesRejected(t *testing.T) {
 				t.Fatalf("got company %q role %q, want %q %q", got.Company, got.Role, c.company, c.role)
 			}
 		})
+	}
+}
+
+func TestR19_CompanyCheckForOtherSources(t *testing.T) {
+	// extract.Company checks an AI answer strictly: a job board's name is
+	// never taken as the employer from a model, on any site.
+	for _, c := range []struct{ name, url, want string }{
+		{"LinkedIn", "https://careers.example.com/1", ""},
+		{"Workday", "https://www.workday.com/careers/1", ""},
+		{"Careers", "https://careers.example.com/1", ""},
+		{"  Contoso\u00a0Ltd ", "https://careers.example.com/1", "Contoso Ltd"},
+		{"2100 Contoso USA", "https://contoso.wd5.myworkdayjobs.com/x/job/1", "Contoso USA"},
+		{"Booking.com", "https://jobs.booking.com/1", "Booking.com"},
+		{"jobs.booking.com", "https://jobs.booking.com/1", ""},
+	} {
+		if got := extract.Company(c.name, c.url); got != c.want {
+			t.Errorf("Company(%q, %s) = %q, want %q", c.name, c.url, got, c.want)
+		}
 	}
 }
 

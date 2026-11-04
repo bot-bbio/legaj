@@ -3,7 +3,9 @@
 //
 // Layers run in a fixed order: JSON-LD JobPosting, then a site adapter,
 // then meta tags and headings, then the user's selection, then the page's
-// main text. Each layer only fills the fields earlier layers left empty,
+// main text; for the description a selection comes before the adapter's
+// cut of the page text (D30). Each layer only fills the fields earlier
+// layers left empty,
 // and every candidate is cleaned and checked before it's accepted, so a
 // later layer can still answer when an earlier one offers junk ("Careers",
 // a host name).
@@ -89,13 +91,20 @@ func Extract(p Page) Result {
 	s := siteFor(host)
 	var r Result
 	r.offer(LayerJSONLD, fromJSONLD(p.JSONLD), s, host)
+	var adapter candidates
 	if s != nil && s.extract != nil {
-		r.offer(LayerAdapter, s.extract(p), s, host)
+		adapter = s.extract(p)
 	}
+	// An adapter's description is a heuristic cut of the same page text the
+	// user can select from, so a real selection beats it (D30).
+	adapterDescription := adapter.description
+	adapter.description = nil
+	r.offer(LayerAdapter, adapter, s, host)
 	r.offer(LayerMeta, fromMeta(p), s, host)
 	if utf8.RuneCountInString(strings.TrimSpace(p.Selection)) >= minSelection {
 		r.offer(LayerSelection, candidates{description: []string{p.Selection}}, s, host)
 	}
+	r.offer(LayerAdapter, candidates{description: adapterDescription, markup: adapter.markup}, s, host)
 	r.offer(LayerText, candidates{description: []string{p.Text}}, s, host)
 	// A meta description is a teaser, so it's the last resort.
 	r.offer(LayerMeta, candidates{description: []string{p.Meta["description"], p.Meta["og:description"]}}, s, host)

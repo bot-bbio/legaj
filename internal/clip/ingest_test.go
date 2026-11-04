@@ -265,6 +265,7 @@ func TestR19_EnrichmentGroundsWholeWords(t *testing.T) {
 		{"whole word at the start", "Meta is hiring a Data Engineer.", "Data Engineer", "Meta", "Meta"},
 		{"whole word before punctuation", "A Data Engineer role at Contoso Ltd.", "Data Engineer", "Contoso Ltd", "Contoso Ltd"},
 		{"in the page title", "We need a Data Engineer.", "Data Engineer | Fabrikam Careers Portal", "Fabrikam", "Fabrikam"},
+		{"script written without spaces", "株式会社コントソでは、データエンジニアを募集しています。", "Data Engineer", "株式会社コントソ", "株式会社コントソ"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -310,16 +311,29 @@ func TestR19_ReclipsDontStackEnrichment(t *testing.T) {
 	if _, err := f.in.Save(ctx, later); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "the later clip's call", func() bool {
-		for _, r := range f.ai.Requests() {
-			if strings.Contains(r.Parts[0].Text, "MARKER-LATER") {
-				return true
+	seen := func(marker string) func() bool {
+		return func() bool {
+			for _, r := range f.ai.Requests() {
+				if strings.Contains(r.Parts[0].Text, marker) {
+					return true
+				}
 			}
+			return false
 		}
-		return false
-	})
-	if n := len(f.ai.Requests()); n != 2 {
-		t.Fatalf("%d AI calls, want 2 (one per row)", n)
+	}
+	eventually(t, "the later clip and the rerun", func() bool { return seen("MARKER-LATER")() && len(f.ai.Requests()) >= 3 })
+	// Everything queued so far has run once a last clip's call arrives.
+	last := page("https://careers.example.com/last")
+	last.Text = "MARKER-LAST posting for a Data Analyst."
+	if _, err := f.in.Save(ctx, last); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the last clip's call", seen("MARKER-LAST"))
+	// The re-clips arrived while the first attempt was running, so the row
+	// gets exactly one more attempt (it was still incomplete), however many
+	// re-clips there were: 2 calls for the row, 1 each for the other clips.
+	if n := len(f.ai.Requests()); n != 4 {
+		t.Fatalf("%d AI calls, want 4", n)
 	}
 }
 
@@ -381,6 +395,11 @@ func TestR34_PhoneScrubFormats(t *testing.T) {
 		{"front of a longer dashed number stays", "600 700 800", "Ref 600-700-800-900 and 900-600-700-800", "", "Ref 600-700-800-900 and 900-600-700-800"},
 		{"two numbers in the field", "+48 600 700 800, +48 22 123 45 67", "Mobile 600 700 800, desk 22 123 45 67.", "700", "Mobile"},
 		{"two numbers, the second one", "+48 600 700 800 / +48 22 123 45 67", "Desk 22 123 45 67 only.", "123", "only."},
+		// Gate 4, round 2.
+		{"country code joined by a dash", "600 700 800", "Kontakt: +48-600-700-800.", "700", "Kontakt:"},
+		{"country code glued on", "600 700 800", "Kontakt: +48600700800.", "700", "Kontakt:"},
+		{"two numbers joined by a bare slash", "+48 600 700 800/+48 22 123 45 67", "Desk 22 123 45 67 only.", "123", "only."},
+		{"two numbers separated by a space", "+48 600 700 800 +48 22 123 45 67", "Mobile 600 700 800 here.", "700", "here."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -433,6 +452,7 @@ func TestR34_ClipURLDropsTheUsersEmail(t *testing.T) {
 	for i, url := range []string{
 		"https://careers.example.com/job/7?email=ada.sentinel@example.com&ref=mail",
 		"https://careers.example.com/job/8?email=Ada.Sentinel%40example.com&ref=mail",
+		"https://careers.example.com/job/9?next=https%3A%2F%2Fats.example%2F%3Femail%3Dada.sentinel%2540example.com",
 	} {
 		res, err := f.in.Save(ctx, page(url))
 		if err != nil {
@@ -445,6 +465,15 @@ func TestR34_ClipURLDropsTheUsersEmail(t *testing.T) {
 		if !strings.HasPrefix(a.URL, "https://careers.example.com/job/") {
 			t.Fatalf("URL damaged: %s", a.URL)
 		}
+	}
+	// The page's own address is never cut by the phone scrub (the fixture
+	// user's phone is 600 700 800).
+	res, err := f.in.Save(ctx, page("https://careers.example.com/jobs/600-700-800"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := f.row(t, res.ID); a.URL != "https://careers.example.com/jobs/600-700-800" {
+		t.Fatalf("URL changed: %s", a.URL)
 	}
 }
 

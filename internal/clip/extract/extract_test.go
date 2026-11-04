@@ -325,6 +325,22 @@ func TestR19_LinkedInGuestDescriptionSlice(t *testing.T) {
 	if got.Description != "Meet the Team\nWe build ledgers." || got.From.Description != extract.LayerAdapter {
 		t.Fatalf("description (%s): %q", got.From.Description, got.Description)
 	}
+	// The Polish site (seen 2026-11-03): its consent line, then a "report
+	// this job" line, then the posting; "Show more" stays English.
+	pl := strings.Join([]string{
+		"Go Engineer", "Fabrikam", "Hasło", "Klikając Kontynuuj, aby dołączyć lub się zalogować, wyrażasz zgodę na warunki LinkedIn.",
+		"Zgłoś tę ofertę pracy", "Meet the Team", "We build ledgers.", "Show more", "Show less", "Poziom w hierarchii",
+	}, "\n")
+	got = extract.Extract(extract.Page{URL: "https://pl.linkedin.com/jobs/view/1", Text: pl})
+	if got.Description != "Meet the Team\nWe build ledgers." {
+		t.Fatalf("polish description (%s): %q", got.From.Description, got.Description)
+	}
+	// The user's own selection beats the slice (gate 4, round 2).
+	sel := strings.Repeat("The selected posting text. ", 5)
+	got = extract.Extract(extract.Page{URL: "https://www.linkedin.com/jobs/view/1", Text: text, Selection: sel})
+	if got.From.Description != extract.LayerSelection {
+		t.Fatalf("description came from %s, want the selection", got.From.Description)
+	}
 	// An unrecognised layout falls back to the page text.
 	got = extract.Extract(extract.Page{URL: "https://www.linkedin.com/jobs/view/1", Text: "Some other layout\nShow more"})
 	if got.From.Description != extract.LayerText {

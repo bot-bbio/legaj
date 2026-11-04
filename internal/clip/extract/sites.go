@@ -159,10 +159,18 @@ func linkedIn(p Page) candidates {
 	return c
 }
 
-// linkedInDescription cuts the posting out of a logged-out LinkedIn page
-// (seen 2026-11-03): sign-in prompts, each ending with a "By clicking
-// Continue to join or sign in…" line, come before it, and "Show more" /
-// "Show less" right after it. "" when the layout isn't recognised.
+// LinkedIn's sign-in consent line and "report this job" link, in English
+// and Polish, as seen on logged-out pages on 2026-11-03.
+var (
+	linkedInConsent = []string{"By clicking Continue to join or sign in", "Klikając Kontynuuj, aby dołączyć lub się zalogować"}
+	linkedInReport  = []string{"Report this job", "Zgłoś tę ofertę pracy"}
+)
+
+// linkedInDescription cuts the posting out of a logged-out LinkedIn page:
+// sign-in prompts, each ending with a consent line (sometimes followed by
+// "report this job"), come before it, and "Show more" / "Show less" (in
+// English on the Polish site too) right after it. "" when the layout
+// isn't recognised.
 func linkedInDescription(text string) string {
 	lines := strings.Split(normalizeText(text), "\n")
 	end := -1
@@ -173,9 +181,14 @@ func linkedInDescription(text string) string {
 		}
 	}
 	for i := end - 1; i >= 0; i-- {
-		if strings.HasPrefix(lines[i], "By clicking Continue to join or sign in") {
-			return strings.TrimSpace(strings.Join(lines[i+1:end], "\n"))
+		if !slices.ContainsFunc(linkedInConsent, func(c string) bool { return strings.HasPrefix(lines[i], c) }) {
+			continue
 		}
+		start := i + 1
+		for start < end && slices.Contains(linkedInReport, lines[start]) {
+			start++
+		}
+		return strings.TrimSpace(strings.Join(lines[start:end], "\n"))
 	}
 	return ""
 }

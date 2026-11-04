@@ -14,7 +14,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -66,7 +68,7 @@ type Ingester struct {
 	once   sync.Once
 
 	mu      sync.Mutex
-	pending map[int64]bool // rows queued or being enriched
+	pending map[int64]*pendingRow // rows queued or being enriched
 }
 
 // job is one row waiting for enrichment. The page title isn't stored on
@@ -86,7 +88,7 @@ func New(cfg Config) *Ingester {
 		cfg.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	in := &Ingester{cfg: cfg, queue: make(chan job, cfg.QueueSize), cancel: cancel, pending: map[int64]bool{}}
+	in := &Ingester{cfg: cfg, queue: make(chan job, cfg.QueueSize), cancel: cancel, pending: map[int64]*pendingRow{}}
 	in.done.Add(1)
 	go in.work(ctx)
 	return in
@@ -121,12 +123,12 @@ var errNothingFound = apperr.New(apperr.CodeInvalid, "LeGaJ couldn't find a job 
 // already holds the same posting. It returns before any AI call.
 func (in *Ingester) Save(ctx context.Context, p extract.Page) (SaveResult, error) {
 	r := extract.Extract(p)
-	scrub, err := in.scrubber(ctx)
+	scrub, scrubURL, err := in.scrubbers(ctx)
 	if err != nil {
 		return SaveResult{}, err
 	}
 	r.Company, r.Role, r.Location, r.Description = scrub(r.Company), scrub(r.Role), scrub(r.Location), scrub(r.Description)
-	p.Title, p.URL = scrub(p.Title), scrub(p.URL) // a link from an email can carry the address
+	p.Title, p.URL = scrub(p.Title), scrubURL(p.URL) // a link from an email can carry the address
 	if r.Company == "" && r.Role == "" && r.Description == "" {
 		return SaveResult{}, errNothingFound
 	}
@@ -165,29 +167,31 @@ var phoneExtension = regexp.MustCompile(`(?i)\s*(?:x|ext\.?|extension|wew\.?|#)\
 
 var errProfileUnreadable = apperr.New(apperr.CodeStorage, "LeGaJ couldn't read your profile, so it didn't save this clip. Try again.")
 
-// scrubber returns a function that removes the user's own email and phone
-// numbers from clipped text; recruiters' contact details stay. It fails
-// closed: when the profile can't be read, the clip isn't saved.
-func (in *Ingester) scrubber(ctx context.Context) (func(string) string, error) {
+// scrubbers return functions that remove the user's own email and phone
+// numbers from clipped text, and the email from the page's address (phone
+// digits there are more likely the job's own ID than the user's number).
+// Recruiters' contact details stay. They fail closed: when the profile
+// can't be read, the clip isn't saved.
+func (in *Ingester) scrubbers(ctx context.Context) (text, address func(string) string, err error) {
 	keep := func(s string) string { return s }
 	if in.cfg.Profile == nil {
-		return keep, nil
+		return keep, keep, nil
 	}
 	pr, err := in.cfg.Profile.Get(ctx)
 	if err != nil {
 		in.cfg.Log.Warn("profile unreadable; clip refused", "err", err)
-		return nil, errProfileUnreadable
+		return nil, nil, errProfileUnreadable
 	}
-	details := append(emailDetails(pr.Email), phoneDetails(pr.Phone)...)
-	if len(details) == 0 {
-		return keep, nil
-	}
-	return func(s string) string {
-		for _, d := range details {
-			s = d.remove(s)
+	remover := func(details []detail) func(string) string {
+		return func(s string) string {
+			for _, d := range details {
+				s = d.remove(s)
+			}
+			return s
 		}
-		return s
-	}, nil
+	}
+	email := emailDetails(pr.Email)
+	return remover(append(email, phoneDetails(pr.Phone)...)), remover(email), nil
 }
 
 // detail is one of the user's details to remove from clipped text. bounded
@@ -215,17 +219,21 @@ func (d detail) remove(s string) string {
 	return b.String()
 }
 
-// emailDetails matches the user's address as written and as a link encodes
-// it ("%40" for "@"), ignoring case, but not inside a longer address
-// ("jada@…", "…@example.com.au").
+// emailDetails matches the user's address as written and as links encode
+// it (once or twice, as nested redirect parameters do), ignoring case, but
+// not inside a longer address ("jada@…", "…@example.com.au").
 func emailDetails(email string) []detail {
 	email = strings.TrimSpace(email)
 	if !strings.Contains(email, "@") {
 		return nil
 	}
 	isLocal := func(c byte) bool { return isAlnum(c) || strings.IndexByte("._%+-", c) >= 0 }
+	isHex := func(c byte) bool { return isDigit(c) || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' }
 	bounded := func(s string, start, end int) bool {
-		if start > 0 && isLocal(s[start-1]) {
+		// A percent-encoded byte before the address ("email%3D…") ends the
+		// previous token.
+		encodedBefore := start >= 3 && s[start-3] == '%' && isHex(s[start-2]) && isHex(s[start-1])
+		if start > 0 && isLocal(s[start-1]) && !encodedBefore {
 			return false
 		}
 		if end < len(s) && (isAlnum(s[end]) || s[end] == '-') {
@@ -234,15 +242,52 @@ func emailDetails(email string) []detail {
 		// "…@example.com.au": a dot followed by more domain.
 		return !(end+1 < len(s) && s[end] == '.' && isAlnum(s[end+1]))
 	}
+	once := url.QueryEscape(email)
+	forms := []string{email, strings.ReplaceAll(email, "@", "%40"), once, url.QueryEscape(once)}
 	var out []detail
-	for _, form := range []string{email, strings.ReplaceAll(email, "@", "%40")} {
+	for i, form := range forms {
+		if slices.Contains(forms[:i], form) {
+			continue
+		}
 		out = append(out, detail{re: regexp.MustCompile(`(?i)` + regexp.QuoteMeta(form)), bounded: bounded})
 	}
 	return out
 }
 
-// phoneList splits a profile phone field holding several numbers.
-var phoneList = regexp.MustCompile(`(?i)\s*(?:[,;|\n]|\s/\s|\sor\s|\slub\s)\s*`)
+// phoneList splits a profile phone field holding several numbers;
+// phoneStart splits a part too long to be one number ("+48 600 700 800
+// +48 22 …", "600 700 800/22 …") before each "+" or at a "/".
+var (
+	phoneList  = regexp.MustCompile(`(?i)\s*(?:[,;|\n]|\s/\s|\sor\s|\slub\s)\s*`)
+	phoneStart = regexp.MustCompile(`\s*/\s*|\s+(?:\+)`)
+)
+
+// phoneNumbers lists the numbers in a profile phone field, each as digits.
+func phoneNumbers(field string) [][]string {
+	var out [][]string
+	var add func(part string, split bool)
+	add = func(part string, split bool) {
+		var digits []string
+		for _, r := range phoneExtension.ReplaceAllString(part, "") {
+			if r >= '0' && r <= '9' {
+				digits = append(digits, string(r))
+			}
+		}
+		if len(digits) > maxPhoneDigits && split {
+			for _, p := range phoneStart.Split(part, -1) {
+				add(p, false)
+			}
+			return
+		}
+		if len(digits) >= 7 {
+			out = append(out, digits[max(len(digits)-maxPhoneDigits, 0):])
+		}
+	}
+	for _, part := range phoneList.Split(field, -1) {
+		add(part, true)
+	}
+	return out
+}
 
 // maxPhoneDigits is the longest phone number there is (E.164).
 const maxPhoneDigits = 15
@@ -251,55 +296,79 @@ const maxPhoneDigits = 15
 // write it: any spacing, with or without the country code (every ending of
 // 9 or more digits, longest first), and with a national trunk "0" ("020
 // 7946 0958" for +44 20 7946 0958). A match touching more digits, directly
-// or across "-", "." or "/", is part of a longer number and stays.
+// or across "-", "." or "/", is part of a longer number and stays, unless
+// the digits before it are a "+" country code ("+48-600…", "+48600…").
 func phoneDetails(field string) []detail {
 	var out []detail
-	for _, phone := range phoneList.Split(field, -1) {
-		var digits []string
-		for _, r := range phoneExtension.ReplaceAllString(phone, "") {
-			if r >= '0' && r <= '9' {
-				digits = append(digits, string(r))
-			}
-		}
-		if len(digits) < 7 {
-			continue
-		}
-		digits = digits[max(len(digits)-maxPhoneDigits, 0):]
+	for _, digits := range phoneNumbers(field) {
 		var alts []string
 		for start := 0; start == 0 || len(digits)-start >= 9; start++ {
 			alts = append(alts, strings.Join(digits[start:], phoneSeparator))
 		}
-		re := regexp.MustCompile(`\b(?:0` + phoneSeparator + `)?(?:` + strings.Join(alts, "|") + `)\b`)
+		re := regexp.MustCompile(`(?:0` + phoneSeparator + `)?(?:` + strings.Join(alts, "|") + `)`)
 		out = append(out, detail{re: re, bounded: phoneBounded})
 	}
 	return out
 }
 
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+
+func isPhoneJoin(c byte) bool { return c == '-' || c == '.' || c == '/' }
+
 func phoneBounded(s string, start, end int) bool {
-	isDigit := func(c byte) bool { return c >= '0' && c <= '9' }
-	isJoin := func(c byte) bool { return c == '-' || c == '.' || c == '/' }
-	if start > 0 && (isDigit(s[start-1]) || (start > 1 && isJoin(s[start-1]) && isDigit(s[start-2]))) {
+	if end < len(s) && (isDigit(s[end]) || (end+1 < len(s) && isPhoneJoin(s[end]) && isDigit(s[end+1]))) {
 		return false
 	}
-	return !(end < len(s) && (isDigit(s[end]) || (end+1 < len(s) && isJoin(s[end]) && isDigit(s[end+1]))))
+	// The digits just before the match, directly or across one joiner.
+	last := start - 1
+	if last >= 1 && isPhoneJoin(s[last]) && isDigit(s[last-1]) {
+		last--
+	}
+	if last < 0 || !isDigit(s[last]) {
+		return true
+	}
+	// They may only be a country code: 1-3 digits after a "+".
+	first := last
+	for first > 0 && isDigit(s[first-1]) {
+		first--
+	}
+	return first > 0 && s[first-1] == '+' && last-first+1 <= 3
 }
 
 func isAlnum(c byte) bool {
 	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
 
-// enqueue queues a row for enrichment unless it's already queued or
-// running, so repeated clips of one posting cost one AI call. It reports
-// whether enrichment is pending for the row.
+// pendingRow is a row queued for, or undergoing, enrichment.
+type pendingRow struct {
+	running bool
+	// again is the latest re-clip that arrived while the row was running:
+	// it gets one more attempt afterwards, however many re-clips came.
+	again *job
+}
+
+// enqueue queues a row for enrichment. A row already queued isn't queued
+// twice; a row being enriched gets at most one more attempt afterwards. So
+// repeated clips of one posting can't pile up AI calls, yet a re-clip
+// during a failing attempt still retries. It reports whether enrichment is
+// pending for the row.
 func (in *Ingester) enqueue(j job) bool {
 	in.mu.Lock()
 	defer in.mu.Unlock()
-	if in.pending[j.id] {
+	if p, ok := in.pending[j.id]; ok {
+		if p.running {
+			p.again = &j
+		}
 		return true
 	}
+	return in.sendLocked(j)
+}
+
+// sendLocked queues j without blocking; in.mu must be held.
+func (in *Ingester) sendLocked(j job) bool {
 	select {
 	case in.queue <- j:
-		in.pending[j.id] = true
+		in.pending[j.id] = &pendingRow{}
 		return true
 	default:
 		in.cfg.Log.Warn("clip enrichment queue full; row kept as clipped", "app", j.id)
@@ -314,9 +383,18 @@ func (in *Ingester) work(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case j := <-in.queue:
+			in.mu.Lock()
+			if p := in.pending[j.id]; p != nil {
+				p.running = true
+			}
+			in.mu.Unlock()
 			in.enrich(ctx, j)
 			in.mu.Lock()
+			p := in.pending[j.id]
 			delete(in.pending, j.id)
+			if p != nil && p.again != nil {
+				in.sendLocked(*p.again)
+			}
 			in.mu.Unlock()
 		}
 	}
@@ -425,6 +503,10 @@ func grounded(v, text string) string {
 		return ""
 	}
 	needle := normalize(v)
+	// Scripts written without spaces run a name straight into the next
+	// word, so no boundary is required on a side that ends in one.
+	firstRune, _ := utf8.DecodeRuneInString(needle)
+	lastRune, _ := utf8.DecodeLastRuneInString(needle)
 	for i := 0; i <= len(text)-len(needle); {
 		j := strings.Index(text[i:], needle)
 		if j < 0 {
@@ -433,7 +515,7 @@ func grounded(v, text string) string {
 		start, end := i+j, i+j+len(needle)
 		before, _ := utf8.DecodeLastRuneInString(text[:start])
 		after, _ := utf8.DecodeRuneInString(text[end:])
-		if !isWordRune(before) && !isWordRune(after) {
+		if (unspaced(firstRune) || !isWordRune(before)) && (unspaced(lastRune) || !isWordRune(after)) {
 			return v
 		}
 		i = start + 1
@@ -445,4 +527,10 @@ func grounded(v, text string) string {
 // start or end of the text.
 func isWordRune(r rune) bool {
 	return r != utf8.RuneError && (unicode.IsLetter(r) || unicode.IsDigit(r))
+}
+
+// unspaced reports whether r belongs to a script written without spaces
+// between words.
+func unspaced(r rune) bool {
+	return unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul, unicode.Thai, unicode.Lao, unicode.Khmer, unicode.Myanmar)
 }

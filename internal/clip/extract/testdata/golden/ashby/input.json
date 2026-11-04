@@ -1,0 +1,25 @@
+{
+  "type": "legaj-clip",
+  "v": 1,
+  "method": "pm",
+  "url": "https://jobs.ashbyhq.com/contosopay/2b7e4c1a-8d3f-4f60-b1c2-9e5a7d3f0c18",
+  "title": "Security Engineer, Cloud @ Contoso Pay",
+  "jsonld": [
+    "{\"@context\":\"https://schema.org/\",\"@type\":\"JobPosting\",\"title\":\" Security Engineer, Cloud\",\"description\":\"<h1><strong>About Contoso Pay</strong></h1><p style=\\\"min-height:1.5em\\\">Contoso Pay builds payment software for finance teams.</p><h2><strong>About the Role</strong></h2><p style=\\\"min-height:1.5em\\\">You will secure our cloud estate.</p><ul style=\\\"min-height:1.5em\\\"><li><p style=\\\"min-height:1.5em\\\">Own cloud IAM and network policy</p></li><li><p style=\\\"min-height:1.5em\\\">Respond to incidents &amp; run reviews</p></li></ul>\",\"directApply\":true,\"identifier\":{\"@type\":\"PropertyValue\",\"name\":\"Contoso Pay\",\"value\":\"2b7e4c1a-8d3f-4f60-b1c2-9e5a7d3f0c18\"},\"datePosted\":\"2026-04-07\",\"hiringOrganization\":{\"@type\":\"Organization\",\"name\":\"Contoso Pay\",\"sameAs\":\"https://contoso.example\",\"logo\":\"https://example.invalid/logo.png\"},\"jobLocation\":{\"@type\":\"Place\",\"address\":{\"@type\":\"PostalAddress\",\"addressLocality\":\"New York City\",\"addressRegion\":\"NY\",\"addressCountry\":\"USA\"}},\"employmentType\":\"FULL_TIME\",\"baseSalary\":{\"@type\":\"MonetaryAmount\",\"currency\":\"USD\",\"value\":{\"@type\":\"QuantitativeValue\",\"minValue\":180000,\"maxValue\":240000,\"unitText\":\"YEAR\"}},\"jobLocationType\":\"TELECOMMUTE\",\"applicantLocationRequirements\":[{\"@type\":\"Country\",\"name\":\"Canada\"},{\"@type\":\"Country\",\"name\":\"United States\"},{\"@type\":\"Country\",\"name\":\"USA\"}]}"
+  ],
+  "meta": {
+    "title": " Security Engineer, Cloud @ Contoso Pay",
+    "description": "ABOUT CONTOSO PAY\n\nContoso Pay builds payment software for finance teams.",
+    "twitter:card": "summary",
+    "og:url": "https://jobs.ashbyhq.com/contosopay/2b7e4c1a-8d3f-4f60-b1c2-9e5a7d3f0c18",
+    "og:type": "website",
+    "og:title": " Security Engineer, Cloud",
+    "og:description": "ABOUT CONTOSO PAY\n\nContoso Pay builds payment software for finance teams.",
+    "twitter:title": " Security Engineer, Cloud"
+  },
+  "h1": [
+    "Security Engineer, Cloud"
+  ],
+  "selection": "",
+  "text": "Security Engineer, Cloud\nLocation\nNew York City, NY, USA\nEmployment Type\nFull time\nApply for this Job"
+}

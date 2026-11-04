@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/bot-bbio/legaj/internal/ai"
 	"github.com/bot-bbio/legaj/internal/apperr"
@@ -62,6 +64,9 @@ type Ingester struct {
 	cancel context.CancelFunc
 	done   sync.WaitGroup
 	once   sync.Once
+
+	mu      sync.Mutex
+	pending map[int64]bool // rows queued or being enriched
 }
 
 // job is one row waiting for enrichment. The page title isn't stored on
@@ -81,7 +86,7 @@ func New(cfg Config) *Ingester {
 		cfg.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	in := &Ingester{cfg: cfg, queue: make(chan job, cfg.QueueSize), cancel: cancel}
+	in := &Ingester{cfg: cfg, queue: make(chan job, cfg.QueueSize), cancel: cancel, pending: map[int64]bool{}}
 	in.done.Add(1)
 	go in.work(ctx)
 	return in
@@ -121,7 +126,7 @@ func (in *Ingester) Save(ctx context.Context, p extract.Page) (SaveResult, error
 		return SaveResult{}, err
 	}
 	r.Company, r.Role, r.Location, r.Description = scrub(r.Company), scrub(r.Role), scrub(r.Location), scrub(r.Description)
-	p.Title = scrub(p.Title)
+	p.Title, p.URL = scrub(p.Title), scrub(p.URL) // a link from an email can carry the address
 	if r.Company == "" && r.Role == "" && r.Description == "" {
 		return SaveResult{}, errNothingFound
 	}
@@ -161,7 +166,7 @@ var phoneExtension = regexp.MustCompile(`(?i)\s*(?:x|ext\.?|extension|wew\.?|#)\
 var errProfileUnreadable = apperr.New(apperr.CodeStorage, "LeGaJ couldn't read your profile, so it didn't save this clip. Try again.")
 
 // scrubber returns a function that removes the user's own email and phone
-// number from clipped text; recruiters' contact details stay. It fails
+// numbers from clipped text; recruiters' contact details stay. It fails
 // closed: when the profile can't be read, the clip isn't saved.
 func (in *Ingester) scrubber(ctx context.Context) (func(string) string, error) {
 	keep := func(s string) string { return s }
@@ -173,49 +178,128 @@ func (in *Ingester) scrubber(ctx context.Context) (func(string) string, error) {
 		in.cfg.Log.Warn("profile unreadable; clip refused", "err", err)
 		return nil, errProfileUnreadable
 	}
-	var patterns []*regexp.Regexp
-	if email := strings.TrimSpace(pr.Email); strings.Contains(email, "@") {
-		patterns = append(patterns, regexp.MustCompile(`(?i)`+regexp.QuoteMeta(email)))
-	}
-	if re := phonePattern(pr.Phone); re != nil {
-		patterns = append(patterns, re)
-	}
-	if len(patterns) == 0 {
+	details := append(emailDetails(pr.Email), phoneDetails(pr.Phone)...)
+	if len(details) == 0 {
 		return keep, nil
 	}
 	return func(s string) string {
-		for _, re := range patterns {
-			s = re.ReplaceAllString(s, "")
+		for _, d := range details {
+			s = d.remove(s)
 		}
 		return s
 	}, nil
 }
 
-// phonePattern matches the profile's phone number as pages write it: any
-// spacing, with or without the country code (every ending of 9 or more
-// digits, longest first), and with a national trunk "0" ("020 7946 0958"
-// for +44 20 7946 0958). Word boundaries keep it from matching the digits
-// inside a longer number. nil for numbers under 7 digits.
-func phonePattern(phone string) *regexp.Regexp {
-	var digits []string
-	for _, r := range phoneExtension.ReplaceAllString(phone, "") {
-		if r >= '0' && r <= '9' {
-			digits = append(digits, string(r))
-		}
-	}
-	if len(digits) < 7 {
-		return nil
-	}
-	var alts []string
-	for start := 0; start == 0 || len(digits)-start >= 9; start++ {
-		alts = append(alts, strings.Join(digits[start:], phoneSeparator))
-	}
-	return regexp.MustCompile(`\b(?:0` + phoneSeparator + `)?(?:` + strings.Join(alts, "|") + `)\b`)
+// detail is one of the user's details to remove from clipped text. bounded
+// rejects a match that is only part of something longer: another address,
+// a longer number.
+type detail struct {
+	re      *regexp.Regexp
+	bounded func(s string, start, end int) bool
 }
 
+func (d detail) remove(s string) string {
+	locs := d.re.FindAllStringIndex(s, -1)
+	if len(locs) == 0 {
+		return s
+	}
+	var b strings.Builder
+	last := 0
+	for _, l := range locs {
+		if d.bounded(s, l[0], l[1]) {
+			b.WriteString(s[last:l[0]])
+			last = l[1]
+		}
+	}
+	b.WriteString(s[last:])
+	return b.String()
+}
+
+// emailDetails matches the user's address as written and as a link encodes
+// it ("%40" for "@"), ignoring case, but not inside a longer address
+// ("jada@…", "…@example.com.au").
+func emailDetails(email string) []detail {
+	email = strings.TrimSpace(email)
+	if !strings.Contains(email, "@") {
+		return nil
+	}
+	isLocal := func(c byte) bool { return isAlnum(c) || strings.IndexByte("._%+-", c) >= 0 }
+	bounded := func(s string, start, end int) bool {
+		if start > 0 && isLocal(s[start-1]) {
+			return false
+		}
+		if end < len(s) && (isAlnum(s[end]) || s[end] == '-') {
+			return false
+		}
+		// "…@example.com.au": a dot followed by more domain.
+		return !(end+1 < len(s) && s[end] == '.' && isAlnum(s[end+1]))
+	}
+	var out []detail
+	for _, form := range []string{email, strings.ReplaceAll(email, "@", "%40")} {
+		out = append(out, detail{re: regexp.MustCompile(`(?i)` + regexp.QuoteMeta(form)), bounded: bounded})
+	}
+	return out
+}
+
+// phoneList splits a profile phone field holding several numbers.
+var phoneList = regexp.MustCompile(`(?i)\s*(?:[,;|\n]|\s/\s|\sor\s|\slub\s)\s*`)
+
+// maxPhoneDigits is the longest phone number there is (E.164).
+const maxPhoneDigits = 15
+
+// phoneDetails matches each number in the profile phone field as pages
+// write it: any spacing, with or without the country code (every ending of
+// 9 or more digits, longest first), and with a national trunk "0" ("020
+// 7946 0958" for +44 20 7946 0958). A match touching more digits, directly
+// or across "-", "." or "/", is part of a longer number and stays.
+func phoneDetails(field string) []detail {
+	var out []detail
+	for _, phone := range phoneList.Split(field, -1) {
+		var digits []string
+		for _, r := range phoneExtension.ReplaceAllString(phone, "") {
+			if r >= '0' && r <= '9' {
+				digits = append(digits, string(r))
+			}
+		}
+		if len(digits) < 7 {
+			continue
+		}
+		digits = digits[max(len(digits)-maxPhoneDigits, 0):]
+		var alts []string
+		for start := 0; start == 0 || len(digits)-start >= 9; start++ {
+			alts = append(alts, strings.Join(digits[start:], phoneSeparator))
+		}
+		re := regexp.MustCompile(`\b(?:0` + phoneSeparator + `)?(?:` + strings.Join(alts, "|") + `)\b`)
+		out = append(out, detail{re: re, bounded: phoneBounded})
+	}
+	return out
+}
+
+func phoneBounded(s string, start, end int) bool {
+	isDigit := func(c byte) bool { return c >= '0' && c <= '9' }
+	isJoin := func(c byte) bool { return c == '-' || c == '.' || c == '/' }
+	if start > 0 && (isDigit(s[start-1]) || (start > 1 && isJoin(s[start-1]) && isDigit(s[start-2]))) {
+		return false
+	}
+	return !(end < len(s) && (isDigit(s[end]) || (end+1 < len(s) && isJoin(s[end]) && isDigit(s[end+1]))))
+}
+
+func isAlnum(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+// enqueue queues a row for enrichment unless it's already queued or
+// running, so repeated clips of one posting cost one AI call. It reports
+// whether enrichment is pending for the row.
 func (in *Ingester) enqueue(j job) bool {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	if in.pending[j.id] {
+		return true
+	}
 	select {
 	case in.queue <- j:
+		in.pending[j.id] = true
 		return true
 	default:
 		in.cfg.Log.Warn("clip enrichment queue full; row kept as clipped", "app", j.id)
@@ -231,6 +315,9 @@ func (in *Ingester) work(ctx context.Context) {
 			return
 		case j := <-in.queue:
 			in.enrich(ctx, j)
+			in.mu.Lock()
+			delete(in.pending, j.id)
+			in.mu.Unlock()
 		}
 	}
 }
@@ -248,11 +335,14 @@ func (in *Ingester) enrich(ctx context.Context, j job) {
 	if app.Company != "" && app.Role != "" {
 		return // the user filled them in meanwhile
 	}
-	posting := postingText(j.title, app.Description)
-	if posting == "" {
+	title := strings.Join(strings.Fields(j.title), " ")
+	description := extract.TruncateBytes(strings.TrimSpace(app.Description), maxPosting)
+	if title == "" && description == "" {
 		return
 	}
-	found, err := in.ask(ctx, j.url, posting, app.Company)
+	// Answers are checked against the page's own words, not the prompt's
+	// labels ("Page title").
+	found, err := in.ask(ctx, j.url, postingText(title, description), normalize(title+"\n"+description), app.Company)
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
 			in.cfg.Log.Warn("clip enrichment failed", "app", j.id, "err", err)
@@ -265,11 +355,8 @@ func (in *Ingester) enrich(ctx context.Context, j job) {
 }
 
 // postingText is what the AI reads: the page title and the description,
-// bounded and stripped of prompt markers (R35).
+// stripped of prompt markers (R35).
 func postingText(title, description string) string {
-	title = strings.Join(strings.Fields(title), " ")
-	description = strings.TrimSpace(description)
-	description = extract.TruncateBytes(description, maxPosting)
 	var b strings.Builder
 	if title != "" {
 		fmt.Fprintf(&b, "Page title: %s\n\n", title)
@@ -298,7 +385,7 @@ const outputSchema = `{
 // ask sends the posting to the AI and keeps only values that pass the
 // extractor's checks and appear in the posting itself (R35: model output
 // reaches storage only through validators).
-func (in *Ingester) ask(ctx context.Context, pageURL, posting, company string) (pipeline.Found, error) {
+func (in *Ingester) ask(ctx context.Context, pageURL, posting, pageText, company string) (pipeline.Found, error) {
 	task := fmt.Sprintf("Report the hiring company, the job title and the location of this job posting.\n\n%s\n%s\n%s\n",
 		letters.BeginJD, posting, letters.EndJD)
 	temp := 0.0
@@ -317,25 +404,45 @@ func (in *Ingester) ask(ctx context.Context, pageURL, posting, company string) (
 	if err := json.Unmarshal([]byte(resp.Text), &out); err != nil {
 		return pipeline.Found{}, apperr.Wrap(err, apperr.CodeAIInvalidOutput, "Gemini's answer wasn't in the expected format.")
 	}
-	text := normalize(posting)
 	var f pipeline.Found
-	f.Company = grounded(extract.Company(out.Company, pageURL), text)
+	f.Company = grounded(extract.Company(out.Company, pageURL), pageText)
 	if company == "" {
 		company = f.Company
 	}
-	f.Role = grounded(extract.Role(out.Role, company, pageURL), text)
-	f.Location = grounded(extract.Location(out.Location), text)
+	f.Role = grounded(extract.Role(out.Role, company, pageURL), pageText)
+	f.Location = grounded(extract.Location(out.Location), pageText)
 	return f, nil
 }
 
 // normalize lower-cases s and collapses its whitespace, for containment checks.
 func normalize(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), " ")) }
 
-// grounded returns v when the normalized posting text contains it, else
-// "": a value the posting doesn't state was invented.
+// grounded returns v when the normalized page text contains it as whole
+// words (not "meta" inside "metadata"), else "": a value the page doesn't
+// state was invented.
 func grounded(v, text string) string {
-	if v == "" || !strings.Contains(text, normalize(v)) {
+	if v == "" {
 		return ""
 	}
-	return v
+	needle := normalize(v)
+	for i := 0; i <= len(text)-len(needle); {
+		j := strings.Index(text[i:], needle)
+		if j < 0 {
+			break
+		}
+		start, end := i+j, i+j+len(needle)
+		before, _ := utf8.DecodeLastRuneInString(text[:start])
+		after, _ := utf8.DecodeRuneInString(text[end:])
+		if !isWordRune(before) && !isWordRune(after) {
+			return v
+		}
+		i = start + 1
+	}
+	return ""
+}
+
+// isWordRune reports whether r continues a word. utf8.RuneError marks the
+// start or end of the text.
+func isWordRune(r rune) bool {
+	return r != utf8.RuneError && (unicode.IsLetter(r) || unicode.IsDigit(r))
 }

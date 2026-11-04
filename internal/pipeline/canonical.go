@@ -8,8 +8,12 @@ import (
 	"github.com/bot-bbio/legaj/internal/apperr"
 )
 
-// maxURL bounds a pasted or clipped URL.
-const maxURL = 2048
+// maxURL bounds a pasted URL. A clipped page's own address can carry long
+// tracking parameters, so clips allow maxClipURL.
+const (
+	maxURL     = 2048
+	maxClipURL = 8192
+)
 
 // trackingParams are query parameters that only say how a link was shared.
 // utm_* is matched by prefix. Parameters that identify the job (gh_jid,
@@ -36,13 +40,15 @@ func invalidURL() error {
 // form for dedupe (R15): https, lower-case host without www or a default
 // port, no fragment, no trailing slash, no tracking parameters, the rest
 // sorted. LinkedIn and Indeed links collapse to their job ID. "" stays "".
-func CanonicalURL(raw string) (string, error) {
+func CanonicalURL(raw string) (string, error) { return canonicalURL(raw, maxURL) }
+
+func canonicalURL(raw string, limit int) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", nil
 	}
-	if len(raw) > maxURL {
-		return "", invalidURL()
+	if len(raw) > limit {
+		return "", apperr.New(apperr.CodeInvalid, "That web address is too long to save.")
 	}
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" || u.User != nil {

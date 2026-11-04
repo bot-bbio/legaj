@@ -155,7 +155,29 @@ func linkedIn(p Page) candidates {
 			break
 		}
 	}
+	c.description = []string{linkedInDescription(p.Text)}
 	return c
+}
+
+// linkedInDescription cuts the posting out of a logged-out LinkedIn page
+// (seen 2026-11-03): sign-in prompts, each ending with a "By clicking
+// Continue to join or sign in…" line, come before it, and "Show more" /
+// "Show less" right after it. "" when the layout isn't recognised.
+func linkedInDescription(text string) string {
+	lines := strings.Split(normalizeText(text), "\n")
+	end := -1
+	for i := 0; i+1 < len(lines); i++ {
+		if lines[i] == "Show more" && lines[i+1] == "Show less" {
+			end = i
+			break
+		}
+	}
+	for i := end - 1; i >= 0; i-- {
+		if strings.HasPrefix(lines[i], "By clicking Continue to join or sign in") {
+			return strings.TrimSpace(strings.Join(lines[i+1:end], "\n"))
+		}
+	}
+	return ""
 }
 
 // careersTitle matches "<role> | <company> Careers" and similar. The
@@ -163,15 +185,19 @@ func linkedIn(p Page) candidates {
 // the role group is greedy: "Engineer - Backend | Acme Careers" splits at
 // the last separator.
 var (
-	careersSuffix = regexp.MustCompile(`(?i)^(.+)\s+[|·–—-]\s+(.+?)\s+(?:careers|jobs|career site|job board)$`)
-	careersAt     = regexp.MustCompile(`(?i)^(.+?)\s+[|·–—-]\s+(?:careers|jobs)\s+(?:at|@)\s+(.+)$`)
+	// "<role> - <company> | Careers": a separator before the word too.
+	careersSeparated = regexp.MustCompile(`(?i)^(.+)\s+[|·–—-]\s+(.+?)\s+[|·–—-]\s+(?:careers|jobs|career site|job board)$`)
+	careersSuffix    = regexp.MustCompile(`(?i)^(.+)\s+[|·–—-]\s+(.+?)\s+(?:careers|jobs|career site|job board)$`)
+	careersAt        = regexp.MustCompile(`(?i)^(.+?)\s+[|·–—-]\s+(?:careers|jobs)\s+(?:at|@)\s+(.+)$`)
+	// spacedSeparator in a company means a split went wrong ("Acme |").
+	spacedSeparator = regexp.MustCompile(`(?:^|\s)[|·–—-](?:\s|$)`)
 )
 
 // splitCareersTitle returns the role and, when the title names it, the
 // company. Other titles come back whole as the role.
 func splitCareersTitle(t string) (role, company string) {
-	for _, re := range []*regexp.Regexp{careersSuffix, careersAt} {
-		if m := re.FindStringSubmatch(t); m != nil {
+	for _, re := range []*regexp.Regexp{careersSeparated, careersSuffix, careersAt} {
+		if m := re.FindStringSubmatch(t); m != nil && !spacedSeparator.MatchString(m[2]) {
 			return m[1], m[2]
 		}
 	}

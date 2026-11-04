@@ -52,15 +52,28 @@ func leadFrom(url, company, role, location, description string, source store.Sou
 		URL: strings.TrimSpace(url), Company: strings.TrimSpace(company), Role: strings.TrimSpace(role),
 		Location: strings.TrimSpace(location), Description: strings.TrimSpace(description), Source: source,
 	}
-	switch {
-	case utf8.RuneCountInString(l.Company) > maxDetail || utf8.RuneCountInString(l.Role) > maxDetail || utf8.RuneCountInString(l.Location) > maxDetail:
-		return l, apperr.New(apperr.CodeInvalid, "Company, role and location must be under 200 characters.")
-	case len(l.Description) > MaxDescription:
+	if err := checkDetails(l.Company, l.Role, l.Location); err != nil {
+		return l, err
+	}
+	if len(l.Description) > MaxDescription {
 		return l, apperr.New(apperr.CodeInvalid, "That job description is too long (over 100,000 characters).")
 	}
+	limit := maxURL
+	if source == store.SourceClip {
+		limit = maxClipURL
+	}
 	var err error
-	l.CanonicalURL, err = CanonicalURL(l.URL)
+	l.CanonicalURL, err = canonicalURL(l.URL, limit)
 	return l, err
+}
+
+// checkDetails enforces the company, role and location limit shared by
+// every way a row is created or filled in.
+func checkDetails(company, role, location string) error {
+	if utf8.RuneCountInString(company) > maxDetail || utf8.RuneCountInString(role) > maxDetail || utf8.RuneCountInString(location) > maxDetail {
+		return apperr.New(apperr.CodeInvalid, "Company, role and location must be under 200 characters.")
+	}
+	return nil
 }
 
 // ClipInput is a job the clipper extracted from a web page (R19). Only the
@@ -132,8 +145,8 @@ type Found struct {
 // meantime always wins. It reports whether the row changed.
 func (s *Service) FillMissing(ctx context.Context, id int64, f Found) (bool, error) {
 	f.Company, f.Role, f.Location = strings.TrimSpace(f.Company), strings.TrimSpace(f.Role), strings.TrimSpace(f.Location)
-	if utf8.RuneCountInString(f.Company) > maxDetail || utf8.RuneCountInString(f.Role) > maxDetail || utf8.RuneCountInString(f.Location) > maxDetail {
-		return false, apperr.New(apperr.CodeInvalid, "Company, role and location must be under 200 characters.")
+	if err := checkDetails(f.Company, f.Role, f.Location); err != nil {
+		return false, err
 	}
 	if f == (Found{}) {
 		return false, nil

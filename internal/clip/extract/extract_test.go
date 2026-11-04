@@ -102,6 +102,18 @@ func TestR19_LayerOrder(t *testing.T) {
 				From: extract.Sources{Company: extract.LayerMeta, Role: extract.LayerMeta}},
 		},
 		{
+			name: "separator right before Careers (gate 4)",
+			page: extract.Page{URL: "https://example.com/j", Title: "Software Engineer - Acme | Careers"},
+			want: extract.Result{Company: "Acme", Role: "Software Engineer",
+				From: extract.Sources{Company: extract.LayerMeta, Role: extract.LayerMeta}},
+		},
+		{
+			name: "separator right before Jobs, other order",
+			page: extract.Page{URL: "https://example.com/j", Title: "Engineer | Acme - Jobs"},
+			want: extract.Result{Company: "Acme", Role: "Engineer",
+				From: extract.Sources{Company: extract.LayerMeta, Role: extract.LayerMeta}},
+		},
+		{
 			name: "nothing found",
 			page: extract.Page{URL: "https://example.com/j"},
 			want: extract.Result{},
@@ -161,6 +173,7 @@ func TestR19_JSONLDShapes(t *testing.T) {
 		{"raw line breaks in strings", "{\"@type\":\"JobPosting\",\"title\":\"Role\nE\",\"hiringOrganization\":{\"name\":\"Org E\"}}", "Org E", "Role E"},
 		{"comment wrapper", `<!-- {"@type":"JobPosting","title":"Role F","hiringOrganization":{"name":"Org F"}} -->`, "Org F", "Role F"},
 		{"entities in names", `{"@type":"JobPosting","title":"R&amp;D Engineer","hiringOrganization":{"name":"Babbage &amp; Co"}}`, "Babbage & Co", "R&D Engineer"},
+		{"entities escaped twice, no tags (gate 4)", `{"@type":"JobPosting","title":"R&amp;amp;D Engineer","hiringOrganization":{"name":"AT&amp;amp;T"}}`, "AT&T", "R&D Engineer"},
 		{"no job posting", `{"@type":"Organization","name":"Org G"}`, "", ""},
 		{"broken json", `{"@type":"JobPosting","title":`, "", ""},
 	}
@@ -295,6 +308,27 @@ func TestR19_GreenhouseDescriptionSlice(t *testing.T) {
 	})
 	if got.Location != "" {
 		t.Fatalf("teaser taken as location: %q", got.Location)
+	}
+}
+
+func TestR19_LinkedInGuestDescriptionSlice(t *testing.T) {
+	// Logged-out LinkedIn without JSON-LD (seen 2026-11-03): sign-in
+	// prompts, each ending "By clicking Continue…", then the posting, then
+	// "Show more" / "Show less" and the job criteria.
+	consent := "By clicking Continue to join or sign in, you agree to LinkedIn's User Agreement, Privacy Policy, and Cookie Policy."
+	text := strings.Join([]string{
+		"Go Engineer", "Fabrikam", "Apply", "Email or phone", "Password", consent,
+		"Save", "Report this job", "Email or phone", "Password", consent,
+		"Meet the Team", "We build ledgers.", "Show more", "Show less", "Seniority level", "Mid-Senior level",
+	}, "\n")
+	got := extract.Extract(extract.Page{URL: "https://www.linkedin.com/jobs/view/1", Title: "Go Engineer at Fabrikam — Remote | LinkedIn Jobs", Text: text})
+	if got.Description != "Meet the Team\nWe build ledgers." || got.From.Description != extract.LayerAdapter {
+		t.Fatalf("description (%s): %q", got.From.Description, got.Description)
+	}
+	// An unrecognised layout falls back to the page text.
+	got = extract.Extract(extract.Page{URL: "https://www.linkedin.com/jobs/view/1", Text: "Some other layout\nShow more"})
+	if got.From.Description != extract.LayerText {
+		t.Fatalf("fallback came from %s", got.From.Description)
 	}
 }
 

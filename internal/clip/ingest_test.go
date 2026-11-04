@@ -254,6 +254,75 @@ func TestR19_EnrichmentRejectsUngroundedValues(t *testing.T) {
 	}
 }
 
+func TestR19_EnrichmentGroundsWholeWords(t *testing.T) {
+	// Gate 4: "Meta" inside "metadata" and the prompt's own "Page title"
+	// label are not the posting naming an employer.
+	cases := []struct {
+		name, text, title, answer, want string
+	}{
+		{"name inside a word", "Our client needs a Data Engineer for metadata pipelines, start ASAP.", "Data Engineer", "Meta", ""},
+		{"the prompt's own label", "Our client needs a Data Engineer.", "Data Engineer", "Page title", ""},
+		{"whole word at the start", "Meta is hiring a Data Engineer.", "Data Engineer", "Meta", "Meta"},
+		{"whole word before punctuation", "A Data Engineer role at Contoso Ltd.", "Data Engineer", "Contoso Ltd", "Contoso Ltd"},
+		{"in the page title", "We need a Data Engineer.", "Data Engineer | Fabrikam Careers Portal", "Fabrikam", "Fabrikam"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t, 0)
+			f.ai.Respond = func(ai.Request) (string, error) { return reply(c.answer, "", "Lyon"), nil }
+			p := page("https://careers.example.com/1")
+			p.Text, p.Title, p.H1 = c.text+" Based in Lyon.", c.title, []string{"Data Engineer"}
+			res, err := f.in.Save(ctx, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			eventually(t, "the location to be filled", func() bool { return f.row(t, res.ID).Location != "" })
+			if got := f.row(t, res.ID).Company; got != c.want {
+				t.Fatalf("company %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestR19_ReclipsDontStackEnrichment(t *testing.T) {
+	f := newFixture(t, 0)
+	release := make(chan struct{})
+	f.ai.Respond = func(ai.Request) (string, error) {
+		<-release
+		return reply("", "", ""), nil
+	}
+	first, err := f.in.Save(ctx, page("https://careers.example.com/42"))
+	if err != nil || !first.Enriching {
+		t.Fatalf("first: %+v %v", first, err)
+	}
+	eventually(t, "the first call", func() bool { return len(f.ai.Requests()) == 1 })
+	for i := 0; i < 3; i++ {
+		again, err := f.in.Save(ctx, page("https://careers.example.com/42"))
+		if err != nil || !again.Enriching {
+			t.Fatalf("re-clip %d: %+v %v", i, again, err)
+		}
+	}
+	close(release)
+	// The worker runs jobs in order: once a later clip's call arrives,
+	// every job queued before it has run.
+	later := page("https://careers.example.com/other")
+	later.Text = "MARKER-LATER posting for a Data Analyst."
+	if _, err := f.in.Save(ctx, later); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the later clip's call", func() bool {
+		for _, r := range f.ai.Requests() {
+			if strings.Contains(r.Parts[0].Text, "MARKER-LATER") {
+				return true
+			}
+		}
+		return false
+	})
+	if n := len(f.ai.Requests()); n != 2 {
+		t.Fatalf("%d AI calls, want 2 (one per row)", n)
+	}
+}
+
 func TestR19_EnrichmentRejectsPageChrome(t *testing.T) {
 	f := newFixture(t, 0)
 	// "LinkedIn" appears in the page, but it's the job board, not the employer.
@@ -308,6 +377,10 @@ func TestR34_PhoneScrubFormats(t *testing.T) {
 		{"ten-digit national number", "+1 555 123 4567", "Phone (555) 123-4567 here", "5", "here"},
 		{"extension in the profile", "555-123-4567 x89", "Phone (555) 123-4567 here", "4567", "here"},
 		{"trunk zero on the page", "+44 20 7946 0958", "Call 020 7946 0958 today", "02", "today"},
+		// Gate 4.
+		{"front of a longer dashed number stays", "600 700 800", "Ref 600-700-800-900 and 900-600-700-800", "", "Ref 600-700-800-900 and 900-600-700-800"},
+		{"two numbers in the field", "+48 600 700 800, +48 22 123 45 67", "Mobile 600 700 800, desk 22 123 45 67.", "700", "Mobile"},
+		{"two numbers, the second one", "+48 600 700 800 / +48 22 123 45 67", "Desk 22 123 45 67 only.", "123", "only."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -330,6 +403,48 @@ func TestR34_PhoneScrubFormats(t *testing.T) {
 				t.Errorf("posting text lost from %q (want %q)", d, c.mustKeep)
 			}
 		})
+	}
+}
+
+func TestR34_EmailScrubBoundaries(t *testing.T) {
+	// The fixture's user is Ada.Sentinel@example.com.
+	f := newFixture(t, 0)
+	f.ai.Respond = func(ai.Request) (string, error) { return reply("", "", ""), nil }
+	p := page("https://careers.example.com/1")
+	p.Text = "Contoso Ltd is hiring. Recruiters: jada.sentinel@example.com, ada.sentinel@example.com.au, ADA.SENTINEL@EXAMPLE.COM."
+	res, err := f.in.Save(ctx, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := f.row(t, res.ID).Description
+	for _, keep := range []string{"jada.sentinel@example.com", "ada.sentinel@example.com.au"} {
+		if !strings.Contains(d, keep) {
+			t.Errorf("recruiter address %q damaged: %q", keep, d)
+		}
+	}
+	if strings.Contains(d, "ADA.SENTINEL") {
+		t.Errorf("the user's address was kept: %q", d)
+	}
+}
+
+func TestR34_ClipURLDropsTheUsersEmail(t *testing.T) {
+	f := newFixture(t, 0)
+	f.ai.Respond = func(ai.Request) (string, error) { return reply("", "", ""), nil }
+	for i, url := range []string{
+		"https://careers.example.com/job/7?email=ada.sentinel@example.com&ref=mail",
+		"https://careers.example.com/job/8?email=Ada.Sentinel%40example.com&ref=mail",
+	} {
+		res, err := f.in.Save(ctx, page(url))
+		if err != nil {
+			t.Fatalf("clip %d: %v", i, err)
+		}
+		a := f.row(t, res.ID)
+		if strings.Contains(strings.ToLower(a.URL), "sentinel") {
+			t.Fatalf("the user's email is in the stored URL: %s", a.URL)
+		}
+		if !strings.HasPrefix(a.URL, "https://careers.example.com/job/") {
+			t.Fatalf("URL damaged: %s", a.URL)
+		}
 	}
 }
 
@@ -475,9 +590,11 @@ func TestR19_FullQueueStillSaves(t *testing.T) {
 	}
 }
 
-func TestR20_ConcurrentClipsAllSaved(t *testing.T) {
-	// Service-level half of R20 (A7). The HTTP half, through the clip
-	// server's Host, Origin, nonce and rate-limit checks, comes with item 21.
+func TestConcurrentClipsAllSaved_ServiceLevel(t *testing.T) {
+	// The service-level groundwork for R20 (A7). It deliberately doesn't
+	// carry the R20 name: R20 requires the saves to go through the clip
+	// server's Host, Origin, nonce and rate-limit checks (item 21), and the
+	// regression audit counts any TestR20_ test as covering it (gate 4).
 	f := newFixture(t, 0)
 	f.ai.Respond = func(ai.Request) (string, error) { return reply("", "", ""), nil }
 	const n = 40

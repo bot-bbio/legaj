@@ -13,7 +13,7 @@ The structure of each `input.json` copies a public job page fetched on 2026-11-0
 | `ashby` | `jobs.ashbyhq.com` posting | JSON-LD title with a leading space; `TELECOMMUTE` plus a place and applicant countries; list items wrapping paragraphs |
 | `workday` | `*.myworkdayjobs.com` posting | Pretty-printed JSON-LD; a legal-entity code before the company (`2100 … USA`); locality written `US, CA, City`; plain-text description; empty `<title>` |
 | `linkedin-guest-pl` | `pl.linkedin.com` logged-out view | JSON-LD whose description is HTML escaped twice (`&lt;strong&gt;`); Polish title format |
-| `linkedin-guest-en` | `www.linkedin.com` logged-out view | No JSON-LD; English title format; sign-in prompts mixed into the text |
+| `linkedin-guest-en` | `www.linkedin.com` logged-out view | No JSON-LD; English title format; sign-in prompts, each ending with a "By clicking Continue to join or sign in…" line, before the description, and "Show more" / "Show less" after it |
 
 The `text` field of the Workday and Ashby fixtures is an approximation: those pages render their content with JavaScript, and the bookmarklet reads the rendered page.
 

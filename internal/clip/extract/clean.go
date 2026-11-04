@@ -110,15 +110,16 @@ var entity = regexp.MustCompile(`&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z][
 
 func looksLikeMarkup(s string) bool { return knownTag.MatchString(s) || entity.MatchString(s) }
 
-// htmlToText converts an HTML fragment to text. When the fragment holds no
-// tags of its own but decodes to markup, it was escaped twice (LinkedIn's
-// JSON-LD, seen 2026-11-03), so it's converted again. A fragment with real
-// tags is converted once: text inside it that decodes to "<div>" is the
-// author's text.
+// htmlToText converts an HTML fragment to text. A fragment with no tags of
+// its own was escaped twice when it decodes to markup (LinkedIn's JSON-LD,
+// seen 2026-11-03), or when it held "&amp;" and decodes to more entities
+// ("AT&amp;amp;T"); it's converted again. A fragment with real tags is
+// converted once: text inside it that decodes to "<div>" is the author's.
 func htmlToText(s string) string {
-	escapedTwice := !knownTag.MatchString(s)
+	noTags := !knownTag.MatchString(s)
+	ampersands := strings.Contains(s, "&amp;")
 	s = stripTags(s)
-	if escapedTwice && knownTag.MatchString(s) {
+	if noTags && (knownTag.MatchString(s) || (ampersands && entity.MatchString(s))) {
 		s = stripTags(s)
 	}
 	return s

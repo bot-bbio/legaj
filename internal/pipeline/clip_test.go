@@ -2,6 +2,7 @@ package pipeline_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,6 +83,31 @@ func TestR19_AddClipRejectsBadInput(t *testing.T) {
 	}
 	if ids := sf.liveIDs(t); len(ids) != 0 {
 		t.Fatalf("rows %v after rejected clips", ids)
+	}
+}
+
+func TestR19_AddClipAcceptsLongPageURLs(t *testing.T) {
+	// Gate 4: tracking parameters can push a job page's address past the
+	// 2,048 characters Paste job allows; the clip must still be saved.
+	sf := newSvc(t)
+	long := "https://www.linkedin.com/jobs/search/?currentJobId=4012345678&trk=" + strings.Repeat("x", 3000)
+	res, err := sf.svc.AddClip(ctx, pipeline.ClipInput{URL: long, Role: "Analyst"})
+	if err != nil || !res.Created {
+		t.Fatalf("long URL: %+v %v", res, err)
+	}
+	var canonical string
+	if err := sf.db.Reader().QueryRowContext(ctx, `SELECT canonical_url FROM applications WHERE id = ?`, res.ID).Scan(&canonical); err != nil {
+		t.Fatal(err)
+	}
+	if canonical != "https://linkedin.com/jobs/view/4012345678" {
+		t.Fatalf("canonical %q", canonical)
+	}
+	if _, err := sf.svc.AddClip(ctx, pipeline.ClipInput{URL: "https://example.com/?q=" + strings.Repeat("x", 9000), Role: "Analyst"}); apperr.CodeOf(err) != apperr.CodeInvalid {
+		t.Fatalf("over 8 KiB: err %v, want invalid", err)
+	}
+	// Paste job keeps its own limit.
+	if _, err := sf.svc.PasteJob(ctx, pipeline.PasteInput{URL: long, Company: "Acme"}); apperr.CodeOf(err) != apperr.CodeInvalid {
+		t.Fatalf("paste of a long URL: err %v, want invalid", err)
 	}
 }
 

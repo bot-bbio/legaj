@@ -24,9 +24,14 @@ The two values must match. If they don't, delete the file and download it again.
 
 LeGaJ is free and isn't signed with a paid code-signing certificate, so Windows SmartScreen shows a warning the first time:
 
-1. Double-click `LeGaJ-Setup-<version>.exe`. A blue **"Windows protected your PC"** window appears.
+1. Double-click `LeGaJ-Setup-<version>.exe`. A **"Windows protected your PC"** window appears.
+
+   ![The "Windows protected your PC" window, with a More info link and a Don't run button](docs/img/smartscreen-1.png)
+
 2. Click **More info**. The window now shows the app name and "Publisher: Unknown publisher".
 3. Click **Run anyway**.
+
+   ![The same window after More info: it names the installer, and a Run anyway button has appeared](docs/img/smartscreen-2.png)
 
 The installer then:
 

@@ -22,7 +22,11 @@ func TestR41_PublicDocs(t *testing.T) {
 		"LICENSE":    {"MIT License", "Copyright (c) 2026 Roberto Montero", "WITHOUT WARRANTY OF ANY KIND"},
 		"README.md":  {"## Mission", "## Setup", "## Usage", "## Architecture", "Roberto Montero", "linkedin.com/in/alvvays", "PRIVACY.md", "INSTALL.md"},
 		"PRIVACY.md": {"Gemini", "Free tier", "Paid tier", "Credential Manager", "GitHub", "update check"},
-		"INSTALL.md": {"More info", "Run anyway", "SHA-256", "LOCALAPPDATA"},
+		"INSTALL.md": {"More info", "Run anyway", "SHA-256", "LOCALAPPDATA", "(docs/img/smartscreen-1.png)", "(docs/img/smartscreen-2.png)"},
+	}
+	// The install guide's SmartScreen screenshots exist (R41).
+	for _, img := range []string{"docs/img/smartscreen-1.png", "docs/img/smartscreen-2.png"} {
+		read(img)
 	}
 	for name, phrases := range want {
 		text := read(name)

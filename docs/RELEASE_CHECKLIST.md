@@ -10,6 +10,13 @@ Run these on a clean Windows 10 or 11 machine with the built installer before a 
 - [ ] In Pipeline, **Posting** opens the job page in the default browser, and **Resume** opens the PDF in the default viewer. No console window flashes.
 - [ ] Upload a second resume after marking a row Applied: that row's **Resume** still opens the first file.
 
+## Clipper (R18)
+Automated: the shipped script ran in headless Chrome and Edge against the real server. This list covers what that can't reach.
+
+- [ ] In the setup wizard, drag **Clip to LeGaJ** onto the bookmarks bar, in Edge and in Chrome. Dragging out of the app window can't be scripted, so this is its first real test. If the drop does nothing, try **Copy the clipper**, paste it as a new bookmark's address, and report the failed drag.
+- [ ] Click the new bookmark on a job page, then **Save**. The job appears in Pipeline at once, and **Install the clipper** leaves the setup checklist.
+- [ ] Close LeGaJ. In PowerShell, hold the port from the bookmark's address: `$l = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, <port>); $l.Start()`. Start LeGaJ: the reinstall banner appears, and **Reinstall bookmarklet** opens the install page in Settings. Drag or copy the new bookmark: the banner clears without a restart. Run `$l.Stop()`.
+
 ## Single instance (R42)
 - [ ] Launch LeGaJ, then minimize it. Launch it again from the Start menu: no second window appears, and the first window is restored and focused.
 - [ ] Launch LeGaJ twice in quick succession, as with a double-click on the shortcut: only one window ever appears.
@@ -31,4 +38,4 @@ Automated in `scripts/verify.ps1`: `TestR4_R34_SentinelScan` runs onboarding, a 
 - [ ] Live Gemini smoke with your own key (it never runs in CI): `$env:LEGAJ_HOME = "$env:TEMP\legaj-live"; $env:LEGAJ_LIVE_GEMINI_KEY = '<key>'; go test -tags live -count=1 ./internal/smoke/`, then `Remove-Item Env:LEGAJ_LIVE_GEMINI_KEY`.
 - [ ] On a clean Windows 10 VM: install, finish onboarding with **made-up** sentinel values (a throwaway key that you revoke afterwards, a fake email, phone and resume line), paste and clip jobs, generate and approve a letter, draft answers, open a follow-up, add a round. Close LeGaJ, then run `powershell -NoProfile -File scripts/scan-sentinels.ps1 -Key ... -Email ... -Phone ... -ResumeLine ...`. It must report nothing, including in the WebView2 folder.
 - [ ] Generate 10 letters while another app has focus: LeGaJ never steals focus and no console window flashes (R6).
-- [ ] Clip on the 6 sites (LinkedIn logged in, Indeed, Greenhouse, Lever, Ashby, Workday) **in Edge**, Windows' default browser. The bookmarklet spike ran in Firefox and Chrome only; Edge shares Chrome's engine, so this confirms it rather than tests something new. Note any blocked popup or "connect to devices on your local network" prompt.
+- [ ] Clip on the 6 sites (LinkedIn logged in, Indeed, Greenhouse, Lever, Ashby, Workday) **in Edge**, Windows' default browser. The spike ran these sites in Firefox and Chrome only, and Edge has so far run the clipper headlessly on local pages, not from a real bookmark on a real site. Note any blocked popup or "connect to devices on your local network" prompt.

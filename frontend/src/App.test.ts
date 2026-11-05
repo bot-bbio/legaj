@@ -12,6 +12,7 @@ vi.mock('./lib/api', () => ({
         finished: true,
         steps: ['key', 'resume', 'profile', 'clipper'].map((id) => ({ id, done: true })),
       }),
+    clipStatus: () => Promise.resolve({ running: true, port: 47123, needsReinstall: true, message: '' }),
     currentResume: () => Promise.resolve({ id: 0, fileName: '', sizeBytes: 0, uploadedAt: '' }),
     getProfile: () =>
       Promise.resolve({
@@ -55,5 +56,13 @@ describe('R1 navigation', () => {
     await userEvent.click(within(nav).getByRole('button', { name: 'Interviews' }));
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Interviews');
     expect(within(nav).getByRole('button', { current: 'page' })).toHaveTextContent('Interviews');
+  });
+});
+
+describe('R18 clipper banner in the shell', () => {
+  it('leads from the banner to the install page', async () => {
+    await mainNav();
+    await userEvent.click(await screen.findByRole('button', { name: /reinstall bookmarklet/i }));
+    expect(await screen.findByRole('link', { name: /clip to legaj/i })).toBeInTheDocument();
   });
 });

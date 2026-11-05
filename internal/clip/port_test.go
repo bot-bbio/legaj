@@ -124,3 +124,46 @@ func TestR18_FreshInstallNeedsNoReinstall(t *testing.T) {
 		t.Fatalf("%+v: the bookmarklet matches the port", st)
 	}
 }
+
+// The banner offers a new bookmarklet, which only exists when a server does:
+// with no port there's nothing to reinstall, and ClipStatus reports why.
+func TestR18_NoServerNeedsNoReinstall(t *testing.T) {
+	st := clip.PortStatus{Port: 0, Bookmarklet: clip.PortLow}
+	if st.NeedsReinstall() {
+		t.Fatalf("%+v: there's no port to reinstall for", st)
+	}
+}
+
+func TestR18_InstalledPortIsWhatWasMarked(t *testing.T) {
+	db := openDB(t)
+	if port, err := clip.InstalledPort(ctx, db); err != nil || port != 0 {
+		t.Fatalf("before any install: %d %v", port, err)
+	}
+	if err := clip.MarkInstalled(ctx, db, clip.PortLow); err != nil {
+		t.Fatal(err)
+	}
+	if port, err := clip.InstalledPort(ctx, db); err != nil || port != clip.PortLow {
+		t.Fatalf("after the install: %d %v", port, err)
+	}
+	// Listen reads the same value, so the banner survives a restart.
+	ln, st, err := clip.Listen(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if st.Bookmarklet != clip.PortLow {
+		t.Fatalf("status %+v", st)
+	}
+}
+
+// A damaged value reads as "nothing installed", like a fresh install: the
+// clipper keeps working and the user can install again.
+func TestR18_DamagedInstalledPortReadsAsNone(t *testing.T) {
+	db := openDB(t)
+	if err := db.SetMeta(ctx, clip.BookmarkletPortKey, "not a port"); err != nil {
+		t.Fatal(err)
+	}
+	if port, err := clip.InstalledPort(ctx, db); err != nil || port != 0 {
+		t.Fatalf("%d %v", port, err)
+	}
+}

@@ -17,7 +17,7 @@ const (
 	// PortKey is the app_meta key holding the server's port.
 	PortKey = "clip_port"
 	// BookmarkletPortKey holds the port of the bookmarklet the user
-	// installed last; the install page (item 22) writes it.
+	// installed last; the install page writes it through MarkInstalled.
 	BookmarkletPortKey = "clip_bookmarklet_port"
 	// PortLow and PortHigh bound the ports LeGaJ picks from: registered
 	// ports few programs use, below Windows' dynamic range (49152+).
@@ -49,7 +49,9 @@ type PortStatus struct {
 // another port, so the app must show the banner and a regenerated
 // bookmarklet (R18). It stays true across restarts until the user
 // reinstalls.
-func (s PortStatus) NeedsReinstall() bool { return s.Bookmarklet != 0 && s.Bookmarklet != s.Port }
+func (s PortStatus) NeedsReinstall() bool {
+	return s.Port != 0 && s.Bookmarklet != 0 && s.Bookmarklet != s.Port
+}
 
 var errNoPort = apperr.New(apperr.CodeConflict, "LeGaJ couldn't open its clipper: no free local port was found. Restart your computer and try again.")
 
@@ -58,10 +60,9 @@ var errNoPort = apperr.New(apperr.CodeConflict, "LeGaJ couldn't open its clipper
 // it picks a new one and persists it.
 func Listen(ctx context.Context, meta Meta) (net.Listener, PortStatus, error) {
 	var st PortStatus
-	if v, ok, err := meta.GetMeta(ctx, BookmarkletPortKey); err != nil {
-		return nil, st, storageErr(err)
-	} else if ok {
-		st.Bookmarklet, _ = strconv.Atoi(v)
+	var err error
+	if st.Bookmarklet, err = InstalledPort(ctx, meta); err != nil {
+		return nil, st, err
 	}
 	v, ok, err := meta.GetMeta(ctx, PortKey)
 	if err != nil {
@@ -91,6 +92,31 @@ func Listen(ctx context.Context, meta Meta) (net.Listener, PortStatus, error) {
 		return ln, st, nil
 	}
 	return nil, st, errNoPort
+}
+
+// InstalledPort reads the port of the bookmarklet the user installed last.
+// It's 0 when none was installed; a damaged value reads the same way.
+func InstalledPort(ctx context.Context, meta Meta) (int, error) {
+	v, ok, err := meta.GetMeta(ctx, BookmarkletPortKey)
+	if err != nil {
+		return 0, storageErr(err)
+	}
+	if !ok {
+		return 0, nil
+	}
+	port, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, nil
+	}
+	return port, nil
+}
+
+// MarkInstalled records that the user took the bookmarklet built for port.
+func MarkInstalled(ctx context.Context, meta Meta, port int) error {
+	if err := meta.SetMeta(ctx, BookmarkletPortKey, strconv.Itoa(port)); err != nil {
+		return storageErr(err)
+	}
+	return nil
 }
 
 // listenPort binds the loopback address only: nothing on the network can

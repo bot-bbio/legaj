@@ -17,7 +17,8 @@
     "checkJs": false,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "noEmit": true
+    "noEmit": true,
+    "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte", "wailsjs/**/*.d.ts", "vite.config.ts", "vitest-setup.ts"]
+  "include": ["src/**/*.ts", "src/**/*.svelte", "wailsjs/**/*.d.ts", "vite.config.ts", "vite-plugin-bookmarklet.ts", "vitest-setup.ts"]
 }

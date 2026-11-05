@@ -42,7 +42,9 @@ LeGaJ has five sections: **Profile**, **Pipeline**, **Follow-ups**, **Interviews
 
 ### Add jobs
 
-In **Pipeline**, use **Paste job** with the posting's link and description. The same posting is never added twice: links are compared after removing tracking parameters. A one-click browser clipper is being finished for the 2.0 release.
+The quickest way is the **clipper**, a bookmark you install during setup (or from **Settings**). On a job posting, click the bookmark, then click **Save** in the small window that opens. LeGaJ has to be running; **Start LeGaJ with Windows** in Settings keeps it ready. On a site LeGaJ doesn't know, select the job description first.
+
+A page that doesn't let LeGaJ read it, or a job you only have as text, goes in through **Paste job** in **Pipeline**, with the posting's link and description. Either way the same posting is never added twice: links are compared after removing tracking parameters.
 
 ### Cover letters
 

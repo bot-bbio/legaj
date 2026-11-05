@@ -2,7 +2,9 @@
   import About from '../components/About.svelte';
   import { api, type Settings } from '../lib/api';
   import { errorMessage } from '../lib/errors';
+  import { clipStore } from '../lib/stores/clip';
   import { settingsStore } from '../lib/stores/settings';
+  import Bookmarklet from './Onboarding/Bookmarklet.svelte';
 
   // The form edits a draft. Until the user changes something it follows the
   // store, so a change made elsewhere shows up here at once (R3).
@@ -16,6 +18,10 @@
     const s = $settingsStore;
     if (s.status === 'ready' && !dirty) draft = { ...s.data.settings };
   });
+
+  // Opens by itself when the port moved: the banner leads here (R18).
+  let reinstalling = $state(false);
+  const showInstall = $derived(reinstalling || ($clipStore.status === 'ready' && $clipStore.data.needsReinstall));
 
   async function saveSettings(e: SubmitEvent): Promise<void> {
     e.preventDefault();
@@ -106,6 +112,16 @@
       {/if}
     {/if}
     {#if keyError}<p class="error" role="alert">{keyError}</p>{/if}
+  </section>
+
+  <section>
+    <h2>Browser clipper</h2>
+    {#if showInstall}
+      <Bookmarklet />
+    {:else}
+      <p>The clipper is a bookmark that saves job postings from your browser to your Pipeline.</p>
+      <p><button type="button" class="secondary" onclick={() => (reinstalling = true)}>Reinstall bookmarklet</button></p>
+    {/if}
   </section>
 
   {#if draft}

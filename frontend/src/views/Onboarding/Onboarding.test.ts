@@ -43,6 +43,9 @@ const api = {
     return Promise.resolve(p);
   }),
   getSettings: vi.fn(),
+  clipStatus: vi.fn(() => Promise.resolve({ running: true, port: 47123, needsReinstall: false, message: '' })),
+  markBookmarkletInstalled: vi.fn(() => Promise.resolve()),
+  copyText: vi.fn(() => Promise.resolve()),
 };
 vi.mock('../../lib/api', () => ({ api }));
 
@@ -93,6 +96,18 @@ describe('R7 onboarding', () => {
     // Resuming opens the wizard at that step.
     await userEvent.click(within(checklist).getByRole('button', { name: /upload your resume/i }));
     expect(await screen.findByRole('button', { name: /choose resume file/i })).toBeInTheDocument();
+  });
+
+  it('the clipper step offers the real bookmarklet (R18)', async () => {
+    render(App);
+    await userEvent.click(await screen.findByRole('button', { name: /skip for now/i })); // key
+    await userEvent.click(screen.getByRole('button', { name: /skip for now/i })); // resume
+    await userEvent.click(await screen.findByRole('button', { name: /skip for now/i })); // profile
+
+    const link = await screen.findByRole('link', { name: /clip to legaj/i });
+    expect(decodeURIComponent(link.getAttribute('href') ?? '')).toContain('http://127.0.0.1:47123');
+    expect(document.body.textContent).not.toMatch(/later build/i);
+    expect(screen.getByRole('button', { name: /finish/i })).toBeInTheDocument();
   });
 
   it('Finish lands on a filled Profile without a reload, with the target role as entered (U1)', async () => {

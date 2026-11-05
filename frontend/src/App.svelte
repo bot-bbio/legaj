@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ClipperBanner from './components/ClipperBanner.svelte';
   import Nav from './components/Nav.svelte';
   import SetupChecklist from './components/SetupChecklist.svelte';
   import StartupGate from './components/StartupGate.svelte';
@@ -37,6 +38,7 @@
       <Nav active={$route} onselect={navigate} />
       <main>
         <UpdateBanner />
+        <ClipperBanner />
         <SetupChecklist />
         {#if $route === 'profile'}
           <Profile />

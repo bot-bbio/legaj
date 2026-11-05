@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Settings, SettingsView } from '../lib/api';
+import type { ClipStatus, Settings, SettingsView } from '../lib/api';
 
 vi.mock('../lib/events', () => ({ onEntityChanged: () => () => {} }));
 
@@ -24,6 +24,11 @@ const api = {
   saveSettings: vi.fn<(s: Settings) => Promise<SettingsView>>(),
   saveApiKey: vi.fn<(k: string) => Promise<void>>(),
   removeApiKey: vi.fn<() => Promise<void>>(),
+  clipStatus: vi.fn<() => Promise<ClipStatus>>(() =>
+    Promise.resolve({ running: true, port: 47123, needsReinstall: false, message: '' }),
+  ),
+  markBookmarkletInstalled: vi.fn<() => Promise<void>>(),
+  copyText: vi.fn<(text: string) => Promise<void>>(),
 };
 vi.mock('../lib/api', () => ({ api }));
 
@@ -108,5 +113,36 @@ describe('R37 preferences', () => {
   it('Save is disabled until something changes', async () => {
     render(SettingsView_);
     expect(await screen.findByRole('button', { name: /save settings/i })).toBeDisabled();
+  });
+});
+
+describe('R18 clipper in Settings', () => {
+  const clip = (needsReinstall: boolean): ClipStatus => ({ running: true, port: 47123, needsReinstall, message: '' });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api.getSettings.mockResolvedValue(view(true));
+  });
+
+  it('Reinstall bookmarklet opens the install page', async () => {
+    api.clipStatus.mockResolvedValue(clip(false));
+    render(SettingsView_);
+    await userEvent.click(await screen.findByRole('button', { name: /reinstall bookmarklet/i }));
+    const link = await screen.findByRole('link', { name: /clip to legaj/i });
+    expect(decodeURIComponent(link.getAttribute('href') ?? '')).toContain('http://127.0.0.1:47123');
+  });
+
+  it('keeps it closed until asked', async () => {
+    api.clipStatus.mockResolvedValue(clip(false));
+    render(SettingsView_);
+    await screen.findByRole('button', { name: /reinstall bookmarklet/i });
+    expect(screen.queryByRole('link', { name: /clip to legaj/i })).not.toBeInTheDocument();
+  });
+
+  // The port-changed banner lands here, so the page must already be open.
+  it('opens by itself when the bookmarklet needs reinstalling', async () => {
+    api.clipStatus.mockResolvedValue(clip(true));
+    render(SettingsView_);
+    expect(await screen.findByRole('link', { name: /clip to legaj/i })).toBeInTheDocument();
   });
 });

@@ -76,6 +76,7 @@ export type Interviewer = Plain<store.Interviewer>;
 export type UpdateResult = Plain<update.Result>;
 export type PasteInput = Plain<pipeline.PasteInput>;
 export type PasteResult = Plain<pipeline.PasteResult>;
+export type ClipStatus = Plain<main.ClipStatusView>;
 export type Stage = 'lead' | 'ready' | 'applied' | 'interviewing' | 'offer' | 'rejected' | 'withdrawn';
 
 export const api = {
@@ -86,6 +87,10 @@ export const api = {
   openURL: (link: string): Promise<void> => App.OpenURL(link),
   /** Notify-only release check (R40); no request when Settings turns it off. */
   checkForUpdate: (): Promise<UpdateResult> => App.CheckForUpdate(),
+  /** Where the clipper listens, and whether the bookmarklet needs reinstalling (R18). */
+  clipStatus: (): Promise<ClipStatus> => App.ClipStatus(),
+  /** Records that the user took the bookmarklet for the current port, which clears the reinstall banner. */
+  markBookmarkletInstalled: (): Promise<void> => App.MarkBookmarkletInstalled(),
 
   getSettings: (): Promise<SettingsView> => SettingsAPI.GetSettings(),
   saveSettings: (s: Settings): Promise<SettingsView> => SettingsAPI.SaveSettings(s),

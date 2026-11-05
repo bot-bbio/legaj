@@ -92,13 +92,25 @@ func greenhouse(p Page) candidates {
 	if m := greenhouseTitle.FindStringSubmatch(cleanLine(p.Title, false)); m != nil {
 		c.role, c.company = []string{m[1]}, []string{m[2]}
 	}
-	if loc := cleanLine(p.Meta["og:description"], false); utf8.RuneCountInString(loc) <= 80 {
+	if loc := cleanLine(p.Meta["og:description"], false); looksLikePlaces(loc) {
 		c.location = []string{loc}
 	}
 	if len(p.H1) > 0 {
 		c.description = []string{greenhouseDescription(p.Text, cleanLine(p.H1[0], false))}
 	}
 	return c
+}
+
+// looksLikePlaces tells a place, or a "; "-separated list of places
+// ("Berlin, Germany; München, Bayern, Germany"), from a teaser sentence:
+// each part is short and none holds a sentence break.
+func looksLikePlaces(s string) bool {
+	for _, part := range strings.Split(s, "; ") {
+		if utf8.RuneCountInString(part) > 80 || strings.Contains(part, ". ") || strings.HasSuffix(part, ".") {
+			return false
+		}
+	}
+	return true
 }
 
 // greenhouseDescription cuts the posting out of the page text: it starts

@@ -304,6 +304,12 @@ func TestR19_GreenhouseDescriptionSlice(t *testing.T) {
 	if got.Location != "Remote, Poland" {
 		t.Fatalf("location %q", got.Location)
 	}
+	// A list of places is a location, however long (Chrome spike capture).
+	places := "Berlin, Germany; Chemnitz, Sachsen, Germany; Dresden, Sachsen, Germany; München, Bayern, Germany"
+	got = extract.Extract(extract.Page{URL: "https://job-boards.greenhouse.io/staffbase/jobs/1", Meta: map[string]string{"og:description": places}})
+	if got.Location != places {
+		t.Fatalf("place list: %q", got.Location)
+	}
 	// A long og:description is a teaser, not a place.
 	got = extract.Extract(extract.Page{
 		URL:  "https://job-boards.greenhouse.io/northwind/jobs/1",

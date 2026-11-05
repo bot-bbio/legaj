@@ -30,7 +30,7 @@ func liveClient(t *testing.T) *gemini.Client {
 	t.Helper()
 	key := os.Getenv("LEGAJ_LIVE_GEMINI_KEY")
 	if key == "" {
-		t.Skip("set LEGAJ_LIVE_GEMINI_KEY to run the live Gemini smoke")
+		t.Fatal("LEGAJ_LIVE_GEMINI_KEY is not set: nothing was sent to Gemini")
 	}
 	return gemini.New(gemini.Config{Key: func() (string, error) {
 		if key == "" {

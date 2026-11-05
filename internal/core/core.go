@@ -59,6 +59,9 @@ type Options struct {
 	// BackupEvery is how often a running app checks whether today's backup
 	// exists; default one hour.
 	BackupEvery time.Duration
+	// StartClipServer runs the clip server on 127.0.0.1 once the database
+	// is ready (R18). The app sets it; tests leave it off and open no ports.
+	StartClipServer bool
 }
 
 // Core is the running backend.
@@ -107,6 +110,14 @@ type Services struct {
 	// Clip saves jobs clipped from web pages and fills in missing details
 	// in the background (R19, R20). The clip server feeds it.
 	Clip *clip.Ingester
+	// ClipServer takes clips from the bookmarklet's popup (R18); nil when
+	// it isn't running.
+	ClipServer *clip.Server
+	// ClipPort is the clip server's startup state: its port, and whether
+	// the installed bookmarklet points elsewhere.
+	ClipPort clip.PortStatus
+	// ClipProblem says, user-safe, why the clip server isn't running.
+	ClipProblem string
 }
 
 // geminiKeyTester makes one tiny call with the candidate key. Any 200
@@ -288,6 +299,9 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 	svc.Clip = clip.New(clip.Config{
 		Pipeline: svc.Pipeline, AI: c.AI, Profile: svc.Profile, Model: svc.model, Log: c.Log,
 	})
+	if c.opts.StartClipServer {
+		c.startClipServer(ctx, svc)
+	}
 	svc.Jobs.Start(context.Background())
 	// Deleting rows cancels their queued and running generation (R13).
 	svc.Pipeline.OnDelete(svc.Jobs.CancelApps)
@@ -324,6 +338,29 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 	c.startBackupLoop(db, stop)
 	c.Log.Info("database ready")
 	return st, nil
+}
+
+// startClipServer opens the clip server on its persisted loopback port.
+// A failure leaves the rest of LeGaJ working; the reason is shown where
+// the bookmarklet is installed.
+func (c *Core) startClipServer(ctx context.Context, svc *Services) {
+	ln, st, err := clip.Listen(ctx, svc.DB)
+	svc.ClipPort = st
+	if err != nil {
+		c.Log.Error("clip server not started", "err", err)
+		svc.ClipProblem = apperr.UserMessage(err)
+		return
+	}
+	if st.Previous != 0 {
+		c.Log.Warn("clip port was taken; moved", "from", st.Previous, "to", st.Port)
+	}
+	server := clip.NewServer(clip.ServerConfig{Port: st.Port, Saver: svc.Clip, Log: c.Log, Now: c.Now})
+	svc.ClipServer = server
+	go func() {
+		if err := server.Serve(ln); err != nil {
+			c.Log.Error("clip server stopped", "err", err)
+		}
+	}()
 }
 
 // startBackupLoop keeps the "daily" in daily backups true while LeGaJ stays
@@ -383,6 +420,14 @@ func (c *Core) Close() error {
 	c.loopDone.Wait() // no backup may run against a closing database
 	var errs []error
 	if svc != nil {
+		if svc.ClipServer != nil {
+			// No new clips, and the ones being saved finish first.
+			sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := svc.ClipServer.Shutdown(sctx); err != nil {
+				c.Log.Warn("clip server shutdown", "err", err)
+			}
+			cancel()
+		}
 		svc.Clip.Close() // stop enrichment and generation before their database goes away
 		svc.Jobs.Close()
 		errs = append(errs, svc.DB.Close())

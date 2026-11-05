@@ -2,6 +2,9 @@ package core_test
 
 import (
 	"context"
+	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -279,5 +282,55 @@ func TestR2_RestoreRefusedWhenReady(t *testing.T) {
 	defer c.Close()
 	if _, err := c.Restore(ctx, "legaj-20261101T090000Z.db"); err == nil {
 		t.Fatal("restore over a healthy open database was allowed")
+	}
+}
+
+func TestR18_CoreRunsTheClipServer(t *testing.T) {
+	o := opts(testenv.Isolate(t), time.Now())
+	o.StartClipServer = true
+	c, st, err := core.Boot(ctx, o)
+	if err != nil || st.Kind != store.StartupReady {
+		t.Fatalf("boot: %v %+v", err, st)
+	}
+	svc, err := c.Ready()
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := svc.ClipPort.Port
+	if svc.ClipServer == nil || port == 0 || svc.ClipProblem != "" {
+		t.Fatalf("clip server not running: %+v %q", svc.ClipPort, svc.ClipProblem)
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/clip", port)
+	res, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("popup: %d", res.StatusCode)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Closed: the port is free again.
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatalf("port %d still held after Close: %v", port, err)
+	}
+	ln.Close()
+}
+
+func TestR18_TestsStartNoClipServer(t *testing.T) {
+	c, _, err := core.Boot(ctx, opts(testenv.Isolate(t), time.Now()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	svc, err := c.Ready()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if svc.ClipServer != nil {
+		t.Fatal("a clip server started without StartClipServer")
 	}
 }

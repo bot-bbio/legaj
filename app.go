@@ -70,7 +70,7 @@ func (a *App) startup(ctx context.Context) {
 		a.setStartup(nil, errorView(apperr.Wrap(err, apperr.CodeStorage, "LeGaJ couldn't find its data folder.")))
 		return
 	}
-	c, st, err := core.Boot(ctx, core.Options{Dir: dir, Emitter: wailsEmitter{ctx}})
+	c, st, err := core.Boot(ctx, core.Options{Dir: dir, Emitter: wailsEmitter{ctx}, StartClipServer: true})
 	if err != nil {
 		a.setStartup(c, errorView(err))
 		return

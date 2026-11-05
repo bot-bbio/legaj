@@ -1,7 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"regexp"
 	"strconv"
 	"testing"
 	"time"
@@ -120,5 +126,106 @@ func TestR18_ClipStatusReadsTheStoredBookmarklet(t *testing.T) {
 	}
 	if st, err := app.ClipStatus(); err != nil || !st.NeedsReinstall {
 		t.Fatalf("stale bookmarklet: %+v %v", st, err)
+	}
+}
+
+var sessionMeta = regexp.MustCompile(`name="legaj-session" content="([0-9a-f]{32})"`)
+
+// clipOnPort saves a page through the real server, as the popup does, and
+// returns the status.
+func clipOnPort(t *testing.T, port int, page map[string]any) int {
+	t.Helper()
+	base := fmt.Sprintf("http://127.0.0.1:%d", port)
+	res, err := http.Get(base + "/clip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	html, _ := io.ReadAll(res.Body)
+	m := sessionMeta.FindSubmatch(html)
+	if m == nil {
+		t.Fatalf("no session in the popup page: %d", res.StatusCode)
+	}
+	body, err := json.Marshal(map[string]any{"session": string(m[1]), "page": page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, base+"/api/clips", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", base)
+	saved, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer saved.Body.Close()
+	return saved.StatusCode
+}
+
+func jobPage(url string) map[string]any {
+	return map[string]any{
+		"type": "legaj-clip", "v": 1, "url": url, "title": "Data Analyst", "meta": map[string]string{}, "h1": []string{"Data Analyst"},
+		"jsonld": []string{`{"@type":"JobPosting","title":"Data Analyst","hiringOrganization":"Contoso","description":"Analyse data."}`},
+	}
+}
+
+func settingsChanges(e *events.Recorder) int {
+	n := 0
+	for _, ev := range e.Events() {
+		if c, ok := ev.Payload.(events.Changed); ok && ev.Name == events.ChangedEvent && c.Entity == events.EntitySettings {
+			n++
+		}
+	}
+	return n
+}
+
+// A clip that reached this port came from a bookmark holding it, which proves
+// more than a drag can: it clears the banner even if the browser never said
+// the drop landed.
+func TestR18_ARealClipProvesTheBookmarklet(t *testing.T) {
+	app, svc, emitted := newClipApp(t)
+	ctx := context.Background()
+	if err := svc.DB.SetMeta(ctx, clip.BookmarkletPortKey, strconv.Itoa(clip.PortLow-1)); err != nil {
+		t.Fatal(err)
+	}
+	before := settingsChanges(emitted)
+
+	port := svc.ClipPort.Port
+	if code := clipOnPort(t, port, jobPage("https://example.com/jobs/1")); code != http.StatusOK {
+		t.Fatalf("clip: %d", code)
+	}
+	st, err := app.ClipStatus()
+	if err != nil || st.NeedsReinstall {
+		t.Fatalf("after a real clip: %+v %v", st, err)
+	}
+	if got, err := clip.InstalledPort(ctx, svc.DB); err != nil || got != port {
+		t.Fatalf("stored %d, %v; server on %d", got, err, port)
+	}
+	if n := settingsChanges(emitted) - before; n != 1 {
+		t.Fatalf("%d settings changes after the first clip, want 1", n)
+	}
+
+	// Only the change is news: a run of clips doesn't reload every view.
+	if code := clipOnPort(t, port, jobPage("https://example.com/jobs/2")); code != http.StatusOK {
+		t.Fatalf("clip: %d", code)
+	}
+	if n := settingsChanges(emitted) - before; n != 1 {
+		t.Fatalf("%d settings changes after the second clip, want 1", n)
+	}
+}
+
+func TestR18_AFailedClipProvesNothing(t *testing.T) {
+	app, svc, _ := newClipApp(t)
+	if err := svc.DB.SetMeta(context.Background(), clip.BookmarkletPortKey, strconv.Itoa(clip.PortLow-1)); err != nil {
+		t.Fatal(err)
+	}
+	empty := map[string]any{"type": "legaj-clip", "v": 1, "url": "https://example.com/jobs/1", "title": ""}
+	if code := clipOnPort(t, svc.ClipPort.Port, empty); code == http.StatusOK {
+		t.Fatal("a page with nothing on it was saved")
+	}
+	if st, err := app.ClipStatus(); err != nil || !st.NeedsReinstall {
+		t.Fatalf("%+v %v", st, err)
 	}
 }

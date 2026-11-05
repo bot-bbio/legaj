@@ -4,9 +4,11 @@
    * Settings. The bookmarklet has the clip server's port built in, so it's
    * generated here from the current status.
    *
-   * The install is recorded when the user drags or copies it, never when the
-   * page opens: the reinstall banner clears on that record, and a page that
-   * was only looked at leaves the old, broken bookmark in the browser.
+   * The install is recorded when a drag lands or the user copies it, never
+   * when the page opens or a drag merely starts: the reinstall banner clears
+   * on that record, and the old, broken bookmark would still be in the
+   * browser. A browser that doesn't report the drop costs nothing lasting:
+   * the first clip that reaches LeGaJ records the install too.
    */
   import { bookmarkletURL } from '../../bookmarklet/bookmarklet';
   import { api } from '../../lib/api';
@@ -27,6 +29,10 @@
     } catch (err) {
       failure = errorMessage(err);
     }
+  }
+
+  function dragEnded(e: DragEvent): void {
+    if (e.dataTransfer && e.dataTransfer.dropEffect !== 'none') void recordInstall();
   }
 
   async function copy(): Promise<void> {
@@ -55,7 +61,7 @@
     <li>
       Drag this button onto the bar:
       <!-- Clicked here it would run on LeGaJ's own window, not on a job page. -->
-      <a class="clipper" {href} ondragstart={recordInstall} onclick={(e) => e.preventDefault()}>Clip to LeGaJ</a>
+      <a class="clipper" {href} ondragend={dragEnded} onclick={(e) => e.preventDefault()}>Clip to LeGaJ</a>
     </li>
     <li>On a job posting, click the new bookmark, then click <b>Save</b> in the window that opens.</li>
   </ol>
@@ -71,7 +77,11 @@
     LeGaJ has to be running for the clipper to work. To have it ready whenever you sign in, turn on
     <b>Start LeGaJ with Windows</b> in Settings.
   </p>
-  <p class="muted">On a site LeGaJ doesn’t know, select the job description first: it helps LeGaJ find the details.</p>
+  <p class="muted">
+    On a site LeGaJ doesn’t know, select the job description first: it helps LeGaJ find the details. If a clip is still
+    missing its company or role and you have a Gemini key saved, LeGaJ asks Gemini, sending the page’s title and the
+    saved description, without your email or phone number.
+  </p>
 {/if}
 {#if failure}<p class="error" role="alert">{failure}</p>{/if}
 

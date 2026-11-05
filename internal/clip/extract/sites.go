@@ -101,12 +101,16 @@ func greenhouse(p Page) candidates {
 	return c
 }
 
+// sentenceEnd is a full stop after a whole word. Places have dots after
+// short abbreviations only: "St. Louis", "Washington, D.C.".
+var sentenceEnd = regexp.MustCompile(`\p{L}{4,}\.(?:\s|$)`)
+
 // looksLikePlaces tells a place, or a "; "-separated list of places
 // ("Berlin, Germany; München, Bayern, Germany"), from a teaser sentence:
-// each part is short and none holds a sentence break.
+// each part is short and none ends a sentence.
 func looksLikePlaces(s string) bool {
 	for _, part := range strings.Split(s, "; ") {
-		if utf8.RuneCountInString(part) > 80 || strings.Contains(part, ". ") || strings.HasSuffix(part, ".") {
+		if utf8.RuneCountInString(part) > 80 || sentenceEnd.MatchString(part) {
 			return false
 		}
 	}
@@ -134,11 +138,13 @@ func greenhouseDescription(text, role string) string {
 		return ""
 	}
 	// The posting ends at the job-alert box, or at the application form.
-	end := lineIndex(lines, start, len(lines), "Create a Job Alert", "Apply for this job")
+	end := slices.IndexFunc(lines[start:], func(l string) bool {
+		return strings.EqualFold(l, "Create a Job Alert") || strings.EqualFold(l, "Apply for this job")
+	})
 	if end < 0 {
-		end = len(lines)
+		return strings.Join(lines[start:], "\n")
 	}
-	return strings.Join(lines[start:end], "\n")
+	return strings.Join(lines[start:start+end], "\n")
 }
 
 // Lever: "<company> - <role>". Company names rarely contain " - "; roles
@@ -193,9 +199,11 @@ var (
 var linkedInMemberTitle = regexp.MustCompile(`^(.+) \| (.+?) \| LinkedIn$`)
 
 // linkedInMemberEnd ends the posting on a logged-in page: the "… more"
-// toggle, or the boxes that follow it.
+// toggle, or the boxes that follow it. "About the company" is a box too, but
+// also a common heading inside postings, so linkedInMemberDescription only
+// trusts the last one.
 var linkedInMemberEnd = []string{"… more", "See more", "Show more", "Show less", "Benefits found in job post",
-	"Set alert for similar jobs", "About the company", "Meet the hiring team"}
+	"Set alert for similar jobs", "Meet the hiring team"}
 
 func linkedIn(p Page) candidates {
 	var c candidates
@@ -211,7 +219,9 @@ func linkedIn(p Page) candidates {
 		c.role, c.company = []string{m[1]}, []string{m[2]}
 		c.location = []string{linkedInMemberLocation(lines, m[1])}
 	}
-	c.description = []string{linkedInMemberDescription(lines), linkedInDescription(lines)}
+	// In this order because only logged-out pages have the guest cut's consent
+	// line, while any posting can have an "About the job" line.
+	c.description = []string{linkedInDescription(lines), linkedInMemberDescription(lines)}
 	return c
 }
 
@@ -245,6 +255,9 @@ func linkedInMemberDescription(lines []string) string {
 	}
 	end := lineIndex(lines, about+1, len(lines), linkedInMemberEnd...)
 	if end < 0 {
+		end = lastLineIndex(lines, len(lines), "About the company")
+	}
+	if end <= about {
 		end = len(lines)
 	}
 	return strings.TrimSpace(strings.Join(lines[about+1:end], "\n"))
@@ -255,20 +268,26 @@ func linkedInMemberDescription(lines []string) string {
 // contain " - " and " | " ("Product Manager - Apparel").
 var indeedTitle = regexp.MustCompile(`^(.+) - (.+?) - Indeed(?:\.com)?$`)
 
+// notAnEmployer is what sits under the role when Indeed shows no employer:
+// the pay ("$90,000 a year", "From 25 an hour") or an address with a ZIP code.
+var notAnEmployer = regexp.MustCompile(`(?i)\p{Sc}|\b\d{5}\b|\ban? (?:year|month|week|day|hour)\b`)
+
 // indeed reads both Indeed layouts. On a job page the role and place come
 // from the title and the company is the line under the role; on a search
 // page the selected job sits after "Job Post Details" as role, company,
 // "•", place. The posting runs from "Full job description" to "Explore
-// other jobs" or "Report job".
+// other jobs" or "Report job". That first line is in English only, so on
+// other sites the header is all of the text and the posting isn't cut.
 func indeed(p Page) candidates {
 	var c candidates
 	lines := strings.Split(normalizeText(p.Text), "\n")
 	full := lineIndex(lines, 0, len(lines), "Full job description")
+	headerEnd := full
 	if full < 0 {
-		return c
+		headerEnd = len(lines)
 	}
 	// The header is read line by line, ignoring blank lines.
-	header := slices.DeleteFunc(slices.Clone(lines[:full]), func(l string) bool { return l == "" })
+	header := slices.DeleteFunc(slices.Clone(lines[:headerEnd]), func(l string) bool { return l == "" })
 	if d := lastLineIndex(header, len(header), "Job Post Details"); d >= 0 && d+2 < len(header) {
 		c.role, c.company = []string{header[d+1]}, []string{header[d+2]}
 		if d+4 < len(header) && header[d+3] == "•" {
@@ -276,9 +295,12 @@ func indeed(p Page) candidates {
 		}
 	} else if m := indeedTitle.FindStringSubmatch(cleanLine(p.Title, false)); m != nil {
 		c.role, c.location = []string{m[1]}, []string{m[2]}
-		if r := lineIndex(header, 0, len(header), m[1]); r >= 0 && r+1 < len(header) {
+		if r := lineIndex(header, 0, len(header), m[1]); r >= 0 && r+1 < len(header) && !notAnEmployer.MatchString(header[r+1]) {
 			c.company = []string{header[r+1]}
 		}
+	}
+	if full < 0 {
+		return c
 	}
 	end := lineIndex(lines, full+1, len(lines), "Explore other jobs", "Report job")
 	if end < 0 {
@@ -367,8 +389,10 @@ var boards = map[string][]string{
 	"mygreenhouse": {"greenhouse"}, // Greenhouse's candidate portal (spike capture)
 }
 
-// searchHeading is a search page's heading or title, never a role: "product
-// manager jobs in New York State", "Now Hiring: 75 … Jobs".
+// searchHeading is a search page's heading or title: "product manager jobs
+// in New York State", "Now Hiring: 75 … Jobs". It's a check on text read off
+// the page; structured data and AI answers name a real role, however worded
+// ("Now Hiring: Delivery Driver").
 var searchHeading = regexp.MustCompile(`(?i)^now hiring\b|\bjobs (?:in|near|at)\b|^browse\b`)
 
 // boardRule says when a job board's name is page chrome.
@@ -428,7 +452,7 @@ func plausibleCompany(c, host string, rule boardRule) bool {
 func plausibleRole(r, company, host string) bool {
 	n := utf8.RuneCountInString(r)
 	switch {
-	case n < 2 || n > MaxDetail || !hasLetterOrDigit(r) || isGeneric(r) || isBoard(r, host, boardsNever) || searchHeading.MatchString(r):
+	case n < 2 || n > MaxDetail || !hasLetterOrDigit(r) || isGeneric(r) || isBoard(r, host, boardsNever):
 		return false
 	case company != "" && strings.EqualFold(r, company):
 		return false

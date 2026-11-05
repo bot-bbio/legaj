@@ -11,7 +11,7 @@ Run these on a clean Windows 10 or 11 machine with the built installer before a 
 - [ ] Upload a second resume after marking a row Applied: that row's **Resume** still opens the first file.
 
 ## Clipper (R18)
-Automated: the shipped script ran in headless Chrome and Edge against the real server. This list covers what that can't reach.
+Automated in `scripts/verify.ps1`: the built bookmarklet and the popup's real page and script run together in jsdom, and the server's checks run over real HTTP. No real browser runs in verify, so this list is the only browser check of a release build.
 
 - [ ] In the setup wizard, drag **Clip to LeGaJ** onto the bookmarks bar, in Edge and in Chrome. Dragging out of the app window can't be scripted, so this is its first real test. If the drop does nothing, try **Copy the clipper**, paste it as a new bookmark's address, and report the failed drag.
 - [ ] Click the new bookmark on a job page, then **Save**. The job appears in Pipeline at once, and **Install the clipper** leaves the setup checklist.

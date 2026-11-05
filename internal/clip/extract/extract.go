@@ -130,7 +130,7 @@ func (r *Result) offer(l Layer, c candidates, s *site, host string) {
 	if r.Role == "" {
 		for _, v := range c.role {
 			v = cleanLine(v, c.markup)
-			if plausibleRole(v, r.Company, host) {
+			if plausibleRole(v, r.Company, host) && (l == LayerJSONLD || !searchHeading.MatchString(v)) {
 				r.Role, r.From.Role = v, l
 				break
 			}

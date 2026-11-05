@@ -64,6 +64,8 @@ type ServerConfig struct {
 	Log   *slog.Logger
 	// Now is the clock; default time.Now.
 	Now func() time.Time
+	// OnSaved, if set, runs after each save that worked, before the reply.
+	OnSaved func(ctx context.Context)
 }
 
 // Server is the clip server.
@@ -196,13 +198,22 @@ func (s *Server) issue() (string, error) {
 	return id, nil
 }
 
-// take uses up a session; it reports whether it was valid.
-func (s *Server) take(id string) bool {
+// take uses up a session; it returns when the session was issued and
+// whether it was valid.
+func (s *Server) take(id string) (time.Time, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	at, ok := s.sessions[id]
 	delete(s.sessions, id)
-	return ok && s.cfg.Now().Sub(at) <= SessionTTL
+	return at, ok && s.cfg.Now().Sub(at) <= SessionTTL
+}
+
+// giveBack restores a session after a save that failed, so the popup can
+// try again. It keeps its issue time: a retry never extends a session.
+func (s *Server) giveBack(id string, issued time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions[id] = issued
 }
 
 // allow counts a save against the rate limit: RateLimit in any minute.
@@ -297,7 +308,8 @@ func (s *Server) save(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusBadRequest, "The page sent something LeGaJ can't read.")
 		return
 	}
-	if !s.take(req.Session) {
+	issued, ok := s.take(req.Session)
+	if !ok {
 		refuse(w, http.StatusForbidden, "This clip window has expired. Click the bookmarklet again.")
 		return
 	}
@@ -310,6 +322,7 @@ func (s *Server) save(w http.ResponseWriter, r *http.Request) {
 		URL: p.URL, Title: p.Title, JSONLD: p.JSONLD, Meta: p.Meta, H1: p.H1, Selection: p.Selection, Text: p.Text,
 	})
 	if err != nil {
+		s.giveBack(req.Session, issued)
 		status := http.StatusInternalServerError
 		switch apperr.CodeOf(err) {
 		case apperr.CodeInvalid:
@@ -322,6 +335,9 @@ func (s *Server) save(w http.ResponseWriter, r *http.Request) {
 		}
 		refuse(w, status, apperr.UserMessage(err))
 		return
+	}
+	if s.cfg.OnSaved != nil {
+		s.cfg.OnSaved(r.Context())
 	}
 	writeJSON(w, http.StatusOK, reply{OK: true, Result: &res})
 }

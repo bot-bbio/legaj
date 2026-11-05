@@ -24,6 +24,14 @@
     }
   }
 
+  function originOf(url) {
+    try {
+      return new URL(url).origin;
+    } catch {
+      return '';
+    }
+  }
+
   function stringList(v, max) {
     return Array.isArray(v) && v.length <= max && v.every((s) => typeof s === 'string');
   }
@@ -35,7 +43,6 @@
       p.type === 'legaj-clip' &&
       p.v === 1 &&
       typeof p.url === 'string' &&
-      p.url !== '' &&
       typeof p.title === 'string' &&
       stringList(p.jsonld, 20) &&
       stringList(p.h1, 5) &&
@@ -87,6 +94,11 @@
         return;
       }
       setStatus(typeof body.message === 'string' && body.message !== '' ? body.message : "LeGaJ couldn't save this clip.", 'bad');
+      // Too many clips, or a problem on LeGaJ's side: this window can try
+      // again. Anything else needs a fresh click on the bookmarklet.
+      if (res.status === 429 || res.status >= 500) {
+        $('save').disabled = false;
+      }
     } catch {
       setStatus("LeGaJ isn't answering. Make sure it's running, then click the bookmarklet again.", 'bad');
     }
@@ -110,7 +122,9 @@
       return;
     }
     clearTimeout(timer);
-    if (!valid(e.data)) {
+    // The browser vouches for e.origin; the url is only the page's word, and
+    // it's what the preview shows and the row stores.
+    if (!valid(e.data) || originOf(e.data.url) !== e.origin) {
       setStatus("The page sent something LeGaJ can't read.", 'bad');
       return;
     }

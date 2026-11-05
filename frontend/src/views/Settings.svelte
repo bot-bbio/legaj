@@ -19,9 +19,13 @@
     if (s.status === 'ready' && !dirty) draft = { ...s.data.settings };
   });
 
-  // Opens by itself when the port moved: the banner leads here (R18).
-  let reinstalling = $state(false);
-  const showInstall = $derived(reinstalling || ($clipStore.status === 'ready' && $clipStore.data.needsReinstall));
+  // Opens by itself when the port moved: the banner leads here (R18). It stays
+  // open after the flag clears, since recording the install clears it while
+  // the user may still be dragging, or about to follow the paste steps.
+  let showInstall = $state(false);
+  $effect(() => {
+    if ($clipStore.status === 'ready' && $clipStore.data.needsReinstall) showInstall = true;
+  });
 
   async function saveSettings(e: SubmitEvent): Promise<void> {
     e.preventDefault();
@@ -120,7 +124,7 @@
       <Bookmarklet />
     {:else}
       <p>The clipper is a bookmark that saves job postings from your browser to your Pipeline.</p>
-      <p><button type="button" class="secondary" onclick={() => (reinstalling = true)}>Reinstall bookmarklet</button></p>
+      <p><button type="button" class="secondary" onclick={() => (showInstall = true)}>Reinstall bookmarklet</button></p>
     {/if}
   </section>
 

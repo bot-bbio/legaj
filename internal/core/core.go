@@ -354,13 +354,34 @@ func (c *Core) startClipServer(ctx context.Context, svc *Services) {
 	if st.Previous != 0 {
 		c.Log.Warn("clip port was taken; moved", "from", st.Previous, "to", st.Port)
 	}
-	server := clip.NewServer(clip.ServerConfig{Port: st.Port, Saver: svc.Clip, Log: c.Log, Now: c.Now})
+	server := clip.NewServer(clip.ServerConfig{
+		Port: st.Port, Saver: svc.Clip, Log: c.Log, Now: c.Now,
+		OnSaved: func(ctx context.Context) { c.confirmBookmarklet(ctx, svc, st.Port) },
+	})
 	svc.ClipServer = server
 	go func() {
 		if err := server.Serve(ln); err != nil {
 			c.Log.Error("clip server stopped", "err", err)
 		}
 	}()
+}
+
+// confirmBookmarklet records a clip's arrival as proof of the install: the
+// bookmark that sent it holds this port. It's the record that can't be wrong,
+// so it also clears the banner when a browser never reported the drop.
+func (c *Core) confirmBookmarklet(ctx context.Context, svc *Services, port int) {
+	installed, err := clip.InstalledPort(ctx, svc.DB)
+	if err == nil && installed == port {
+		return // only a change is news to the views
+	}
+	if err == nil {
+		err = clip.MarkInstalled(ctx, svc.DB, port)
+	}
+	if err != nil {
+		c.Log.Warn("clip: bookmarklet not recorded", "err", err)
+		return
+	}
+	c.Bus.Emit(events.Change(events.EntitySettings))
 }
 
 // startBackupLoop keeps the "daily" in daily backups true while LeGaJ stays

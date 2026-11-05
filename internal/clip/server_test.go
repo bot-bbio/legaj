@@ -35,6 +35,12 @@ func (f *fakeSaver) Save(_ context.Context, p extract.Page) (clip.SaveResult, er
 	return f.result, f.err
 }
 
+func (f *fakeSaver) failWith(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.err = err
+}
+
 func (f *fakeSaver) count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -352,6 +358,80 @@ func TestR18_SaveReturnsResult(t *testing.T) {
 	}
 }
 
+// The popup's script reads these names; frontend/src/bookmarklet/popup.test.ts
+// feeds it the same ones, so a rename here must fail here.
+func TestR18_ResultKeepsTheNamesThePopupReads(t *testing.T) {
+	s := startServer(t, &fakeSaver{result: clip.SaveResult{Created: true}})
+	_, body := s.post(t, s.session(t), validPage("https://careers.example.com/1"), nil)
+	var out struct {
+		OK     bool           `json:"ok"`
+		Result map[string]any `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(body), &out); err != nil || !out.OK {
+		t.Fatalf("body %s: %v", body, err)
+	}
+	for _, name := range []string{"created", "company", "role", "needsCompany", "enriching"} {
+		if _, ok := out.Result[name]; !ok {
+			t.Errorf("the result has no %q: %s", name, body)
+		}
+	}
+}
+
+// The popup says "try again" after a failed save, so the same window must
+// be able to: the session goes only with a save that worked.
+func TestR18_FailedSaveCanBeRetried(t *testing.T) {
+	saver := &fakeSaver{}
+	saver.failWith(apperr.New(apperr.CodeStorage, "LeGaJ couldn't read your profile. Try again."))
+	s := startServer(t, saver)
+	session := s.session(t)
+	page := validPage("https://example.com/jobs/1")
+
+	if res, body := s.post(t, session, page, nil); res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("failing save: %d %s", res.StatusCode, body)
+	}
+	saver.failWith(nil)
+	if res, body := s.post(t, session, page, nil); res.StatusCode != http.StatusOK {
+		t.Fatalf("retry: %d %s", res.StatusCode, body)
+	}
+	if res, _ := s.post(t, session, page, nil); res.StatusCode != http.StatusForbidden {
+		t.Fatalf("a session outlived its save: %d", res.StatusCode)
+	}
+}
+
+func TestR18_RetryKeepsTheSessionsDeadline(t *testing.T) {
+	saver := &fakeSaver{}
+	saver.failWith(apperr.New(apperr.CodeStorage, "Try again."))
+	s := startServer(t, saver)
+	session := s.session(t)
+	s.clock.advance(clip.SessionTTL - time.Minute)
+	if res, _ := s.post(t, session, validPage("https://example.com/jobs/1"), nil); res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("failing save: %d", res.StatusCode)
+	}
+	saver.failWith(nil)
+	s.clock.advance(2 * time.Minute)
+	if res, _ := s.post(t, session, validPage("https://example.com/jobs/1"), nil); res.StatusCode != http.StatusForbidden {
+		t.Fatalf("a failed save extended the session: %d", res.StatusCode)
+	}
+}
+
+// Said "wait a moment and try again": the wait must be all it takes.
+func TestR18_RateLimitLeavesTheSessionUsable(t *testing.T) {
+	s := startServer(t, &fakeSaver{})
+	for i := range clip.RateLimit {
+		if res, _ := s.post(t, s.session(t), validPage(fmt.Sprintf("https://example.com/jobs/%d", i)), nil); res.StatusCode != http.StatusOK {
+			t.Fatalf("save %d: %d", i, res.StatusCode)
+		}
+	}
+	session := s.session(t)
+	if res, _ := s.post(t, session, validPage("https://example.com/jobs/late"), nil); res.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("over the limit: %d", res.StatusCode)
+	}
+	s.clock.advance(61 * time.Second)
+	if res, body := s.post(t, session, validPage("https://example.com/jobs/late"), nil); res.StatusCode != http.StatusOK {
+		t.Fatalf("after the wait: %d %s", res.StatusCode, body)
+	}
+}
+
 func TestR18_PopupScriptTreatsPageAsText(t *testing.T) {
 	// A static guard on the popup's script: the page snapshot is hostile, so
 	// it's only ever shown with textContent, and only the window that opened
@@ -367,7 +447,11 @@ func TestR18_PopupScriptTreatsPageAsText(t *testing.T) {
 			t.Errorf("clip.js uses %s", banned)
 		}
 	}
-	for _, needed := range []string{"e.source !== window.opener", ".textContent =", "'/api/clips'"} {
+	for _, needed := range []string{
+		"e.source !== window.opener", ".textContent =", "'/api/clips'",
+		"originOf(e.data.url) !== e.origin", // the browser vouches for the sender, not the page's own claim
+		"res.status === 429 || res.status >= 500",
+	} {
 		if !strings.Contains(js, needed) {
 			t.Errorf("clip.js lacks %q", needed)
 		}

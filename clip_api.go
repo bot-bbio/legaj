@@ -36,9 +36,10 @@ func (a *App) ClipStatus() (ClipStatusView, error) {
 }
 
 // MarkBookmarkletInstalled records that the user took the bookmarklet for
-// the running server's port. The install page calls it when the user drags
-// or copies the bookmarklet, not when the page opens: a page merely seen
-// leaves the old bookmark in place, so the banner has to stay.
+// the running server's port. The install page calls it when a drag lands or
+// the user copies the bookmarklet, never when the page opens: a page merely
+// seen leaves the old bookmark in place, so the banner has to stay. A clip
+// reaching the server records the same thing (Core.confirmBookmarklet).
 func (a *App) MarkBookmarkletInstalled() error {
 	c, svc, err := a.services()
 	if err != nil {

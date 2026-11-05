@@ -64,16 +64,26 @@ describe('R18 install page', () => {
     expect(api.markBookmarkletInstalled).not.toHaveBeenCalled();
   });
 
-  it('records the install when the user drags it', async () => {
+  it('records the install when a drag lands', async () => {
     render(Bookmarklet);
-    await fireEvent.dragStart(await link());
+    await fireEvent.dragEnd(await link(), { dataTransfer: { dropEffect: 'link' } });
     expect(api.markBookmarkletInstalled).toHaveBeenCalledOnce();
+  });
+
+  // Starting a drag proves nothing: Esc, or a drop beside the bar, leaves the
+  // broken bookmark in place, and a record here would hide the banner for good.
+  it('records nothing when a drag is cancelled', async () => {
+    render(Bookmarklet);
+    const el = await link();
+    await fireEvent.dragStart(el);
+    await fireEvent.dragEnd(el, { dataTransfer: { dropEffect: 'none' } });
+    expect(api.markBookmarkletInstalled).not.toHaveBeenCalled();
   });
 
   it('shows why when the install can not be recorded', async () => {
     api.markBookmarkletInstalled.mockRejectedValue('LeGaJ’s clipper isn’t running.');
     render(Bookmarklet);
-    await fireEvent.dragStart(await link());
+    await fireEvent.dragEnd(await link(), { dataTransfer: { dropEffect: 'copy' } });
     expect(await screen.findByRole('alert')).toHaveTextContent('LeGaJ’s clipper isn’t running.');
   });
 
@@ -128,6 +138,15 @@ describe('R18 install page', () => {
     render(Bookmarklet);
     await link();
     expect(document.body.textContent).toContain('Ctrl+Shift+B');
+  });
+
+  // Saving a clip can send page text to Google with no further click (D31).
+  it('says when a clip reaches Gemini, and what it sends', async () => {
+    render(Bookmarklet);
+    await link();
+    const page = document.body.textContent.replace(/\s+/g, ' ');
+    expect(page).toMatch(/missing its company or role/i);
+    expect(page).toMatch(/LeGaJ asks Gemini, sending the page’s title and the saved description/i);
   });
 
   it('says that selecting the description helps on unknown pages (R19)', async () => {

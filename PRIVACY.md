@@ -21,13 +21,15 @@ The app's window is drawn by Microsoft Edge WebView2, which keeps its own small 
 
 ## What leaves your computer
 
-### Google Gemini (only when you use an AI feature)
+### Google Gemini (when you use an AI feature, or a clip is missing details)
 
 When you parse a resume, generate a cover letter, regenerate a paragraph, draft form answers or ask for interview questions, LeGaJ sends a request straight from your computer to Google's Gemini API with your own key. A request contains:
 
 - the job description of **that one application** (never other applications);
 - your profile: name, headline, target role, summary, experience, education and skills. Your **email, phone number, location and links are left out**;
 - for resume parsing, the resume file you chose.
+
+**Clipping a job can also reach Gemini, without a further click.** The clipper hands the page only to LeGaJ on your computer. But if you have a key saved and LeGaJ can't find a clip's company or role, it then asks Gemini for them. That request contains the page's title and up to 20 KB of the description LeGaJ saved, with your email and phone number removed, and nothing from your profile. On a page LeGaJ doesn't recognise, the description can be all the text it could read there, including other people's names. To limit what's saved and sent, select the job description before you click the clipper.
 
 How Google may use that data depends on your Gemini plan:
 

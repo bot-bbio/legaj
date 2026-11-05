@@ -1,6 +1,5 @@
 import { render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { tick } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ClipStatus, Settings, SettingsView } from '../lib/api';
@@ -28,13 +27,11 @@ const api = {
   clipStatus: vi.fn<() => Promise<ClipStatus>>(() =>
     Promise.resolve({ running: true, port: 47123, needsReinstall: false, message: '' }),
   ),
-  markBookmarkletInstalled: vi.fn<() => Promise<void>>(),
   copyText: vi.fn<(text: string) => Promise<void>>(),
 };
 vi.mock('../lib/api', () => ({ api }));
 
 const { default: SettingsView_ } = await import('./Settings.svelte');
-const { clipStore } = await import('../lib/stores/clip');
 
 const SECRET = 'AIzaSyD-SENTINEL-KEY-0123456789abcdWXYZ';
 
@@ -146,18 +143,5 @@ describe('R18 clipper in Settings', () => {
     api.clipStatus.mockResolvedValue(clip(true));
     render(SettingsView_);
     expect(await screen.findByRole('link', { name: /clip to legaj/i })).toBeInTheDocument();
-  });
-
-  // Recording the install clears the flag. The page must stay: its button may
-  // still be mid-drag, and after a copy the paste steps are what's needed next.
-  it('stays open once the install is recorded', async () => {
-    api.clipStatus.mockResolvedValue(clip(true));
-    render(SettingsView_);
-    const link = await screen.findByRole('link', { name: /clip to legaj/i });
-
-    api.clipStatus.mockResolvedValue(clip(false));
-    await clipStore.refresh();
-    await tick();
-    expect(link).toBeInTheDocument();
   });
 });

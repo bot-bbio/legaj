@@ -15,7 +15,7 @@ Automated in `scripts/verify.ps1`: the built bookmarklet and the popup's real pa
 
 - [ ] In the setup wizard, drag **Clip to LeGaJ** onto the bookmarks bar, in Edge and in Chrome. Dragging out of the app window can't be scripted, so this is its first real test. If the drop does nothing, try **Copy the clipper**, paste it as a new bookmark's address, and report the failed drag.
 - [ ] Click the new bookmark on a job page, then **Save**. The job appears in Pipeline at once, and **Install the clipper** leaves the setup checklist.
-- [ ] Close LeGaJ. In PowerShell, hold the port from the bookmark's address: `$l = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, <port>); $l.Start()`. Start LeGaJ: the reinstall banner appears, and **Reinstall bookmarklet** opens the install page in Settings. Drag or copy the new bookmark: the banner clears without a restart. Run `$l.Stop()`.
+- [ ] Close LeGaJ. In PowerShell, hold the port from the bookmark's address: `$l = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, <port>); $l.Start()`. Start LeGaJ: the reinstall banner appears, and **Reinstall bookmarklet** opens the install page in Settings. Add the new bookmark and clip a job with it: the banner clears without a restart. Run `$l.Stop()`.
 
 ## Single instance (R42)
 - [ ] Launch LeGaJ, then minimize it. Launch it again from the Start menu: no second window appears, and the first window is restored and focused.

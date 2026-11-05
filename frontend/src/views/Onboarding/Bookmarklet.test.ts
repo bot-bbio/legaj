@@ -16,7 +16,6 @@ const status = (over: Partial<ClipStatus> = {}): ClipStatus => ({
 
 const api = {
   clipStatus: vi.fn<() => Promise<ClipStatus>>(),
-  markBookmarkletInstalled: vi.fn<() => Promise<void>>(),
   copyText: vi.fn<(text: string) => Promise<void>>(),
 };
 vi.mock('../../lib/api', () => ({ api }));
@@ -29,7 +28,6 @@ describe('R18 install page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     api.clipStatus.mockResolvedValue(status());
-    api.markBookmarkletInstalled.mockResolvedValue();
     api.copyText.mockResolvedValue();
   });
 
@@ -53,56 +51,22 @@ describe('R18 install page', () => {
     const click = createEvent.click(el);
     await fireEvent(el, click);
     expect(click.defaultPrevented).toBe(true);
-    expect(api.markBookmarkletInstalled).not.toHaveBeenCalled();
   });
 
-  // The banner clears on this record, so seeing the page must not count:
-  // the old, broken bookmark would still be in the browser.
-  it('records nothing for just showing the page', async () => {
-    render(Bookmarklet);
-    await link();
-    expect(api.markBookmarkletInstalled).not.toHaveBeenCalled();
-  });
-
-  it('records the install when a drag lands', async () => {
-    render(Bookmarklet);
-    await fireEvent.dragEnd(await link(), { dataTransfer: { dropEffect: 'link' } });
-    expect(api.markBookmarkletInstalled).toHaveBeenCalledOnce();
-  });
-
-  // Starting a drag proves nothing: Esc, or a drop beside the bar, leaves the
-  // broken bookmark in place, and a record here would hide the banner for good.
-  it('records nothing when a drag is cancelled', async () => {
-    render(Bookmarklet);
-    const el = await link();
-    await fireEvent.dragStart(el);
-    await fireEvent.dragEnd(el, { dataTransfer: { dropEffect: 'none' } });
-    expect(api.markBookmarkletInstalled).not.toHaveBeenCalled();
-  });
-
-  it('shows why when the install can not be recorded', async () => {
-    api.markBookmarkletInstalled.mockRejectedValue('LeGaJ’s clipper isn’t running.');
-    render(Bookmarklet);
-    await fireEvent.dragEnd(await link(), { dataTransfer: { dropEffect: 'copy' } });
-    expect(await screen.findByRole('alert')).toHaveTextContent('LeGaJ’s clipper isn’t running.');
-  });
-
-  it('offers a copy for when dragging out of LeGaJ does not work, and records it', async () => {
+  it('offers a copy for when dragging out of LeGaJ does not work', async () => {
     render(Bookmarklet);
     const href = (await link()).getAttribute('href');
     await userEvent.click(screen.getByRole('button', { name: /copy/i }));
     expect(api.copyText).toHaveBeenCalledExactlyOnceWith(href);
-    expect(api.markBookmarkletInstalled).toHaveBeenCalledOnce();
     expect(await screen.findByText(/copied/i)).toBeInTheDocument();
   });
 
-  it('records nothing when the copy fails', async () => {
+  it('says so when the copy fails', async () => {
     api.copyText.mockRejectedValue('LeGaJ couldn’t copy to the clipboard.');
     render(Bookmarklet);
     await link();
     await userEvent.click(screen.getByRole('button', { name: /copy/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent('couldn’t copy');
-    expect(api.markBookmarkletInstalled).not.toHaveBeenCalled();
     expect(screen.queryByText(/copied/i)).not.toBeInTheDocument();
   });
 

@@ -298,6 +298,10 @@ func (c *Core) open(ctx context.Context) (store.Startup, error) {
 	})
 	svc.Clip = clip.New(clip.Config{
 		Pipeline: svc.Pipeline, AI: c.AI, Profile: svc.Profile, Model: svc.model, Log: c.Log,
+		HasKey: func() bool {
+			key, err := c.Secrets.Status()
+			return err == nil && key.Saved
+		},
 	})
 	if c.opts.StartClipServer {
 		c.startClipServer(ctx, svc)
@@ -366,9 +370,10 @@ func (c *Core) startClipServer(ctx context.Context, svc *Services) {
 	}()
 }
 
-// confirmBookmarklet records a clip's arrival as proof of the install: the
-// bookmark that sent it holds this port. It's the record that can't be wrong,
-// so it also clears the banner when a browser never reported the drop.
+// confirmBookmarklet records which bookmarklet is installed. A clip that
+// reached this port came from a bookmark holding it, the only proof there
+// is: a drag can land anywhere and a copy may never be pasted, and the
+// reinstall banner must not clear while the old bookmark is what's in use.
 func (c *Core) confirmBookmarklet(ctx context.Context, svc *Services, port int) {
 	installed, err := clip.InstalledPort(ctx, svc.DB)
 	if err == nil && installed == port {

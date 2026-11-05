@@ -21,7 +21,7 @@ func TestR41_PublicDocs(t *testing.T) {
 	want := map[string][]string{
 		"LICENSE":    {"MIT License", "Copyright (c) 2026 Roberto Montero", "WITHOUT WARRANTY OF ANY KIND"},
 		"README.md":  {"## Mission", "## Setup", "## Usage", "## Architecture", "Roberto Montero", "linkedin.com/in/alvvays", "PRIVACY.md", "INSTALL.md"},
-		"PRIVACY.md": {"Gemini", "Free tier", "Paid tier", "Credential Manager", "GitHub", "update check", "Clipping a job can also reach Gemini"},
+		"PRIVACY.md": {"Gemini", "Free tier", "Paid tier", "Credential Manager", "GitHub", "update check", "Clipping a job can also reach Gemini", "your name, if the page shows it"},
 		"INSTALL.md": {"More info", "Run anyway", "SHA-256", "LOCALAPPDATA", "(docs/img/smartscreen-1.png)", "(docs/img/smartscreen-2.png)"},
 	}
 	// The install guide's SmartScreen screenshots exist (R41).

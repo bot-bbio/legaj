@@ -89,8 +89,6 @@ export const api = {
   checkForUpdate: (): Promise<UpdateResult> => App.CheckForUpdate(),
   /** Where the clipper listens, and whether the bookmarklet needs reinstalling (R18). */
   clipStatus: (): Promise<ClipStatus> => App.ClipStatus(),
-  /** Records that the user took the bookmarklet for the current port, which clears the reinstall banner. */
-  markBookmarkletInstalled: (): Promise<void> => App.MarkBookmarkletInstalled(),
 
   getSettings: (): Promise<SettingsView> => SettingsAPI.GetSettings(),
   saveSettings: (s: Settings): Promise<SettingsView> => SettingsAPI.SaveSettings(s),

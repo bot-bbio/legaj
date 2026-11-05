@@ -16,8 +16,9 @@ import (
 const (
 	// PortKey is the app_meta key holding the server's port.
 	PortKey = "clip_port"
-	// BookmarkletPortKey holds the port of the bookmarklet the user
-	// installed last; the install page writes it through MarkInstalled.
+	// BookmarkletPortKey holds the port the installed bookmarklet is taken
+	// to have: the one a clip last arrived on, or the port LeGaJ had to
+	// leave (MarkInstalled).
 	BookmarkletPortKey = "clip_bookmarklet_port"
 	// PortLow and PortHigh bound the ports LeGaJ picks from: registered
 	// ports few programs use, below Windows' dynamic range (49152+).
@@ -40,15 +41,15 @@ type PortStatus struct {
 	// Previous is the persisted port another program held at startup; 0
 	// when the port didn't change.
 	Previous int `json:"previous"`
-	// Bookmarklet is the port of the installed bookmarklet; 0 when none was
-	// installed yet.
+	// Bookmarklet is the port the installed bookmarklet is taken to have; 0
+	// before the first clip.
 	Bookmarklet int `json:"bookmarklet"`
 }
 
 // NeedsReinstall reports whether the installed bookmarklet points at
 // another port, so the app must show the banner and a regenerated
-// bookmarklet (R18). It stays true across restarts until the user
-// reinstalls.
+// bookmarklet (R18). It stays true across restarts until a clip arrives from
+// a bookmark holding the current port.
 func (s PortStatus) NeedsReinstall() bool {
 	return s.Port != 0 && s.Bookmarklet != 0 && s.Bookmarklet != s.Port
 }
@@ -88,13 +89,22 @@ func Listen(ctx context.Context, meta Meta) (net.Listener, PortStatus, error) {
 			_ = ln.Close()
 			return nil, st, storageErr(err)
 		}
+		// Any bookmark made so far holds the old port, even with no clip yet
+		// to prove it, so the banner must show (R18).
+		if st.Previous != 0 && st.Bookmarklet == 0 {
+			if err := MarkInstalled(ctx, meta, st.Previous); err != nil {
+				_ = ln.Close()
+				return nil, st, err
+			}
+			st.Bookmarklet = st.Previous
+		}
 		st.Port = port
 		return ln, st, nil
 	}
 	return nil, st, errNoPort
 }
 
-// InstalledPort reads the port of the bookmarklet the user installed last.
+// InstalledPort reads the port the installed bookmarklet is taken to have.
 // It's 0 when none was installed; a damaged value reads the same way.
 func InstalledPort(ctx context.Context, meta Meta) (int, error) {
 	v, ok, err := meta.GetMeta(ctx, BookmarkletPortKey)
@@ -111,7 +121,7 @@ func InstalledPort(ctx context.Context, meta Meta) (int, error) {
 	return port, nil
 }
 
-// MarkInstalled records that the user took the bookmarklet built for port.
+// MarkInstalled records the port the installed bookmarklet is taken to have.
 func MarkInstalled(ctx context.Context, meta Meta, port int) error {
 	if err := meta.SetMeta(ctx, BookmarkletPortKey, strconv.Itoa(port)); err != nil {
 		return storageErr(err)

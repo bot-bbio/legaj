@@ -12,7 +12,7 @@
 
 {#if status?.needsReinstall}
   <div class="banner" role="status">
-    <span>Your clipper bookmark no longer reaches LeGaJ. Reinstall it to keep clipping jobs.</span>
+    <span>Your clipper bookmark no longer reaches LeGaJ. Reinstall it, then clip a job to clear this message.</span>
     <button type="button" onclick={() => navigate('settings')}>Reinstall bookmarklet</button>
   </div>
 {:else if status && !status.running && status.message}

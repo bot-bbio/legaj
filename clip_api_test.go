@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,61 +60,6 @@ func TestR18_ClipStatusWithoutServer(t *testing.T) {
 	}
 }
 
-func TestR18_InstallWithoutServerIsRefused(t *testing.T) {
-	app, _ := newTestApp(t)
-	if err := app.MarkBookmarkletInstalled(); err == nil {
-		t.Fatal("recorded a bookmarklet for a server that isn't running")
-	}
-	_, svc, err := app.services()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if port, err := clip.InstalledPort(context.Background(), svc.DB); err != nil || port != 0 {
-		t.Fatalf("stored %d, %v", port, err)
-	}
-}
-
-// The port moved and the user took the new bookmarklet: the banner clears
-// at once, without a restart, and every view hears about it (R3).
-func TestR18_InstallClearsReinstallAtOnce(t *testing.T) {
-	app, svc, emitted := newClipApp(t)
-	ctx := context.Background()
-	if err := svc.DB.SetMeta(ctx, clip.BookmarkletPortKey, strconv.Itoa(clip.PortLow-1)); err != nil {
-		t.Fatal(err)
-	}
-	st, err := app.ClipStatus()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !st.Running || !st.NeedsReinstall {
-		t.Fatalf("before reinstalling: %+v", st)
-	}
-	before := len(emitted.Events())
-
-	if err := app.MarkBookmarkletInstalled(); err != nil {
-		t.Fatal(err)
-	}
-	st, err = app.ClipStatus()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if st.NeedsReinstall || st.Port != svc.ClipPort.Port {
-		t.Fatalf("after reinstalling: %+v", st)
-	}
-	if port, err := clip.InstalledPort(ctx, svc.DB); err != nil || port != st.Port {
-		t.Fatalf("stored %d, %v; server on %d", port, err, st.Port)
-	}
-	var settings int
-	for _, e := range emitted.Events()[before:] {
-		if c, ok := e.Payload.(events.Changed); ok && e.Name == events.ChangedEvent && c.Entity == events.EntitySettings {
-			settings++
-		}
-	}
-	if settings != 1 {
-		t.Fatalf("%d settings changes emitted, want 1", settings)
-	}
-}
-
 // The port moved while LeGaJ was closed, so the status read at startup and
 // the stored value agree until the user reinstalls.
 func TestR18_ClipStatusReadsTheStoredBookmarklet(t *testing.T) {
@@ -134,6 +80,12 @@ var sessionMeta = regexp.MustCompile(`name="legaj-session" content="([0-9a-f]{32
 // clipOnPort saves a page through the real server, as the popup does, and
 // returns the status.
 func clipOnPort(t *testing.T, port int, page map[string]any) int {
+	t.Helper()
+	code, _ := clipReply(t, port, page)
+	return code
+}
+
+func clipReply(t *testing.T, port int, page map[string]any) (int, string) {
 	t.Helper()
 	base := fmt.Sprintf("http://127.0.0.1:%d", port)
 	res, err := http.Get(base + "/clip")
@@ -161,7 +113,8 @@ func clipOnPort(t *testing.T, port int, page map[string]any) int {
 		t.Fatal(err)
 	}
 	defer saved.Body.Close()
-	return saved.StatusCode
+	reply, _ := io.ReadAll(saved.Body)
+	return saved.StatusCode, string(reply)
 }
 
 func jobPage(url string) map[string]any {
@@ -181,9 +134,8 @@ func settingsChanges(e *events.Recorder) int {
 	return n
 }
 
-// A clip that reached this port came from a bookmark holding it, which proves
-// more than a drag can: it clears the banner even if the browser never said
-// the drop landed.
+// A clip that reached this port came from a bookmark holding it. Nothing else
+// proves the reinstall: a drag can be dropped anywhere, and a copy never pasted.
 func TestR18_ARealClipProvesTheBookmarklet(t *testing.T) {
 	app, svc, emitted := newClipApp(t)
 	ctx := context.Background()
@@ -227,5 +179,30 @@ func TestR18_AFailedClipProvesNothing(t *testing.T) {
 	}
 	if st, err := app.ClipStatus(); err != nil || !st.NeedsReinstall {
 		t.Fatalf("%+v %v", st, err)
+	}
+}
+
+// Core tells the ingester about the key: the popup's promise of a lookup
+// depends on it, through the real server.
+func TestR18_PopupPromisesALookupOnlyWithAKey(t *testing.T) {
+	app, svc, _ := newClipApp(t)
+	noCompany := func(url string) map[string]any {
+		return map[string]any{"type": "legaj-clip", "v": 1, "url": url, "title": "Data Analyst", "h1": []string{"Data Analyst"}, "text": "We need a data analyst."}
+	}
+	port := svc.ClipPort.Port
+	code, body := clipReply(t, port, noCompany("https://example.com/jobs/1"))
+	if code != http.StatusOK || !strings.Contains(body, `"enriching":false`) {
+		t.Fatalf("no key: %d %s", code, body)
+	}
+	c, err := app.coreOnly()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Secrets.Save(sentinelKey); err != nil {
+		t.Fatal(err)
+	}
+	code, body = clipReply(t, port, noCompany("https://example.com/jobs/2"))
+	if code != http.StatusOK || !strings.Contains(body, `"enriching":true`) {
+		t.Fatalf("with a key: %d %s", code, body)
 	}
 }

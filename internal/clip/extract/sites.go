@@ -101,16 +101,30 @@ func greenhouse(p Page) candidates {
 	return c
 }
 
-// sentenceEnd is a full stop after a whole word. Places have dots after
-// short abbreviations only: "St. Louis", "Washington, D.C.".
-var sentenceEnd = regexp.MustCompile(`\p{L}{4,}\.(?:\s|$)`)
+// abbreviation is the only word a place ends with a full stop: capitalized
+// and short, or initials ("St.", "Calif.", "D.C.").
+var abbreviation = regexp.MustCompile(`^(?:\p{Lu}\p{L}{0,4}|(?:\p{Lu}\.)+\p{Lu})\.$`)
 
 // looksLikePlaces tells a place, or a "; "-separated list of places
 // ("Berlin, Germany; München, Bayern, Germany"), from a teaser sentence:
-// each part is short and none ends a sentence.
+// each part is short, ends no sentence, and has at most one lower-case word
+// ("Frankfurt am Main", "Trinidad and Tobago"). A wrong location prints on
+// the letter, while a missing one costs nothing.
 func looksLikePlaces(s string) bool {
 	for _, part := range strings.Split(s, "; ") {
-		if utf8.RuneCountInString(part) > 80 || sentenceEnd.MatchString(part) {
+		if utf8.RuneCountInString(part) > 80 {
+			return false
+		}
+		lower := 0
+		for _, word := range strings.Fields(part) {
+			if strings.HasSuffix(word, ".") && !abbreviation.MatchString(word) {
+				return false
+			}
+			if first, _ := utf8.DecodeRuneInString(word); unicode.IsLower(first) {
+				lower++
+			}
+		}
+		if lower > 1 {
 			return false
 		}
 	}
@@ -201,7 +215,8 @@ var linkedInMemberTitle = regexp.MustCompile(`^(.+) \| (.+?) \| LinkedIn$`)
 // linkedInMemberEnd ends the posting on a logged-in page: the "… more"
 // toggle, or the boxes that follow it. "About the company" is a box too, but
 // also a common heading inside postings, so linkedInMemberDescription only
-// trusts the last one.
+// trusts the last one, and checks it separately: the box has a toggle of its
+// own, which is the first one on the page when the posting is expanded.
 var linkedInMemberEnd = []string{"… more", "See more", "Show more", "Show less", "Benefits found in job post",
 	"Set alert for similar jobs", "Meet the hiring team"}
 
@@ -254,10 +269,10 @@ func linkedInMemberDescription(lines []string) string {
 		return ""
 	}
 	end := lineIndex(lines, about+1, len(lines), linkedInMemberEnd...)
-	if end < 0 {
-		end = lastLineIndex(lines, len(lines), "About the company")
+	if box := lastLineIndex(lines, len(lines), "About the company"); box > about && (end < 0 || box < end) {
+		end = box
 	}
-	if end <= about {
+	if end < 0 {
 		end = len(lines)
 	}
 	return strings.TrimSpace(strings.Join(lines[about+1:end], "\n"))
@@ -269,34 +284,44 @@ func linkedInMemberDescription(lines []string) string {
 var indeedTitle = regexp.MustCompile(`^(.+) - (.+?) - Indeed(?:\.com)?$`)
 
 // notAnEmployer is what sits under the role when Indeed shows no employer:
-// the pay ("$90,000 a year", "From 25 an hour") or an address with a ZIP code.
-var notAnEmployer = regexp.MustCompile(`(?i)\p{Sc}|\b\d{5}\b|\ban? (?:year|month|week|day|hour)\b`)
+// pay ("$90,000 a year", "From 25 an hour"), an address or a city ("New York,
+// NY"), or the job type. Anchored where it can be, since employers can hold
+// digits and those words ("Walgreens #12345", "A Day Away Kennels"). Refusing
+// a real employer sends the row to enrichment; taking a wrong one prints it
+// on the letter, and enrichment never sees that row.
+var notAnEmployer = regexp.MustCompile(`\p{Sc}|(?i:\ban? (?:year|month|week|day|hour))$|\b\p{Lu}{2} \d{5}(?:-\d{4})?$|^[^,]+, \p{Lu}{2}$|` +
+	`(?i:^(?:full[- ]time|part[- ]time|contract|temporary|internship|permanent|remote|hybrid|on-?site)$)`)
+
+// employerLine offers a line of Indeed's header as the company.
+func employerLine(line string) []string {
+	if notAnEmployer.MatchString(line) {
+		return nil
+	}
+	return []string{line}
+}
 
 // indeed reads both Indeed layouts. On a job page the role and place come
 // from the title and the company is the line under the role; on a search
 // page the selected job sits after "Job Post Details" as role, company,
 // "•", place. The posting runs from "Full job description" to "Explore
-// other jobs" or "Report job". That first line is in English only, so on
-// other sites the header is all of the text and the posting isn't cut.
+// other jobs" or "Report job". That first line is in English only: without
+// it the title is still good, but this isn't a layout LeGaJ knows, so the
+// header is taken as empty and the company is left to enrichment.
 func indeed(p Page) candidates {
 	var c candidates
 	lines := strings.Split(normalizeText(p.Text), "\n")
 	full := lineIndex(lines, 0, len(lines), "Full job description")
-	headerEnd := full
-	if full < 0 {
-		headerEnd = len(lines)
-	}
 	// The header is read line by line, ignoring blank lines.
-	header := slices.DeleteFunc(slices.Clone(lines[:headerEnd]), func(l string) bool { return l == "" })
+	header := slices.DeleteFunc(slices.Clone(lines[:max(full, 0)]), func(l string) bool { return l == "" })
 	if d := lastLineIndex(header, len(header), "Job Post Details"); d >= 0 && d+2 < len(header) {
-		c.role, c.company = []string{header[d+1]}, []string{header[d+2]}
+		c.role, c.company = []string{header[d+1]}, employerLine(header[d+2])
 		if d+4 < len(header) && header[d+3] == "•" {
 			c.location = []string{header[d+4]}
 		}
 	} else if m := indeedTitle.FindStringSubmatch(cleanLine(p.Title, false)); m != nil {
 		c.role, c.location = []string{m[1]}, []string{m[2]}
-		if r := lineIndex(header, 0, len(header), m[1]); r >= 0 && r+1 < len(header) && !notAnEmployer.MatchString(header[r+1]) {
-			c.company = []string{header[r+1]}
+		if r := lineIndex(header, 0, len(header), m[1]); r >= 0 && r+1 < len(header) {
+			c.company = employerLine(header[r+1])
 		}
 	}
 	if full < 0 {
@@ -390,9 +415,9 @@ var boards = map[string][]string{
 }
 
 // searchHeading is a search page's heading or title: "product manager jobs
-// in New York State", "Now Hiring: 75 … Jobs". It's a check on text read off
-// the page; structured data and AI answers name a real role, however worded
-// ("Now Hiring: Delivery Driver").
+// in New York State", "Now Hiring: 75 … Jobs". It checks text read off the
+// page, and AI answers, which copy from it. Structured data names a real
+// role, however worded ("Now Hiring: Delivery Driver").
 var searchHeading = regexp.MustCompile(`(?i)^now hiring\b|\bjobs (?:in|near|at)\b|^browse\b`)
 
 // boardRule says when a job board's name is page chrome.

@@ -101,6 +101,39 @@ func TestR18_PortTakenRaisesBanner(t *testing.T) {
 	}
 }
 
+// Nothing has clipped yet, but a bookmark added since the last start holds
+// the old port all the same, and R18 promises the banner whenever a port is
+// taken. It must also survive a restart.
+func TestR18_PortTakenBeforeTheFirstClipRaisesBanner(t *testing.T) {
+	db := openDB(t)
+	ln, first, err := clip.Listen(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln.Close()
+	blocker, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", first.Port))
+	if err != nil {
+		t.Skipf("couldn't take port %d for the test: %v", first.Port, err)
+	}
+	ln, st, err := clip.Listen(ctx, db)
+	blocker.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.NeedsReinstall() {
+		t.Fatalf("status %+v: the port moved and nothing says so", st)
+	}
+	ln.Close()
+	ln, st, err = clip.Listen(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if !st.NeedsReinstall() {
+		t.Fatalf("after a restart: %+v", st)
+	}
+}
+
 func TestR18_FreshInstallNeedsNoReinstall(t *testing.T) {
 	db := openDB(t)
 	ln, st, err := clip.Listen(ctx, db)

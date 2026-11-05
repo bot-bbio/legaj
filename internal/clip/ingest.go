@@ -57,6 +57,9 @@ type Config struct {
 	// QueueSize bounds the enrichment backlog; default 100. A clip that
 	// finds the queue full is still saved, just not enriched.
 	QueueSize int
+	// HasKey reports whether an AI key is saved. Setup can be finished
+	// without one; then no lookup is queued or promised. Nil means yes.
+	HasKey func() bool
 }
 
 // Ingester saves clips and enriches them in the background.
@@ -151,7 +154,7 @@ func (in *Ingester) Save(ctx context.Context, p extract.Page) (SaveResult, error
 	out.NeedsCompany = out.Company == ""
 	// A row still missing details gets another try, e.g. after the first
 	// attempt failed or found the queue full.
-	if out.Company == "" || out.Role == "" {
+	if (out.Company == "" || out.Role == "") && (in.cfg.HasKey == nil || in.cfg.HasKey()) {
 		out.Enriching = in.enqueue(job{id: res.ID, url: p.URL, title: p.Title})
 	}
 	return out, nil

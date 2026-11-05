@@ -4,11 +4,9 @@
    * Settings. The bookmarklet has the clip server's port built in, so it's
    * generated here from the current status.
    *
-   * The install is recorded when a drag lands or the user copies it, never
-   * when the page opens or a drag merely starts: the reinstall banner clears
-   * on that record, and the old, broken bookmark would still be in the
-   * browser. A browser that doesn't report the drop costs nothing lasting:
-   * the first clip that reaches LeGaJ records the install too.
+   * Taking it records nothing: a drag can land anywhere and a copy may never
+   * be pasted. The first clip that reaches LeGaJ is the proof, and it's what
+   * clears the reinstall banner.
    */
   import { bookmarkletURL } from '../../bookmarklet/bookmarklet';
   import { api } from '../../lib/api';
@@ -22,19 +20,6 @@
     $clipStore.status === 'ready' && $clipStore.data.running ? bookmarkletURL($clipStore.data.port) : '',
   );
 
-  async function recordInstall(): Promise<void> {
-    failure = '';
-    try {
-      await api.markBookmarkletInstalled();
-    } catch (err) {
-      failure = errorMessage(err);
-    }
-  }
-
-  function dragEnded(e: DragEvent): void {
-    if (e.dataTransfer && e.dataTransfer.dropEffect !== 'none') void recordInstall();
-  }
-
   async function copy(): Promise<void> {
     failure = '';
     copied = false;
@@ -45,7 +30,6 @@
       return;
     }
     copied = true;
-    await recordInstall();
   }
 </script>
 
@@ -61,7 +45,7 @@
     <li>
       Drag this button onto the bar:
       <!-- Clicked here it would run on LeGaJ's own window, not on a job page. -->
-      <a class="clipper" {href} ondragend={dragEnded} onclick={(e) => e.preventDefault()}>Clip to LeGaJ</a>
+      <a class="clipper" {href} onclick={(e) => e.preventDefault()}>Clip to LeGaJ</a>
     </li>
     <li>On a job posting, click the new bookmark, then click <b>Save</b> in the window that opens.</li>
   </ol>

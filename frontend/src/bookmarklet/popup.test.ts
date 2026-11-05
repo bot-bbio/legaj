@@ -148,6 +148,14 @@ describe('R18 popup', () => {
     expect(saveButton().hidden).toBe(true);
   });
 
+  // A sandboxed page's origin is 'null', and so is that of a made-up scheme.
+  it('refuses a sandboxed page posing behind a made-up scheme', () => {
+    openPopup(opener);
+    send(snapshot({ url: 'foo://www.linkedin.com/jobs/view/1' }), opener, 'null');
+    expect(status()).toMatch(/can't read/);
+    expect(saveButton().hidden).toBe(true);
+  });
+
   it.each([
     ['another version', { v: 2 }],
     ['no address', { url: '' }],

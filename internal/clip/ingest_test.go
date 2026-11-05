@@ -36,6 +36,11 @@ type fixture struct {
 
 func newFixture(t *testing.T, queue int) *fixture {
 	t.Helper()
+	return newFixtureWith(t, queue, nil)
+}
+
+func newFixtureWith(t *testing.T, queue int, hasKey func() bool) *fixture {
+	t.Helper()
 	db, st, err := store.Open(ctx, store.Options{Dir: testenv.Isolate(t)})
 	if err != nil || st.Kind != store.StartupReady {
 		t.Fatalf("open: %v %+v", err, st)
@@ -49,10 +54,27 @@ func newFixture(t *testing.T, queue int) *fixture {
 		t.Fatal(err)
 	}
 	f.in = clip.New(clip.Config{
-		Pipeline: f.p, AI: f.ai, Profile: f.prof, Model: func(context.Context) string { return "gemini-test" }, QueueSize: queue,
+		Pipeline: f.p, AI: f.ai, Profile: f.prof, Model: func(context.Context) string { return "gemini-test" }, QueueSize: queue, HasKey: hasKey,
 	})
 	t.Cleanup(f.in.Close) // runs before the DB closes (cleanups run last-in, first-out)
 	return f
+}
+
+// With no key saved, which setup allows, no lookup can run, so the popup
+// mustn't promise one, and the row just goes to "Needs company".
+func TestR19_NoKeyMeansNoLookup(t *testing.T) {
+	f := newFixtureWith(t, 10, func() bool { return false })
+	res, err := f.in.Save(ctx, page("https://example.com/jobs/1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Created || !res.NeedsCompany || res.Enriching {
+		t.Fatalf("result %+v", res)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if n := len(f.ai.Requests()); n != 0 {
+		t.Fatalf("%d AI requests with no key", n)
+	}
 }
 
 // page is a clip of an unknown site whose company only the description names.

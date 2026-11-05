@@ -64,7 +64,8 @@ type ServerConfig struct {
 	Log   *slog.Logger
 	// Now is the clock; default time.Now.
 	Now func() time.Time
-	// OnSaved, if set, runs after each save that worked, before the reply.
+	// OnSaved, if set, runs after each save that worked, before the reply,
+	// and isn't cancelled if the popup closes.
 	OnSaved func(ctx context.Context)
 }
 
@@ -208,8 +209,9 @@ func (s *Server) take(id string) (time.Time, bool) {
 	return at, ok && s.cfg.Now().Sub(at) <= SessionTTL
 }
 
-// giveBack restores a session after a save that failed, so the popup can
-// try again. It keeps its issue time: a retry never extends a session.
+// giveBack restores a session after a failure on LeGaJ's side, the one case
+// where the popup offers a retry. It keeps its issue time: a retry never
+// extends a session.
 func (s *Server) giveBack(id string, issued time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -322,7 +324,6 @@ func (s *Server) save(w http.ResponseWriter, r *http.Request) {
 		URL: p.URL, Title: p.Title, JSONLD: p.JSONLD, Meta: p.Meta, H1: p.H1, Selection: p.Selection, Text: p.Text,
 	})
 	if err != nil {
-		s.giveBack(req.Session, issued)
 		status := http.StatusInternalServerError
 		switch apperr.CodeOf(err) {
 		case apperr.CodeInvalid:
@@ -331,13 +332,14 @@ func (s *Server) save(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusConflict
 		}
 		if status == http.StatusInternalServerError {
+			s.giveBack(req.Session, issued)
 			s.cfg.Log.Error("clip save failed", "err", err)
 		}
 		refuse(w, status, apperr.UserMessage(err))
 		return
 	}
 	if s.cfg.OnSaved != nil {
-		s.cfg.OnSaved(r.Context())
+		s.cfg.OnSaved(context.WithoutCancel(r.Context()))
 	}
 	writeJSON(w, http.StatusOK, reply{OK: true, Result: &res})
 }

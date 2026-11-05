@@ -480,13 +480,19 @@ func TestR19_GreenhouseFormHeadingInAnyCase(t *testing.T) {
 }
 
 func TestR19_GreenhouseAbbreviatedPlacesAreLocations(t *testing.T) {
-	for _, place := range []string{"St. Louis, MO", "Ft. Worth, TX", "Washington, D.C.", "Berlin, Germany; St. Louis, MO", "Mt. Vernon, NY; Washington, D.C."} {
+	for _, place := range []string{
+		"St. Louis, MO", "Ft. Worth, TX", "Washington, D.C.", "San Diego, Calif.", "Boston, Mass.", "Berlin, Germany; St. Louis, MO",
+		"Mt. Vernon, NY; Washington, D.C.", "Frankfurt am Main, Germany", "Rio de Janeiro, Brazil", "Trinidad and Tobago",
+	} {
 		got := extract.Extract(extract.Page{URL: "https://job-boards.greenhouse.io/northwind/jobs/1", Meta: map[string]string{"og:description": place}})
 		if got.Location != place {
 			t.Errorf("%q came back as %q", place, got.Location)
 		}
 	}
-	for _, teaser := range []string{"We build robots. Join us", "We are hiring.", "Berlin, Germany; We are hiring."} {
+	for _, teaser := range []string{
+		"We build robots. Join us", "We are hiring.", "We are hiring now.", "Apply now.", "Join us.", "Founded in 2012.", "Now Hiring.",
+		"Berlin, Germany; We are hiring.", "Build the future of AI.", "Build the future of AI", "Join us at Acme to build things",
+	} {
 		got := extract.Extract(extract.Page{URL: "https://job-boards.greenhouse.io/northwind/jobs/1", Meta: map[string]string{"og:description": teaser}})
 		if got.Location != "" {
 			t.Errorf("teaser %q taken as location %q", teaser, got.Location)
@@ -497,7 +503,10 @@ func TestR19_GreenhouseAbbreviatedPlacesAreLocations(t *testing.T) {
 func TestR19_IndeedLineUnderTheRoleMustBeACompany(t *testing.T) {
 	// With no employer shown, the next line is the pay or the address. A
 	// wrong company would also stop enrichment from ever fixing the row.
-	for _, line := range []string{"$90,000 - $105,000 a year", "€4,500 a month", "£45,000", "From 25 an hour", "1230 York Avenue, New York, NY 10065"} {
+	for _, line := range []string{
+		"$90,000 - $105,000 a year", "€4,500 a month", "£45,000", "From 25 an hour", "From $25 an hour - Full-time",
+		"1230 York Avenue, New York, NY 10065", "New York, NY", "Full-time", "Part time", "Contract", "Remote",
+	} {
 		text := strings.Join([]string{"Analyst", line, "Full time", "Full job description", "Do the work.", "Report job"}, "\n")
 		got := extract.Extract(extract.Page{URL: "https://www.indeed.com/viewjob?jk=1", Title: "Analyst - New York, NY - Indeed.com", Text: text})
 		if got.Company != "" {
@@ -507,21 +516,43 @@ func TestR19_IndeedLineUnderTheRoleMustBeACompany(t *testing.T) {
 			t.Errorf("role %q description %q", got.Role, got.Description)
 		}
 	}
-	text := strings.Join([]string{"Analyst", "7-Eleven, Inc.", "Full job description", "Do the work."}, "\n")
-	got := extract.Extract(extract.Page{URL: "https://www.indeed.com/viewjob?jk=1", Title: "Analyst - New York, NY - Indeed.com", Text: text})
-	if got.Company != "7-Eleven, Inc." {
-		t.Fatalf("a real employer was refused: %q", got.Company)
+	// Real employers can have digits and those words in their names.
+	for _, employer := range []string{"7-Eleven, Inc.", "Walgreens #12345", "Store 10423", "A Day Away Kennels"} {
+		text := strings.Join([]string{"Analyst", employer, "Full job description", "Do the work."}, "\n")
+		got := extract.Extract(extract.Page{URL: "https://www.indeed.com/viewjob?jk=1", Title: "Analyst - New York, NY - Indeed.com", Text: text})
+		if got.Company != employer {
+			t.Errorf("a real employer was refused: %q became %q", employer, got.Company)
+		}
+	}
+}
+
+func TestR19_IndeedSearchLayoutChecksTheCompanyToo(t *testing.T) {
+	text := strings.Join([]string{"Job Post Details", "Analyst", "$90,000 a year", "•", "New York, NY", "Full job description", "Do the work."}, "\n")
+	got := extract.Extract(extract.Page{URL: "https://www.indeed.com/jobs?q=analyst", Title: "Now Hiring: 75 Analyst Jobs in New York | Indeed", Text: text})
+	if got.Company != "" || got.Role != "Analyst" {
+		t.Fatalf("company %q role %q", got.Company, got.Role)
 	}
 }
 
 func TestR19_IndeedWithoutTheEnglishMarkerKeepsTheTitle(t *testing.T) {
-	text := strings.Join([]string{"Projektmanager", "Genome Lab", "Vollständige Stellenbeschreibung", "Die Arbeit."}, "\n")
+	// The title is reliable anywhere. The line under the role is only the
+	// company on the layout LeGaJ knows, so here enrichment finds it.
+	text := strings.Join([]string{"Projektmanager", "Vollzeit", "Vollständige Stellenbeschreibung", "Die Arbeit."}, "\n")
 	got := extract.Extract(extract.Page{URL: "https://de.indeed.com/viewjob?jk=1", Title: "Projektmanager - Berlin - Indeed.com", Text: text})
-	if got.Role != "Projektmanager" || got.Location != "Berlin" || got.Company != "Genome Lab" {
-		t.Fatalf("role %q location %q company %q", got.Role, got.Location, got.Company)
+	if got.Role != "Projektmanager" || got.Location != "Berlin" {
+		t.Fatalf("role %q location %q", got.Role, got.Location)
+	}
+	if got.Company != "" {
+		t.Fatalf("%q taken as the company", got.Company)
 	}
 	if !strings.Contains(got.Description, "Die Arbeit.") || got.From.Description != extract.LayerText {
 		t.Fatalf("description (%s): %q", got.From.Description, got.Description)
+	}
+	// An expired page has no marker either.
+	text = strings.Join([]string{"Analyst", "This job has expired on Indeed", "Find similar jobs"}, "\n")
+	got = extract.Extract(extract.Page{URL: "https://www.indeed.com/viewjob?jk=1", Title: "Analyst - New York, NY - Indeed.com", Text: text})
+	if got.Company != "" {
+		t.Fatalf("%q taken as the company", got.Company)
 	}
 }
 
@@ -533,8 +564,34 @@ func TestR19_SearchHeadingWordsAreFineInStructuredData(t *testing.T) {
 	if got.Role != "Now Hiring: Delivery Driver" {
 		t.Fatalf("a posting's own title was refused: %q", got.Role)
 	}
-	if role := extract.Role("Now Hiring: Delivery Driver", "Acme", "https://example.com/j"); role == "" {
-		t.Fatal("the same title from an AI answer was refused")
+}
+
+// A model asked about a search page copies its heading, which is exactly
+// what the page-text check refused.
+func TestR19_AISearchHeadingIsNotARole(t *testing.T) {
+	if role := extract.Role("product manager jobs in New York State", "", "https://example.com/j"); role != "" {
+		t.Fatalf("an AI answer brought back a search heading: %q", role)
+	}
+}
+
+func TestR19_LinkedInMemberExpandedPostingStopsAtTheBox(t *testing.T) {
+	// Expanded, the posting has no toggle of its own, so the next "… more"
+	// belongs to the company box.
+	text := strings.Join([]string{
+		"About the job", "Join our team.", "About the company", "Northwind", "1,000 followers", "We build robots.", "… more", "Show more",
+	}, "\n")
+	got := extract.Extract(extract.Page{URL: "https://www.linkedin.com/jobs/view/1/", Title: "Go Engineer | Northwind | LinkedIn", Text: text})
+	if got.Description != "Join our team." {
+		t.Fatalf("description %q", got.Description)
+	}
+	// With a heading of its own too, the cut is still at the box.
+	text = strings.Join([]string{
+		"About the job", "Join our team.", "About the company", "We build robots.", "Responsibilities", "Ship.",
+		"About the company", "Northwind", "… more",
+	}, "\n")
+	got = extract.Extract(extract.Page{URL: "https://www.linkedin.com/jobs/view/1/", Title: "Go Engineer | Northwind | LinkedIn", Text: text})
+	if !strings.HasSuffix(got.Description, "Ship.") {
+		t.Fatalf("description %q", got.Description)
 	}
 }
 

@@ -1,10 +1,6 @@
 package main
 
-import (
-	"github.com/bot-bbio/legaj/internal/apperr"
-	"github.com/bot-bbio/legaj/internal/clip"
-	"github.com/bot-bbio/legaj/internal/events"
-)
+import "github.com/bot-bbio/legaj/internal/clip"
 
 // ClipStatusView tells the frontend where the clipper listens (R18), and
 // whether the installed bookmarklet points at an old port, in which case
@@ -17,7 +13,7 @@ type ClipStatusView struct {
 }
 
 // ClipStatus reports the clip server's state. The installed port is read
-// fresh, so a reinstall clears the banner at once, without a restart.
+// fresh, so the first clip from a new bookmark clears the banner at once.
 func (a *App) ClipStatus() (ClipStatusView, error) {
 	_, svc, err := a.services()
 	if err != nil {
@@ -33,25 +29,4 @@ func (a *App) ClipStatus() (ClipStatusView, error) {
 		NeedsReinstall: st.NeedsReinstall(),
 		Message:        svc.ClipProblem,
 	}, nil
-}
-
-// MarkBookmarkletInstalled records that the user took the bookmarklet for
-// the running server's port. The install page calls it when a drag lands or
-// the user copies the bookmarklet, never when the page opens: a page merely
-// seen leaves the old bookmark in place, so the banner has to stay. A clip
-// reaching the server records the same thing (Core.confirmBookmarklet).
-func (a *App) MarkBookmarkletInstalled() error {
-	c, svc, err := a.services()
-	if err != nil {
-		return a.public("App.MarkBookmarkletInstalled", err)
-	}
-	if svc.ClipServer == nil {
-		return a.public("App.MarkBookmarkletInstalled",
-			apperr.New(apperr.CodeConflict, "LeGaJ's clipper isn't running. Restart LeGaJ and try again."))
-	}
-	if err := clip.MarkInstalled(a.ctx, svc.DB, svc.ClipPort.Port); err != nil {
-		return a.public("App.MarkBookmarkletInstalled", err)
-	}
-	c.Bus.Emit(events.Change(events.EntitySettings))
-	return nil
 }

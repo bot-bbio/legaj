@@ -24,9 +24,12 @@
     }
   }
 
+  // Only http(s) has a real origin. Any other scheme reads as 'null', the
+  // same as a sandboxed sender, so it could pass for one.
   function originOf(url) {
     try {
-      return new URL(url).origin;
+      const u = new URL(url);
+      return u.protocol === 'https:' || u.protocol === 'http:' ? u.origin : '';
     } catch {
       return '';
     }

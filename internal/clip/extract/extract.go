@@ -190,7 +190,7 @@ func Company(name, pageURL string) string {
 // Role cleans and checks a role the same way: "" when it isn't plausible.
 func Role(role, company, pageURL string) string {
 	r := cleanLine(role, false)
-	if !plausibleRole(r, company, hostOf(pageURL)) {
+	if !plausibleRole(r, company, hostOf(pageURL)) || searchHeading.MatchString(r) {
 		return ""
 	}
 	return r

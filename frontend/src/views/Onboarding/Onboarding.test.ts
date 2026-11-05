@@ -44,7 +44,6 @@ const api = {
   }),
   getSettings: vi.fn(),
   clipStatus: vi.fn(() => Promise.resolve({ running: true, port: 47123, needsReinstall: false, message: '' })),
-  markBookmarkletInstalled: vi.fn(() => Promise.resolve()),
   copyText: vi.fn(() => Promise.resolve()),
 };
 vi.mock('../../lib/api', () => ({ api }));

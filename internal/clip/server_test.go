@@ -76,13 +76,18 @@ type server struct {
 // clip server will (R18, R20: through the real HTTP chain).
 func startServer(t *testing.T, saver clip.Saver) *server {
 	t.Helper()
+	return startServerWith(t, saver, nil)
+}
+
+func startServerWith(t *testing.T, saver clip.Saver, onSaved func(context.Context)) *server {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 	c := &clock{t: time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)}
-	s := clip.NewServer(clip.ServerConfig{Port: port, Saver: saver, Now: c.now})
+	s := clip.NewServer(clip.ServerConfig{Port: port, Saver: saver, Now: c.now, OnSaved: onSaved})
 	hs := httptest.NewUnstartedServer(s.Handler())
 	hs.Listener.Close()
 	hs.Listener = ln
@@ -395,6 +400,72 @@ func TestR18_FailedSaveCanBeRetried(t *testing.T) {
 	}
 	if res, _ := s.post(t, session, page, nil); res.StatusCode != http.StatusForbidden {
 		t.Fatalf("a session outlived its save: %d", res.StatusCode)
+	}
+}
+
+// Only a problem on LeGaJ's side can pass on a retry, and only then does the
+// popup offer one. A page it refuses uses its session up, like any save.
+func TestR18_RefusedPageUsesUpItsSession(t *testing.T) {
+	for name, err := range map[string]error{
+		"nothing on the page": apperr.New(apperr.CodeInvalid, "LeGaJ found nothing to save."),
+		"conflict":            apperr.New(apperr.CodeConflict, "No."),
+	} {
+		t.Run(name, func(t *testing.T) {
+			saver := &fakeSaver{}
+			saver.failWith(err)
+			s := startServer(t, saver)
+			session := s.session(t)
+			if res, _ := s.post(t, session, validPage("https://example.com/jobs/1"), nil); res.StatusCode < 400 || res.StatusCode >= 500 {
+				t.Fatalf("refused page: %d", res.StatusCode)
+			}
+			saver.failWith(nil)
+			if res, _ := s.post(t, session, validPage("https://example.com/jobs/1"), nil); res.StatusCode != http.StatusForbidden {
+				t.Fatalf("the session outlived a refused page: %d", res.StatusCode)
+			}
+		})
+	}
+}
+
+// savedWhileLeaving saves only once the client has gone, like a popup closed
+// while its save was still running.
+type savedWhileLeaving struct{ started chan struct{} }
+
+func (s savedWhileLeaving) Save(ctx context.Context, _ extract.Page) (clip.SaveResult, error) {
+	close(s.started)
+	<-ctx.Done()
+	return clip.SaveResult{Created: true}, nil
+}
+
+// The job is saved, so what follows from it mustn't depend on the window
+// staying open: the reinstall banner clears on this.
+func TestR18_OnSavedOutlivesTheRequest(t *testing.T) {
+	got := make(chan error, 1)
+	saver := savedWhileLeaving{started: make(chan struct{})}
+	s := startServerWith(t, saver, func(ctx context.Context) { got <- ctx.Err() })
+
+	body, err := json.Marshal(map[string]any{"session": s.session(t), "page": validPage("https://example.com/jobs/1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, s.base+"/api/clips", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", s.origin)
+	go func() {
+		if res, err := http.DefaultClient.Do(req); err == nil {
+			res.Body.Close()
+		}
+	}()
+	<-saver.started
+	cancel()
+	select {
+	case err := <-got:
+		if err != nil {
+			t.Fatalf("OnSaved ran on a dead context: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("OnSaved never ran")
 	}
 }
 

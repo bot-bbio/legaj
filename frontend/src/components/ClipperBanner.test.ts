@@ -43,6 +43,12 @@ describe('R18 clipper banner', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('says what clears it, since only a real clip proves the new bookmark', async () => {
+    api.clipStatus.mockResolvedValue(status({ needsReinstall: true }));
+    render(ClipperBanner);
+    expect(await screen.findByRole('status')).toHaveTextContent(/then clip a job/i);
+  });
+
   it('links to the install page when the port moved', async () => {
     api.clipStatus.mockResolvedValue(status({ needsReinstall: true }));
     render(ClipperBanner);

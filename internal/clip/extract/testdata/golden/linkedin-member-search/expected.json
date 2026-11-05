@@ -1,0 +1,12 @@
+{
+  "company": "Fabrikam",
+  "role": "Private Wealth Associate",
+  "location": "New York, NY",
+  "description": "Fabrikam is a leading asset manager.\nResponsibilities\nSupport client service for the Private Wealth team.\nFabrikam is proud to be an Equal Opportunity Employer.",
+  "from": {
+    "company": "adapter",
+    "role": "adapter",
+    "location": "adapter",
+    "description": "adapter"
+  }
+}

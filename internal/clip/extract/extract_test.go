@@ -219,6 +219,9 @@ func TestR19_GenericNamesRejected(t *testing.T) {
 		{"url as company", extract.Page{URL: "https://example.com/j", JSONLD: []string{`{"@type":"JobPosting","hiringOrganization":"https://acme.example"}`}}, "", ""},
 		{"generic heading falls through to the title", extract.Page{URL: "https://example.com/j", H1: []string{"Job details"}, Title: "Data Analyst"}, "", "Data Analyst"},
 		{"role equal to company rejected", extract.Page{URL: "https://example.com/j", JSONLD: []string{`{"@type":"JobPosting","hiringOrganization":"Contoso"}`}, H1: []string{"Contoso"}, Title: "Data Analyst"}, "Contoso", "Data Analyst"},
+		// Spike captures: search pages and portals aren't a job.
+		{"search heading as role", extract.Page{URL: "https://example.com/jobs?q=pm", H1: []string{"product manager jobs in New York State"}, Title: "Now Hiring: 75 Product Manager Jobs in New York State | Indeed"}, "", ""},
+		{"greenhouse candidate portal", extract.Page{URL: "https://my.greenhouse.io/jobs/search?query=x", Title: "MyGreenhouse"}, "", ""},
 		// Review fixes: real employers that share a name with a job board or a domain.
 		{"employer named in JSON-LD on its own board", extract.Page{URL: "https://www.linkedin.com/jobs/view/1", JSONLD: []string{`{"@type":"JobPosting","title":"Engineer","hiringOrganization":"LinkedIn"}`}}, "LinkedIn", "Engineer"},
 		{"board name elsewhere is an employer", extract.Page{URL: "https://www.workday.com/en-us/company/careers/1", Meta: map[string]string{"og:site_name": "Workday"}, H1: []string{"Engineer"}}, "Workday", "Engineer"},

@@ -11,9 +11,12 @@ import (
 )
 
 // requiredGolden are the fixtures that must exist (R19). See
-// testdata/golden/README.md for where each came from. Indeed and the
-// logged-in LinkedIn view are added from the spike captures (plan item 2).
-var requiredGolden = []string{"ashby", "greenhouse", "lever", "linkedin-guest-en", "linkedin-guest-pl", "workday"}
+// testdata/golden/README.md for where each came from.
+var requiredGolden = []string{
+	"ashby", "greenhouse", "lever", "workday",
+	"indeed-search", "indeed-viewjob",
+	"linkedin-guest-en", "linkedin-guest-pl", "linkedin-member", "linkedin-member-search",
+}
 
 func TestR19_Golden(t *testing.T) {
 	dirs, err := filepath.Glob(filepath.Join("testdata", "golden", "*", "input.json"))

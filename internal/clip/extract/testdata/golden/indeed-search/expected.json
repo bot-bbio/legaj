@@ -1,0 +1,12 @@
+{
+  "company": "Fabrikam Foods",
+  "role": "Senior Product Manager",
+  "location": "Binghamton, NY 13902",
+  "description": "Fabrikam Foods is hiring a Senior Product Manager.\nResponsibilities\nOwn the product roadmap\nBenefits:\n401(k)\nWork Location: In person",
+  "from": {
+    "company": "adapter",
+    "role": "adapter",
+    "location": "adapter",
+    "description": "adapter"
+  }
+}

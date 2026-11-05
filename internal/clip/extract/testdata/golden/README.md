@@ -17,10 +17,15 @@ The structure of each `input.json` copies a public job page fetched on 2026-11-0
 
 The `text` field of the Workday and Ashby fixtures is an approximation: those pages render their content with JavaScript, and the bookmarklet reads the rendered page.
 
-## Still to add (from the bookmarklet spike, plan item 2)
+These fixtures copy the structure of real bookmarklet captures from the spike (plan item 2, Firefox, 2026-11-04), again with made-up content:
 
-- **Indeed:** it refuses non-browser requests, so its structure is unknown.
-- **LinkedIn logged in:** the view most people use. Its title, JSON-LD and text differ from the logged-out pages.
-- Real captures for the six sites above, to confirm the copied structure matches what the bookmarklet sees.
+| Folder | Structure copied from | Notes |
+|---|---|---|
+| `linkedin-member` | `www.linkedin.com/jobs/view/…` logged in | Title `<role> \| <company> \| LinkedIn`; no `h1`, meta or JSON-LD; header lines company, role, `<place> · <posted> · <applicants>` with blank lines between them; the description between "About the job" and "… more" |
+| `linkedin-member-search` | `www.linkedin.com/jobs/search-results/?currentJobId=…` logged in | The results list comes first and repeats the role; the selected job's header and "About the job" follow the page footer |
+| `indeed-viewjob` | `www.indeed.com/viewjob?jk=…` | Title `<role> - <place> - Indeed.com` (the role can contain ` \| `); the company on the line after the role; the description between "Full job description" and "Explore other jobs" |
+| `indeed-search` | `www.indeed.com/jobs?…&vjk=…` | The title and `h1` describe the search; the selected job sits after "Job Post Details" as role, company, `•`, place; the description ends at "Report job" |
 
-Captures saved by the spike (`spike/bookmarklet/out/captures/`) can contain the user's name and other personal data, for example from a logged-in header. Replace every personal detail and the job's own text before a capture becomes a fixture here.
+The same captures confirmed the Greenhouse, Lever, Ashby and Workday structures above. Greenhouse's real page adds a "Create a Job Alert" box before the application form, now in the `greenhouse` fixture.
+
+Spike captures (`spike/bookmarklet/out/captures/`, never committed) contain the user's name, past employers and other personal data, for example in LinkedIn's "People you can reach out to" box. Replace every personal detail and the job's own text before a capture's structure becomes a fixture here.

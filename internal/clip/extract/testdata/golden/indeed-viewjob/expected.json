@@ -1,0 +1,12 @@
+{
+  "company": "Contoso University",
+  "role": "Project Manager | Genome Lab",
+  "location": "New York, NY 10065",
+  "description": "Organization Overview: The Genome Lab at Contoso University leads international projects.\nResponsibilities:\nManages day-to-day execution of project activities\nQualifications:\nBachelor's degree in a science, engineering or management field\nCompensation Range: Min: USD $90,000.00/Yr. Compensation Range: Max: USD $105,000.00/Yr.",
+  "from": {
+    "company": "adapter",
+    "role": "adapter",
+    "location": "adapter",
+    "description": "adapter"
+  }
+}

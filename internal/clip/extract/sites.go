@@ -28,6 +28,38 @@ var sites = []*site{
 	{name: "ashby", domains: []string{"ashbyhq.com"}, extract: ashby},
 	{name: "workday", domains: []string{"myworkdayjobs.com", "myworkdaysite.com"}, cleanCompany: workdayCompany},
 	{name: "linkedin", domains: []string{"linkedin.com"}, extract: linkedIn},
+	{name: "indeed", domains: []string{"indeed.com", "indeed.co.uk", "indeed.ca", "indeed.de", "indeed.fr", "indeed.com.au", "indeed.co.in"}, extract: indeed},
+}
+
+// lineIndex returns the index of the first line in lines[from:to] equal to
+// one of want, or -1.
+func lineIndex(lines []string, from, to int, want ...string) int {
+	for i := max(from, 0); i < min(to, len(lines)); i++ {
+		if slices.Contains(want, lines[i]) {
+			return i
+		}
+	}
+	return -1
+}
+
+// nextNonEmpty returns the index of the first non-empty line at or after i
+// (len(lines) when there's none).
+func nextNonEmpty(lines []string, i int) int {
+	for i < len(lines) && lines[i] == "" {
+		i++
+	}
+	return i
+}
+
+// lastLineIndex returns the index of the last line in lines[:before] equal
+// to want, or -1.
+func lastLineIndex(lines []string, before int, want string) int {
+	for i := min(before, len(lines)) - 1; i >= 0; i-- {
+		if lines[i] == want {
+			return i
+		}
+	}
+	return -1
 }
 
 // siteFor returns the adapter for host, or nil.
@@ -89,12 +121,10 @@ func greenhouseDescription(text, role string) string {
 	if start < 0 {
 		return ""
 	}
-	end := len(lines)
-	for i := start; i < len(lines); i++ {
-		if strings.EqualFold(lines[i], "Apply for this job") {
-			end = i
-			break
-		}
+	// The posting ends at the job-alert box, or at the application form.
+	end := lineIndex(lines, start, len(lines), "Create a Job Alert", "Apply for this job")
+	if end < 0 {
+		end = len(lines)
 	}
 	return strings.Join(lines[start:end], "\n")
 }
@@ -146,6 +176,15 @@ var (
 	notificationCount = regexp.MustCompile(`^\(\d+\+?\)\s*`)
 )
 
+// linkedInMemberTitle is the logged-in title (spike captures, 2026-11-04):
+// "<role> | <company> | LinkedIn".
+var linkedInMemberTitle = regexp.MustCompile(`^(.+) \| (.+?) \| LinkedIn$`)
+
+// linkedInMemberEnd ends the posting on a logged-in page: the "… more"
+// toggle, or the boxes that follow it.
+var linkedInMemberEnd = []string{"… more", "See more", "Show more", "Show less", "Benefits found in job post",
+	"Set alert for similar jobs", "About the company", "Meet the hiring team"}
+
 func linkedIn(p Page) candidates {
 	var c candidates
 	title := notificationCount.ReplaceAllString(cleanLine(p.Title, false), "")
@@ -155,7 +194,85 @@ func linkedIn(p Page) candidates {
 			break
 		}
 	}
-	c.description = []string{linkedInDescription(p.Text)}
+	lines := strings.Split(normalizeText(p.Text), "\n")
+	if m := linkedInMemberTitle.FindStringSubmatch(title); m != nil && c.role == nil {
+		c.role, c.company = []string{m[1]}, []string{m[2]}
+		c.location = []string{linkedInMemberLocation(lines, m[1])}
+	}
+	c.description = []string{linkedInMemberDescription(lines), linkedInDescription(lines)}
+	return c
+}
+
+// linkedInMemberLocation reads the line under the job's own header: the
+// last role line before "About the job" (a search page lists the role in
+// its results first), then "<place> · <posted> · <applicants>".
+func linkedInMemberLocation(lines []string, role string) string {
+	about := lineIndex(lines, 0, len(lines), "About the job")
+	if about < 0 {
+		return ""
+	}
+	r := lastLineIndex(lines, about, role)
+	next := nextNonEmpty(lines, r+1)
+	if r < 0 || next >= about {
+		return ""
+	}
+	place, _, found := strings.Cut(lines[next], " · ")
+	if !found {
+		return ""
+	}
+	return place
+}
+
+// linkedInMemberDescription cuts the posting out of a logged-in page: after
+// "About the job", up to its "… more" toggle or the next box. "" when the
+// layout isn't recognised.
+func linkedInMemberDescription(lines []string) string {
+	about := lineIndex(lines, 0, len(lines), "About the job")
+	if about < 0 {
+		return ""
+	}
+	end := lineIndex(lines, about+1, len(lines), linkedInMemberEnd...)
+	if end < 0 {
+		end = len(lines)
+	}
+	return strings.TrimSpace(strings.Join(lines[about+1:end], "\n"))
+}
+
+// indeedTitle is the job page's title (spike captures, 2026-11-04):
+// "<role> - <place> - Indeed.com". The role group is greedy, since roles
+// contain " - " and " | " ("Product Manager - Apparel").
+var indeedTitle = regexp.MustCompile(`^(.+) - (.+?) - Indeed(?:\.com)?$`)
+
+// indeed reads both Indeed layouts. On a job page the role and place come
+// from the title and the company is the line under the role; on a search
+// page the selected job sits after "Job Post Details" as role, company,
+// "•", place. The posting runs from "Full job description" to "Explore
+// other jobs" or "Report job".
+func indeed(p Page) candidates {
+	var c candidates
+	lines := strings.Split(normalizeText(p.Text), "\n")
+	full := lineIndex(lines, 0, len(lines), "Full job description")
+	if full < 0 {
+		return c
+	}
+	// The header is read line by line, ignoring blank lines.
+	header := slices.DeleteFunc(slices.Clone(lines[:full]), func(l string) bool { return l == "" })
+	if d := lastLineIndex(header, len(header), "Job Post Details"); d >= 0 && d+2 < len(header) {
+		c.role, c.company = []string{header[d+1]}, []string{header[d+2]}
+		if d+4 < len(header) && header[d+3] == "•" {
+			c.location = []string{header[d+4]}
+		}
+	} else if m := indeedTitle.FindStringSubmatch(cleanLine(p.Title, false)); m != nil {
+		c.role, c.location = []string{m[1]}, []string{m[2]}
+		if r := lineIndex(header, 0, len(header), m[1]); r >= 0 && r+1 < len(header) {
+			c.company = []string{header[r+1]}
+		}
+	}
+	end := lineIndex(lines, full+1, len(lines), "Explore other jobs", "Report job")
+	if end < 0 {
+		end = len(lines)
+	}
+	c.description = []string{strings.Join(lines[full+1:end], "\n")}
 	return c
 }
 
@@ -171,8 +288,7 @@ var (
 // "report this job"), come before it, and "Show more" / "Show less" (in
 // English on the Polish site too) right after it. "" when the layout
 // isn't recognised.
-func linkedInDescription(text string) string {
-	lines := strings.Split(normalizeText(text), "\n")
+func linkedInDescription(lines []string) string {
 	end := -1
 	for i := 0; i+1 < len(lines); i++ {
 		if lines[i] == "Show more" && lines[i+1] == "Show less" {
@@ -236,7 +352,12 @@ var boards = map[string][]string{
 	"glassdoor": {"glassdoor"}, "greenhouse": {"greenhouse"}, "lever": {"lever"}, "ashby": {"ashbyhq"},
 	"workday": {"myworkdayjobs", "myworkdaysite"}, "icims": {"icims"}, "smartrecruiters": {"smartrecruiters"},
 	"ziprecruiter": {"ziprecruiter"}, "monster": {"monster"}, "pracuj.pl": {"pracuj"}, "justjoin.it": {"justjoin"},
+	"mygreenhouse": {"greenhouse"}, // Greenhouse's candidate portal (spike capture)
 }
+
+// searchHeading is a search page's heading or title, never a role: "product
+// manager jobs in New York State", "Now Hiring: 75 … Jobs".
+var searchHeading = regexp.MustCompile(`(?i)^now hiring\b|\bjobs (?:in|near|at)\b|^browse\b`)
 
 // boardRule says when a job board's name is page chrome.
 type boardRule int
@@ -295,7 +416,7 @@ func plausibleCompany(c, host string, rule boardRule) bool {
 func plausibleRole(r, company, host string) bool {
 	n := utf8.RuneCountInString(r)
 	switch {
-	case n < 2 || n > MaxDetail || !hasLetterOrDigit(r) || isGeneric(r) || isBoard(r, host, boardsNever):
+	case n < 2 || n > MaxDetail || !hasLetterOrDigit(r) || isGeneric(r) || isBoard(r, host, boardsNever) || searchHeading.MatchString(r):
 		return false
 	case company != "" && strings.EqualFold(r, company):
 		return false

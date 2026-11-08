@@ -63,7 +63,7 @@
   }
 </script>
 
-<form class="card editor" aria-label="Interview round" onsubmit={submit}>
+<form autocomplete="off" class="card editor" aria-label="Interview round" onsubmit={submit}>
   <h2>{initial ? `Edit round: ${initial.company}` : 'Add an interview round'}</h2>
 
   {#if !initial}
@@ -81,7 +81,7 @@
   <div class="cols">
     <label class="field">
       <span>Date and time</span>
-      <input type="datetime-local" bind:value={form.local} />
+      <input autocomplete="off" type="datetime-local" bind:value={form.local} />
     </label>
     <label class="field">
       <span>Time zone</span>
@@ -93,7 +93,7 @@
     </label>
     <label class="field">
       <span>Minutes</span>
-      <input type="number" min="5" max="720" step="5" bind:value={form.durationMin} />
+      <input autocomplete="off" type="number" min="5" max="720" step="5" bind:value={form.durationMin} />
     </label>
     <label class="field">
       <span>Type</span>
@@ -106,10 +106,10 @@
   </div>
 
   <div class="cols">
-    <label class="field"><span>Location</span><input type="text" bind:value={form.location} /></label>
+    <label class="field"><span>Location</span><input autocomplete="off" type="text" bind:value={form.location} /></label>
     <label class="field">
       <span>Meeting link</span>
-      <input type="url" placeholder="https://" bind:value={form.link} />
+      <input autocomplete="off" type="url" placeholder="https://" bind:value={form.link} />
     </label>
   </div>
 
@@ -119,7 +119,7 @@
       <div class="cols person">
         <label class="field">
           <span>Name</span>
-          <input
+          <input autocomplete="off"
             type="text"
             aria-label="Interviewer {i + 1} name"
             value={p.name}
@@ -128,7 +128,7 @@
         </label>
         <label class="field">
           <span>Title</span>
-          <input
+          <input autocomplete="off"
             type="text"
             aria-label="Interviewer {i + 1} title"
             value={p.title}
@@ -137,7 +137,7 @@
         </label>
         <label class="field">
           <span>Email</span>
-          <input
+          <input autocomplete="off"
             type="email"
             aria-label="Interviewer {i + 1} email"
             value={p.email}
@@ -162,9 +162,9 @@
     </button>
   </fieldset>
 
-  <label class="field"><span>Prep notes</span><textarea rows="3" bind:value={form.prepNotes}></textarea></label>
-  <label class="field"><span>Notes after</span><textarea rows="3" bind:value={form.postNotes}></textarea></label>
-  <label class="field"><span>Outcome</span><input type="text" bind:value={form.outcome} /></label>
+  <label class="field"><span>Prep notes</span><textarea autocomplete="off" rows="3" bind:value={form.prepNotes}></textarea></label>
+  <label class="field"><span>Notes after</span><textarea autocomplete="off" rows="3" bind:value={form.postNotes}></textarea></label>
+  <label class="field"><span>Outcome</span><input autocomplete="off" type="text" bind:value={form.outcome} /></label>
 
   {#if failure}<p class="error" role="alert">{failure}</p>{/if}
   <div class="cols">

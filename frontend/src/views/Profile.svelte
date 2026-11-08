@@ -73,25 +73,25 @@
 {:else if $profileStore.status === 'error'}
   <p class="error">{$profileStore.message}</p>
 {:else if draft}
-  <form onsubmit={save} oninput={markDirty} onchange={markDirty}>
+  <form autocomplete="off" onsubmit={save} oninput={markDirty} onchange={markDirty}>
     <section class="card">
       <h2>About you</h2>
       <div class="cols">
-        <label class="field"><span>Full name</span><input type="text" autocomplete="name" bind:value={draft.fullName} /></label>
-        <label class="field"><span>Email</span><input type="email" autocomplete="email" bind:value={draft.email} /></label>
-        <label class="field"><span>Phone</span><input type="tel" autocomplete="tel" bind:value={draft.phone} /></label>
+        <label class="field"><span>Full name</span><input type="text" autocomplete="off" bind:value={draft.fullName} /></label>
+        <label class="field"><span>Email</span><input type="email" autocomplete="off" bind:value={draft.email} /></label>
+        <label class="field"><span>Phone</span><input type="tel" autocomplete="off" bind:value={draft.phone} /></label>
       </div>
       <div class="cols">
-        <label class="field"><span>Location</span><input type="text" bind:value={draft.location} /></label>
-        <label class="field"><span>Headline</span><input type="text" bind:value={draft.headline} /></label>
-        <label class="field"><span>Target role</span><input type="text" bind:value={draft.targetRole} /></label>
+        <label class="field"><span>Location</span><input autocomplete="off" type="text" bind:value={draft.location} /></label>
+        <label class="field"><span>Headline</span><input autocomplete="off" type="text" bind:value={draft.headline} /></label>
+        <label class="field"><span>Target role</span><input autocomplete="off" type="text" bind:value={draft.targetRole} /></label>
       </div>
-      <label class="field"><span>Summary</span><textarea rows="3" bind:value={draft.summary}></textarea></label>
+      <label class="field"><span>Summary</span><textarea autocomplete="off" rows="3" bind:value={draft.summary}></textarea></label>
       <h3>Links</h3>
       {#each draft.links as link, i (link)}
         <div class="cols">
-          <label class="field"><span>Label</span><input type="text" bind:value={link.label} /></label>
-          <label class="field grow"><span>Web address</span><input type="url" bind:value={link.url} /></label>
+          <label class="field"><span>Label</span><input autocomplete="off" type="text" bind:value={link.label} /></label>
+          <label class="field grow"><span>Web address</span><input autocomplete="off" type="url" bind:value={link.url} /></label>
           <button type="button" class="secondary" onclick={() => removeLink(i)}>Remove link</button>
         </div>
       {/each}

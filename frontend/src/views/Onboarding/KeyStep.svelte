@@ -65,7 +65,7 @@
   <p class="muted">A key is already saved. You can replace it here or go on.</p>
 {/if}
 
-<form class="cols" onsubmit={submit}>
+<form autocomplete="off" class="cols" onsubmit={submit}>
   <label class="field grow">
     <span>Gemini API key</span>
     <input type="password" autocomplete="off" spellcheck="false" bind:value={keyInput} disabled={busy} />

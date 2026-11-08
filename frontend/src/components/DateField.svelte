@@ -31,7 +31,7 @@
 
 <label class="field">
   <span>{label}</span>
-  <input
+  <input autocomplete="off"
     type="text"
     inputmode="numeric"
     placeholder="YYYY-MM"

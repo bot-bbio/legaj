@@ -33,16 +33,16 @@
 
 <section class="card paste" aria-label="Paste job">
   <h2>Paste a job</h2>
-  <form onsubmit={submit}>
-    <label class="field"><span>Job URL</span><input type="url" placeholder="https://" bind:value={form.url} /></label>
+  <form autocomplete="off" onsubmit={submit}>
+    <label class="field"><span>Job URL</span><input autocomplete="off" type="url" placeholder="https://" bind:value={form.url} /></label>
     <div class="cols">
-      <label class="field"><span>Company</span><input type="text" bind:value={form.company} /></label>
-      <label class="field"><span>Role</span><input type="text" bind:value={form.role} /></label>
-      <label class="field"><span>Location</span><input type="text" bind:value={form.location} /></label>
+      <label class="field"><span>Company</span><input autocomplete="off" type="text" bind:value={form.company} /></label>
+      <label class="field"><span>Role</span><input autocomplete="off" type="text" bind:value={form.role} /></label>
+      <label class="field"><span>Location</span><input autocomplete="off" type="text" bind:value={form.location} /></label>
     </div>
     <label class="field">
       <span>Job description (paste the whole posting; letters and answers are based on it)</span>
-      <textarea rows="8" bind:value={form.description}></textarea>
+      <textarea autocomplete="off" rows="8" bind:value={form.description}></textarea>
     </label>
 
     {#if duplicateOf}

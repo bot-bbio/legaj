@@ -93,7 +93,7 @@
         No key saved. LeGaJ needs one to write letters and answers.
       {/if}
     </p>
-    <form class="row" onsubmit={saveKey}>
+    <form autocomplete="off" class="row" onsubmit={saveKey}>
       <label class="grow">
         <span>New API key</span>
         <input type="password" autocomplete="off" spellcheck="false" bind:value={keyInput} disabled={keyBusy} />
@@ -127,10 +127,10 @@
   {#if draft}
     <section>
       <h2>Preferences</h2>
-      <form class="grid" onsubmit={saveSettings} oninput={() => ((dirty = true), (saved = false))}>
+      <form autocomplete="off" class="grid" onsubmit={saveSettings} oninput={() => ((dirty = true), (saved = false))}>
         <label>
           <span>Gemini model</span>
-          <input type="text" spellcheck="false" bind:value={draft.model} />
+          <input autocomplete="off" type="text" spellcheck="false" bind:value={draft.model} />
         </label>
         <label>
           <span>Default materials for new applications</span>
@@ -142,7 +142,7 @@
         </label>
         <label>
           <span>Follow up after (days)</span>
-          <input type="number" min="1" max="60" bind:value={draft.followUpDays} />
+          <input autocomplete="off" type="number" min="1" max="60" bind:value={draft.followUpDays} />
         </label>
         <label class="check">
           <input type="checkbox" bind:checked={draft.skipReview} onchange={() => (dirty = true)} />

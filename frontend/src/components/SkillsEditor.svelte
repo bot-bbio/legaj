@@ -37,10 +37,10 @@
   <fieldset class="item">
     <legend>Skill group {i + 1}</legend>
     <div class="cols">
-      <label class="field"><span>Category</span><input type="text" bind:value={group.category} /></label>
+      <label class="field"><span>Category</span><input autocomplete="off" type="text" bind:value={group.category} /></label>
       <label class="field grow">
         <span>Skills (comma-separated)</span>
-        <input type="text" value={itemsText(group)} oninput={(e) => onItems(group, e.currentTarget.value)} />
+        <input autocomplete="off" type="text" value={itemsText(group)} oninput={(e) => onItems(group, e.currentTarget.value)} />
       </label>
     </div>
     <p><button type="button" class="secondary" onclick={() => remove(i)}>Remove</button></p>

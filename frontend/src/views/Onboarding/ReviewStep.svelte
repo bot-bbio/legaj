@@ -72,16 +72,16 @@
       links and anything the resume doesn’t mention are kept.
     </p>
   {/if}
-  <form onsubmit={save}>
+  <form autocomplete="off" onsubmit={save}>
     <div class="cols">
-      <label class="field"><span>Full name</span><input type="text" bind:value={base.fullName} /></label>
-      <label class="field"><span>Email</span><input type="email" bind:value={base.email} /></label>
-      <label class="field"><span>Phone</span><input type="tel" bind:value={base.phone} /></label>
-      <label class="field"><span>Location</span><input type="text" bind:value={base.location} /></label>
+      <label class="field"><span>Full name</span><input autocomplete="off" type="text" bind:value={base.fullName} /></label>
+      <label class="field"><span>Email</span><input autocomplete="off" type="email" bind:value={base.email} /></label>
+      <label class="field"><span>Phone</span><input autocomplete="off" type="tel" bind:value={base.phone} /></label>
+      <label class="field"><span>Location</span><input autocomplete="off" type="text" bind:value={base.location} /></label>
     </div>
     <label class="field">
       <span>Target role (the job you’re looking for)</span>
-      <input type="text" bind:value={base.targetRole} />
+      <input autocomplete="off" type="text" bind:value={base.targetRole} />
     </label>
 
     {#if base.experiences.length > 0}

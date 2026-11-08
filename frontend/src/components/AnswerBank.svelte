@@ -34,7 +34,7 @@
 <div class="bank">
   <label class="field">
     <span>Search the bank</span>
-    <input type="search" placeholder="Question or answer" bind:value={query} />
+    <input autocomplete="off" type="search" placeholder="Question or answer" bind:value={query} />
   </label>
   {#if message}<p class="notice" role="status">{message}</p>{/if}
   {#if failure}<p class="error" role="alert">{failure}</p>{/if}

@@ -104,13 +104,13 @@
   {:else if draft}
     <label class="field">
       <span>Greeting</span>
-      <input type="text" bind:value={draft.salutation} onchange={persist} disabled={busy} />
+      <input autocomplete="off" type="text" bind:value={draft.salutation} onchange={persist} disabled={busy} />
     </label>
 
     <div class="para">
       <label class="field">
         <span>Opening</span>
-        <textarea rows="3" bind:value={draft.opening} onchange={persist} disabled={busy}></textarea>
+        <textarea autocomplete="off" rows="3" bind:value={draft.opening} onchange={persist} disabled={busy}></textarea>
       </label>
       <button type="button" class="secondary" disabled={busy} onclick={() => regenerate('opening', 0)}>
         Regenerate opening
@@ -132,7 +132,7 @@
               />
               <span>{draft.whyOptions[i]}</span>
             </label>
-            <textarea
+            <textarea autocomplete="off"
               rows="3"
               aria-label="Why option {i + 1}"
               bind:value={draft.whyOptions[i]}
@@ -151,7 +151,7 @@
       <div class="para">
         <label class="field">
           <span>Body paragraph {i + 1}</span>
-          <textarea rows="4" bind:value={draft.body[i]} onchange={persist} disabled={busy}></textarea>
+          <textarea autocomplete="off" rows="4" bind:value={draft.body[i]} onchange={persist} disabled={busy}></textarea>
         </label>
         <button type="button" class="secondary" disabled={busy} onclick={() => regenerate('body', i)}>
           Regenerate body paragraph {i + 1}
@@ -162,7 +162,7 @@
     <div class="para">
       <label class="field">
         <span>Closing</span>
-        <textarea rows="3" bind:value={draft.closing} onchange={persist} disabled={busy}></textarea>
+        <textarea autocomplete="off" rows="3" bind:value={draft.closing} onchange={persist} disabled={busy}></textarea>
       </label>
       <button type="button" class="secondary" disabled={busy} onclick={() => regenerate('closing', 0)}>
         Regenerate closing
@@ -171,7 +171,7 @@
 
     <label class="field">
       <span>Sign-off</span>
-      <input type="text" bind:value={draft.signOff} onchange={persist} disabled={busy} />
+      <input autocomplete="off" type="text" bind:value={draft.signOff} onchange={persist} disabled={busy} />
     </label>
 
     <div class="cols">

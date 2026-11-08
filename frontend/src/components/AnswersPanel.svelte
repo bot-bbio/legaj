@@ -108,7 +108,7 @@
 
   <label class="field">
     <span>Question (leave empty for “Why this company?”)</span>
-    <textarea rows="2" bind:value={question} oninput={questionChanged} disabled={busy}></textarea>
+    <textarea autocomplete="off" rows="2" bind:value={question} oninput={questionChanged} disabled={busy}></textarea>
   </label>
 
   {#if suggestions.length > 0}
@@ -150,7 +150,7 @@
         {:else}
           {#each a.options, i (i)}
             <div class="option">
-              <textarea
+              <textarea autocomplete="off"
                 rows="5"
                 aria-label="Option {i + 1}"
                 value={optionText(a, i)}

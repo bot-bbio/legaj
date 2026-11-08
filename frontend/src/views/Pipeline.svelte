@@ -176,7 +176,7 @@
   <div class="toolbar">
     <label class="field">
       <span>Search</span>
-      <input type="search" placeholder="Company or role" bind:value={filter.query} />
+      <input autocomplete="off" type="search" placeholder="Company or role" bind:value={filter.query} />
     </label>
     <label class="field">
       <span>Stage</span>

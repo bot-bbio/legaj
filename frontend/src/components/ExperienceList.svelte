@@ -30,9 +30,9 @@
   <fieldset class="item">
     <legend>Experience {i + 1}</legend>
     <div class="cols">
-      <label class="field"><span>Company</span><input type="text" bind:value={exp.company} /></label>
-      <label class="field"><span>Title</span><input type="text" bind:value={exp.title} /></label>
-      <label class="field"><span>Location</span><input type="text" bind:value={exp.location} /></label>
+      <label class="field"><span>Company</span><input autocomplete="off" type="text" bind:value={exp.company} /></label>
+      <label class="field"><span>Title</span><input autocomplete="off" type="text" bind:value={exp.title} /></label>
+      <label class="field"><span>Location</span><input autocomplete="off" type="text" bind:value={exp.location} /></label>
     </div>
     <div class="cols">
       <DateField label="Start" bind:value={exp.start} />
@@ -52,7 +52,7 @@
     </div>
     <label class="field">
       <span>What you did (one point per line)</span>
-      <textarea rows="4" value={exp.bullets.join('\n')} oninput={(e) => (exp.bullets = e.currentTarget.value.split('\n'))}
+      <textarea autocomplete="off" rows="4" value={exp.bullets.join('\n')} oninput={(e) => (exp.bullets = e.currentTarget.value.split('\n'))}
       ></textarea>
     </label>
     <p><button type="button" class="secondary" onclick={() => remove(i)}>Remove</button></p>

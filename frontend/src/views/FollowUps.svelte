@@ -286,11 +286,11 @@
           </label>
           <label class="field">
             <span>Subject</span>
-            <input type="text" bind:value={draft.subject} onchange={() => save(key)} />
+            <input autocomplete="off" type="text" bind:value={draft.subject} onchange={() => save(key)} />
           </label>
           <label class="field">
             <span>Message</span>
-            <textarea rows="9" bind:value={draft.body} onchange={() => save(key)}></textarea>
+            <textarea autocomplete="off" rows="9" bind:value={draft.body} onchange={() => save(key)}></textarea>
           </label>
           {#each draft.problems as p, i (i)}<p class="error">{p}</p>{/each}
           {#each draft.warnings as w, i (i)}<p class="warning">{w}</p>{/each}

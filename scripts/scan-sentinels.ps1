@@ -13,11 +13,14 @@
   The key must appear in no file under the data folder or the WebView2
   folder. The email, phone and resume line must not appear in the logs or
   the WebView2 folder (the database and your documents hold them on
-  purpose), with one exception: WebView2's autofill store ("Web Data"),
-  which keeps what you type into LeGaJ's own forms, such as your profile's
-  email and phone. LeGaJ can't turn it off, and uninstalling with "No"
-  deletes it. The key is still looked for there. Text is searched as UTF-8
-  and UTF-16.
+  purpose), with one exception: the email and phone may be in WebView2's
+  autofill store ("Web Data"), which keeps what you type into LeGaJ's own
+  forms. LeGaJ can't turn it off, and uninstalling with "No" deletes it.
+  The key and the resume line are still looked for there. Text is searched
+  as UTF-8 and UTF-16.
+
+  -IgnoreRunningLeGaJ skips the check that LeGaJ is closed. It is for
+  scanning other folders (the tests do): a running LeGaJ locks only its own.
 
 .EXAMPLE
   powershell -NoProfile -File scripts/scan-sentinels.ps1 -Key 'AIzaSyD-SENTINEL-...' `
@@ -30,12 +33,13 @@ param(
     [Parameter(Mandatory)][string]$Phone,
     [Parameter(Mandatory)][string]$ResumeLine,
     [string]$DataDir = (Join-Path $env:LOCALAPPDATA 'LeGaJ'),
-    [string]$WebViewDir = (Join-Path $env:APPDATA 'legaj.exe')
+    [string]$WebViewDir = (Join-Path $env:APPDATA 'legaj.exe'),
+    [switch]$IgnoreRunningLeGaJ
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-if (Get-Process -Name 'legaj' -ErrorAction SilentlyContinue) {
+if (-not $IgnoreRunningLeGaJ -and (Get-Process -Name 'legaj' -ErrorAction SilentlyContinue)) {
     Write-Host 'Close LeGaJ first: WebView2 keeps its files locked while it runs.' -ForegroundColor Red
     exit 2
 }
@@ -50,11 +54,12 @@ function Get-Needles([string]$Text) {
     )
 }
 
-# WebView2's autofill store and its journal: only the key is looked for in
-# them (see the description above).
+# WebView2's autofill store and its journal may hold the email and phone
+# (see the description above).
 $autofillStore = @('Web Data', 'Web Data-journal')
+$autofillAllowed = @('email', 'phone')
 
-function Find-In([string]$Root, [hashtable]$Needles, [string[]]$KeyOnlyIn = @()) {
+function Find-In([string]$Root, [hashtable]$Needles, [string[]]$ExemptFiles = @(), [string[]]$ExemptNames = @()) {
     $hits = @()
     if (-not (Test-Path $Root)) {
         Write-Host "  (not found: $Root)" -ForegroundColor Yellow
@@ -67,7 +72,8 @@ function Find-In([string]$Root, [hashtable]$Needles, [string[]]$KeyOnlyIn = @())
             Write-Host "  skipped (unreadable): $($file.FullName)" -ForegroundColor Yellow
             continue
         }
-        $names = if ($KeyOnlyIn -contains $file.Name) { @('API key') } else { @($Needles.Keys) }
+        $exempt = $ExemptFiles -contains $file.Name
+        $names = @($Needles.Keys | Where-Object { -not ($exempt -and ($ExemptNames -contains $_)) })
         foreach ($name in $names) {
             foreach ($n in $Needles[$name]) {
                 if ($text.Contains($n)) {
@@ -95,8 +101,8 @@ Write-Host "Data folder (key only): $DataDir"
 $hits = @(Find-In $DataDir $keyNeedles)
 Write-Host "Logs (key, email, phone, resume line): $(Join-Path $DataDir 'logs')"
 $hits += @(Find-In (Join-Path $DataDir 'logs') $allNeedles)
-Write-Host "WebView2 folder (key, email, phone, resume line; key only in its autofill store): $WebViewDir"
-$hits += @(Find-In $WebViewDir $allNeedles $autofillStore)
+Write-Host "WebView2 folder (key, email, phone, resume line; its autofill store may hold the email and phone): $WebViewDir"
+$hits += @(Find-In $WebViewDir $allNeedles $autofillStore $autofillAllowed)
 
 if ($hits.Count -gt 0) {
     Write-Host ''

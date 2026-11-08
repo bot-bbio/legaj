@@ -28,7 +28,10 @@ func runScanScript(t *testing.T, data, webview string) (code int, out string) {
 	cmd := proc.Command(context.Background(), "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
 		"-File", filepath.Join("scripts", "scan-sentinels.ps1"),
 		"-Key", sentinelKey, "-Email", sentinelEmail, "-Phone", sentinelPhone, "-ResumeLine", sentinelResume,
-		"-DataDir", data, "-WebViewDir", webview)
+		"-DataDir", data, "-WebViewDir", webview,
+		// The folders here aren't LeGaJ's, so a running LeGaJ locks nothing
+		// they hold; without this, verify would fail whenever the app is open.
+		"-IgnoreRunningLeGaJ")
 	raw, err := cmd.CombinedOutput()
 	out = string(raw)
 	var exit *exec.ExitError
@@ -38,9 +41,6 @@ func runScanScript(t *testing.T, data, webview string) (code int, out string) {
 		code = exit.ExitCode()
 	default:
 		t.Fatalf("running the scan script: %v", err)
-	}
-	if code == 2 && strings.Contains(out, "Close LeGaJ first") {
-		t.Fatal("a process named legaj is running on this machine, and the scan refuses to run then; close LeGaJ and run the tests again")
 	}
 	return code, out
 }
@@ -89,7 +89,8 @@ func TestR34_ScanScriptFindsTheKeyAnywhereInTheDataFolder(t *testing.T) {
 
 // WebView2's autofill store keeps what the user types into LeGaJ's own
 // forms, such as the profile's email and phone, and Wails offers no way to
-// turn it off; R34 accepts that file. The key must still never be there.
+// turn it off; R34 accepts the email and phone in that file. The key and
+// the resume line must still never be there.
 func TestR34_ScanScriptAllowsTheAutofillStoreButNeverTheKey(t *testing.T) {
 	data, webview := t.TempDir(), t.TempDir()
 	store := filepath.Join(webview, "EBWebView", "Default")
@@ -108,6 +109,12 @@ func TestR34_ScanScriptAllowsTheAutofillStoreButNeverTheKey(t *testing.T) {
 	}
 	if strings.Contains(out, "  email: ") {
 		t.Fatalf("reported the email in the autofill store:\n%s", out)
+	}
+
+	writeScanFile(t, filepath.Join(store, "Web Data"), utf16le("summary "+sentinelResume))
+	code, out = runScanScript(t, data, webview)
+	if code != 1 || !strings.Contains(out, `  resume line: `) || !strings.Contains(out, `Default\Web Data`) {
+		t.Fatalf("exit %d; the resume line in the autofill store was not reported; output:\n%s", code, out)
 	}
 }
 

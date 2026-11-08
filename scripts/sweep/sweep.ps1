@@ -21,6 +21,13 @@ param([ValidateSet('main', 'standard', 'nowebview2')][string]$Phase = 'main')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# It trusts a throwaway root certificate and edits the hosts file: on a real
+# PC that would be a security hole, so it runs only on a GitHub-hosted runner.
+if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
+    Write-Host 'sweep.ps1 runs only on a GitHub-hosted runner; it changes machine-wide settings.' -ForegroundColor Red
+    exit 2
+}
+
 $repo = $PWD.Path
 $out = Join-Path $repo 'out'
 $work = Join-Path $env:RUNNER_TEMP 'sweep'

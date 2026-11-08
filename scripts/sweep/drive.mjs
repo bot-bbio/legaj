@@ -66,17 +66,23 @@ const skip = (detail) => ({ status: 'SKIP', detail });
 class Shell {
   constructor() {
     this.ps = spawn('powershell.exe', ['-NoProfile', '-NoLogo', '-ExecutionPolicy', 'Bypass', '-Command', '-'], { stdio: ['pipe', 'pipe', 'pipe'] });
-    this.waiting = [];
+    // Replies carry their request's id, so a late reply after a timeout
+    // can't be taken for the next call's.
+    this.waiting = new Map();
+    this.seq = 0;
     createInterface({ input: this.ps.stdout }).on('line', (line) => {
       if (!line.startsWith('{"ok":')) return;
-      const next = this.waiting.shift();
       let reply;
       try {
         reply = JSON.parse(line);
       } catch {
-        reply = { ok: false, error: `unreadable reply: ${line.slice(0, 200)}` };
+        return;
       }
-      if (next) next(reply);
+      const done = this.waiting.get(reply.id);
+      if (done) done(reply);
+    });
+    this.ps.on('exit', (code) => {
+      for (const done of this.waiting.values()) done({ ok: false, error: `the Windows helper exited (${code})` });
     });
     this.ps.stderr.on('data', (d) => process.stderr.write(`[ps] ${d}`));
     this.chain = Promise.resolve();
@@ -84,9 +90,19 @@ class Shell {
   }
   call(op, args = {}) {
     const run = () => new Promise((resolve, reject) => {
-      const json = JSON.stringify({ op, timeout: 15000, type: '', ...args }).replaceAll("'", "''");
-      this.waiting.push((r) => (r.ok ? resolve(r.value) : reject(new Error(`${op}: ${r.error}`))));
-      this.ps.stdin.write(`Invoke-Sweep '${json}'\n`);
+      const id = ++this.seq;
+      const req = { op, timeout: 15000, type: '', ...args, id };
+      // A helper that hangs mustn't hang the run: the report must still be written.
+      const limit = setTimeout(() => {
+        this.waiting.delete(id);
+        reject(new Error(`${op}: no answer from the Windows helper in ${req.timeout + 60000} ms`));
+      }, req.timeout + 60000);
+      this.waiting.set(id, (r) => {
+        clearTimeout(limit);
+        this.waiting.delete(id);
+        r.ok ? resolve(r.value) : reject(new Error(`${op}: ${r.error}`));
+      });
+      this.ps.stdin.write(`Invoke-Sweep '${JSON.stringify(req).replaceAll("'", "''")}'\n`);
     });
     const p = this.chain.then(run, run);
     this.chain = p.catch(() => {});
@@ -928,7 +944,7 @@ async function mainPhase() {
     });
     writeFileSync(join(cfg.out, 'scan-sentinels.txt'), r.output);
     if (r.code === 0 && /nothing found/.test(r.output)) return pass('nothing found in the data folder, the logs or the WebView2 folder');
-    const hits = r.output.split('\n').filter((l) => /^\s+\S.*: /.test(l)).map((l) => l.trim().replace(/C:\\Users\\[^\\]+\\AppData\\(Local|Roaming)/, '%$1%'));
+    const hits = r.output.split('\n').filter((l) => /^\s+(API key|email|phone|resume line): /.test(l)).map((l) => l.trim().replace(/C:\\Users\\[^\\]+\\AppData\\(Local|Roaming)/, '%$1%'));
     const webData = r.output.includes('Web Data') ? `; Web Data: ${webDataReport()}` : '';
     return fail(`${hits.join(' | ') || r.output.slice(-300)}${webData}`);
   });
@@ -1014,9 +1030,11 @@ async function mainPhase() {
     const back = apps().length;
     if (back !== rows) problems.push(`${back} applications after reinstall, ${rows} before`);
     // Pipeline lists the newest rows first and renders only what fits, so
-    // the check looks for the last job clipped before the uninstall.
+    // the check looks for the newest row's role.
     await nav('Pipeline');
-    await waitText(/Reporting Analyst/, 10000).catch(() => problems.push('Pipeline does not show the old rows'));
+    const newest = apps().at(-1);
+    const role = new RegExp(newest.role.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    await waitText(role, 10000).catch(() => problems.push(`Pipeline does not show the newest row ("${newest.role}")`));
     return problems.length ? fail(problems.join('; ')) : pass(`data kept; all ${back} applications back after reinstall`);
   });
   saveAppLogs();

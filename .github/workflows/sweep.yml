@@ -31,7 +31,7 @@ jobs:
         id: cache
         with:
           path: dist
-          key: installer-2-${{ hashFiles('*.go', 'go.mod', 'go.sum', 'internal/**', 'frontend/src/**', 'frontend/package-lock.json', 'frontend/*.ts', 'frontend/*.js', 'frontend/index.html', 'packaging/**', 'wails.json', 'build/**', 'LICENSE') }}
+          key: installer-2-${{ hashFiles('*.go', 'go.mod', 'go.sum', 'internal/**', 'frontend/src/**', 'frontend/package.json', 'frontend/package-lock.json', 'frontend/*.ts', 'frontend/*.js', 'frontend/index.html', 'packaging/**', 'wails.json', 'build/**', 'LICENSE', '.github/workflows/sweep.yml') }}
 
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/setup-go@v6

@@ -503,8 +503,8 @@ function Invoke-Sweep([string]$Json) {
             }
             default { throw "unknown op $($c.op)" }
         }
-        [ordered]@{ ok = $true; value = $r } | ConvertTo-Json -Compress -Depth 6
+        [ordered]@{ ok = $true; value = $r; id = $c.id } | ConvertTo-Json -Compress -Depth 6
     } catch {
-        [ordered]@{ ok = $false; error = "$($_.Exception.Message)" } | ConvertTo-Json -Compress
+        [ordered]@{ ok = $false; error = "$($_.Exception.Message)"; id = $c.id } | ConvertTo-Json -Compress
     }
 }

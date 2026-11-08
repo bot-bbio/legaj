@@ -2,6 +2,13 @@
 
 Run these on a clean Windows 10 or 11 machine with the built installer before a release. Automated checks live in `scripts/verify.ps1`. This list covers what a headless test can't see.
 
+## Automated sweep on clean runners
+`.github/workflows/sweep.yml` (Actions › sweep › Run workflow) builds the installer as a release does and runs `scripts/sweep/` on fresh GitHub-hosted Windows runners, a new machine per job. It drives the installed app through its window, as a user does: UI Automation, the real mouse and keyboard, the Windows file dialog. Edge runs over the DevTools protocol, with a throwaway profile. A stand-in Gemini answers the app's calls, made reachable by a hosts-file entry and a throwaway root certificate, so no real key is used. The scripts change machine settings, so never run them on a real PC.
+
+It checks: the silent install and an install by a standard user; the WebView2 step on a machine without WebView2; the wizard, with the key in Credential Manager and the resume chosen in the file dialog; the clipper (dragging it to Edge's favorites bar, copying it, real favorite clicks on a local page and on live Greenhouse, Lever, Ashby, Workday, LinkedIn and Indeed postings); the reinstall banner with the port taken; opening Posting, Letter and Resume, including the resume an Applied row keeps; focus during bulk letter generation; single instance; Start with Windows; the sentinel scan; Setup's and the uninstaller's prompts while LeGaJ runs; and both uninstall answers. Each check is reported as PASS, FAIL or SKIP in the run's summary.
+
+It can't stand in for: a real Windows 10 or 11 desktop (runners are Windows Server, signed in as an administrator, with Edge's first-run pages turned off by policy); LinkedIn signed in; Outlook and Google Calendar; real Gemini output, which the live smoke test covers. Those items stay on this list.
+
 ## Gemini key storage (R4)
 - [ ] Run the real Credential Manager round trip: `$env:LEGAJ_HOME = "$env:TEMP\legaj-smoke"; go test -tags credman ./internal/secrets/`. It passes and leaves no `LeGaJ-test` entry in Credential Manager.
 - [ ] After saving a key in the app, Credential Manager › Windows Credentials shows **LeGaJ:gemini-api-key**.
@@ -33,7 +40,7 @@ Automated in `scripts/verify.ps1`: the built bookmarklet and the popup's real pa
 - [ ] Uninstall and answer **No**: `%LOCALAPPDATA%\LeGaJ`, `%APPDATA%\legaj.exe` and the **LeGaJ:gemini-api-key** credential are gone. In both cases the `LeGaJ` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` is gone.
 
 ## Release sweep (item 45)
-Automated in `scripts/verify.ps1`: `TestR4_R34_SentinelScan` runs onboarding, a forced Gemini 400, profile, a job, letter generation and approval and form answers with sentinel values, then byte-scans the data folder (no key anywhere; no email, phone or resume line in the logs or in tables that shouldn't hold them).
+Automated in `scripts/verify.ps1`: `TestR4_R34_SentinelScan` runs onboarding, a forced Gemini 400, profile, a job, letter generation and approval and form answers with sentinel values, then byte-scans the data folder (no key anywhere; no email, phone or resume line in the logs or in tables that shouldn't hold them). `TestR34_ScanScript*` run `scripts/scan-sentinels.ps1` itself on folders they build.
 
 - [ ] Live Gemini smoke with your own key (it never runs in CI): `$env:LEGAJ_HOME = "$env:TEMP\legaj-live"; $env:LEGAJ_LIVE_GEMINI_KEY = '<key>'; go test -tags live -count=1 ./internal/smoke/`, then `Remove-Item Env:LEGAJ_LIVE_GEMINI_KEY`.
 - [ ] On a clean Windows 10 VM: install, finish onboarding with **made-up** sentinel values (a throwaway key that you revoke afterwards, a fake email, phone and resume line), paste and clip jobs, generate and approve a letter, draft answers, open a follow-up, add a round. Close LeGaJ, then run `powershell -NoProfile -File scripts/scan-sentinels.ps1 -Key ... -Email ... -Phone ... -ResumeLine ...`. It must report nothing, including in the WebView2 folder.

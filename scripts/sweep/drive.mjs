@@ -1013,7 +1013,10 @@ async function mainPhase() {
     await startApp();
     const back = apps().length;
     if (back !== rows) problems.push(`${back} applications after reinstall, ${rows} before`);
-    await waitText(/Northwind Analytics/, 10000).catch(() => problems.push('Pipeline does not show the old rows'));
+    // Pipeline lists the newest rows first and renders only what fits, so
+    // the check looks for the last job clipped before the uninstall.
+    await nav('Pipeline');
+    await waitText(/Reporting Analyst/, 10000).catch(() => problems.push('Pipeline does not show the old rows'));
     return problems.length ? fail(problems.join('; ')) : pass(`data kept; all ${back} applications back after reinstall`);
   });
   saveAppLogs();

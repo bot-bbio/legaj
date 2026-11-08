@@ -290,9 +290,9 @@ function Save-Screen([string]$Path) {
     $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
     $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
     $g = [System.Drawing.Graphics]::FromImage($bmp)
-    # CaptureBlt includes layered windows, such as a drag's ghost image.
-    $op = [System.Drawing.CopyPixelOperation]::SourceCopy -bor [System.Drawing.CopyPixelOperation]::CaptureBlt
-    try { $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size, $op) } finally { $g.Dispose() }
+    # Plain copy: .NET rejects SourceCopy combined with CaptureBlt as an
+    # undefined CopyPixelOperation value.
+    try { $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size) } finally { $g.Dispose() }
     $bmp.Save($Path); $bmp.Dispose()
 }
 

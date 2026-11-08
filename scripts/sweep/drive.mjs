@@ -964,7 +964,7 @@ async function mainPhase() {
     let text = d.text;
     if (/Are you sure/i.test(d.text)) {
       await pressIn(d, 'Yes');
-      d = await dialog('*Uninstall*', /running|close|removed|Keep/i, 30000);
+      d = await dialog('*Uninstall*', /running|close|successfully removed|Keep/i, 30000);
       text += ' || ' + d.text;
     }
     await shot('uninstall-while-running');
@@ -987,12 +987,12 @@ async function mainPhase() {
     spawn(UNINSTALLER, [], { stdio: 'ignore' });
     const seen = [];
     for (let i = 0; i < 5; i++) {
-      const d = await dialog('*Uninstall*', /sure|Keep your applications|removed|running/i, 60000).catch(() => null);
+      const d = await dialog('*Uninstall*', /sure|Keep your applications|successfully removed|running/i, 60000).catch(() => null);
       if (!d) break;
       seen.push(d.text);
       if (/Are you sure/i.test(d.text)) await pressIn(d, 'Yes');
       else if (/Keep your applications/i.test(d.text)) await pressIn(d, keep ? 'Yes' : 'No');
-      else if (/removed/i.test(d.text)) {
+      else if (/successfully removed/i.test(d.text)) {
         await pressIn(d, 'OK');
         break;
       } else break;

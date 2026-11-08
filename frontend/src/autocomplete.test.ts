@@ -1,10 +1,14 @@
 import { parse } from 'svelte/compiler';
 import { describe, expect, it } from 'vitest';
 
-// R34: nothing the user types may be kept in the WebView2 folder. WebView2
-// saves form values for autofill unless a field or its form opts out, and
-// Wails gives the app no way to turn autofill off for the whole WebView. So
-// every text field and every form in the app says autocomplete="off".
+// R34: what the user types should stay out of the WebView2 folder. Chromium
+// keeps a form history of submitted fields unless a field or its form says
+// autocomplete="off", and Wails gives the app no way to turn autofill off
+// for the whole WebView. So every text field and form opts out here.
+//
+// This is not the whole answer: the release sweep found that Edge's own
+// field-value store (autofill_edge_field_values in "Web Data") still keeps
+// the email and phone after the profile form is saved, despite the opt-out.
 
 const sources = import.meta.glob('./**/*.svelte', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
 
@@ -70,12 +74,12 @@ function fields(): { where: string; off: boolean }[] {
   return out;
 }
 
-describe('R34 browser autofill stays off', () => {
+describe('R34 form history stays off', () => {
   it('finds the app\'s text fields and forms', () => {
     expect(fields().length).toBeGreaterThan(40);
   });
 
-  it('every text field and form opts out, so WebView2 keeps nothing the user types', () => {
+  it('every text field and form opts out of the browser\'s form history', () => {
     expect(fields().filter((f) => !f.off).map((f) => f.where)).toEqual([]);
   });
 });

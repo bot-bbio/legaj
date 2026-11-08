@@ -290,7 +290,9 @@ function Save-Screen([string]$Path) {
     $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
     $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
     $g = [System.Drawing.Graphics]::FromImage($bmp)
-    try { $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size) } finally { $g.Dispose() }
+    # CaptureBlt includes layered windows, such as a drag's ghost image.
+    $op = [System.Drawing.CopyPixelOperation]::SourceCopy -bor [System.Drawing.CopyPixelOperation]::CaptureBlt
+    try { $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size, $op) } finally { $g.Dispose() }
     $bmp.Save($Path); $bmp.Dispose()
 }
 
@@ -330,23 +332,26 @@ function Invoke-Sweep([string]$Json) {
             'clipboard' { $r = [System.Windows.Forms.Clipboard]::GetText() }
             'pids' { $r = @(Get-Pids $c.name) }
             'dialogs' {
-                # Windows and owned dialogs whose title matches, with their text and buttons.
-                $r = @(foreach ($w in Get-Windows) {
+                # Windows and owned dialogs whose title matches, with their text
+                # and buttons. When a window and a dialog it owns both match, only
+                # the dialog is reported: that is where its buttons are.
+                $found = foreach ($top in $A::RootElement.FindAll($Scope::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+                    $kids = @($top.FindAll($Scope::Children, $IsWindow) | Where-Object { $_.Current.Name -like $c.window -and $_.Current.NativeWindowHandle -ne 0 })
+                    if ($kids.Count) { $kids } elseif ($top.Current.Name -like $c.window -and $top.Current.NativeWindowHandle -ne 0) { $top }
+                }
+                $r = @(foreach ($w in @($found)) {
                         $x = $w.Current
-                        if ($x.Name -like $c.window -and $x.NativeWindowHandle -ne 0) {
-                            $buttons = @($w.FindAll($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button))) | ForEach-Object { $_.Current.Name })
-                            [ordered]@{ hwnd = $x.NativeWindowHandle; title = $x.Name; text = (Text-Of $w); buttons = $buttons }
-                        }
+                        $buttons = @($w.FindAll($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button))) | ForEach-Object { $_.Current.Name })
+                        [ordered]@{ hwnd = $x.NativeWindowHandle; title = $x.Name; text = (Text-Of $w); buttons = $buttons }
                     })
             }
             'press' {
                 # A message box's buttons can sit in an owned window, and some
                 # dialogs give them another control type.
                 $w = $A::FromHandle([IntPtr][long]$c.hwnd)
-                $b = Find-Named $w $c.button 'Button'
-                if (-not $b) {
-                    foreach ($d in $w.FindAll($Scope::Children, $IsWindow)) { $b = Find-Named $d $c.button 'Button'; if ($b) { break } }
-                }
+                $b = $null
+                foreach ($d in $w.FindAll($Scope::Children, $IsWindow)) { $b = Find-Named $d $c.button 'Button'; if ($b) { break } }
+                if (-not $b) { $b = Find-Named $w $c.button 'Button' }
                 if (-not $b) { $b = Find-Named $w $c.button '' }
                 if (-not $b) { throw "no button '$($c.button)' in: $(Text-Of $w)" }
                 # A press that worked closes the message box, and its button
@@ -405,9 +410,20 @@ function Invoke-Sweep([string]$Json) {
                 # A browser window's own controls whose name matches (see Get-ChromeElements).
                 $w = Find-Window $c.window ([int]$c.timeout)
                 if (-not $w) { throw "no window like '$($c.window)'" }
-                $r = @(Get-ChromeElements $w | Where-Object {
+                $hits = @(Get-ChromeElements $w | Where-Object {
                         $_.Current.Name -like $c.name -and ($c.type -eq '' -or $_.Current.ControlType.ProgrammaticName -eq "ControlType.$($c.type)")
-                    } | ForEach-Object { Rect-Of $_ })
+                    })
+                if ($c.invoke) {
+                    if (-not $hits.Count) { throw "no '$($c.name)' in '$($w.Current.Name)'" }
+                    Invoke-Element $hits[-1]
+                }
+                $r = @($hits | ForEach-Object { Rect-Of $_ })
+            }
+            'kill-owners' {
+                # Ends the processes that own windows whose title matches.
+                $ids = @(Get-Windows | Where-Object { $_.Current.Name -like $c.window } | ForEach-Object { $_.Current.ProcessId } | Sort-Object -Unique)
+                foreach ($id in $ids) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }
+                $r = $ids.Count
             }
             'filedialog' {
                 # Windows' open-file dialog opens with the caret in File name,

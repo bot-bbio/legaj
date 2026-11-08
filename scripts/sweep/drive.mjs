@@ -29,7 +29,10 @@ const WEBVIEW_DATA = join(process.env.APPDATA, 'legaj.exe');
 const RUN_KEY = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 const UNINSTALLER = join(process.env.LOCALAPPDATA, 'Programs', 'LeGaJ', 'unins000.exe');
 const START_MENU = join(process.env.APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'LeGaJ.lnk');
-const EDGE_TOP = 500; // Edge sits under LeGaJ's window, its favorites bar in view
+// Edge sits under LeGaJ's window. LeGaJ can't be shorter than 600 px, and its
+// invisible resize border reaches y 600, so Edge's favorites bar must start
+// below that or clicks and drops on it land in LeGaJ.
+const EDGE_TOP = 520;
 const shots = join(cfg.out, 'shots');
 mkdirSync(shots, { recursive: true });
 
@@ -247,6 +250,16 @@ async function clickBookmark() {
   await win.call('click', { x: Math.round(b.x + b.w / 2), y: Math.round(b.y + b.h / 2) });
 }
 
+/** Activates the favorite through UI Automation instead of the mouse. */
+async function invokeBookmark() {
+  await win.call('chrome', { window: EDGE_WINDOW, name: 'Clip to LeGaJ*', type: '', invoke: true, timeout: 5000 });
+}
+
+const findPopup = (port) => async () => {
+  const { targetInfos } = await edge.cdp.send('Target.getTargets');
+  return targetInfos.find((t) => t.type === 'page' && t.url.startsWith(`http://127.0.0.1:${port}/clip`));
+};
+
 async function clickIn(cdp, sessionId, re) {
   const box = await until(`a control ${re}`, () => evaluate(cdp, `(() => {
     const re = new RegExp(${JSON.stringify(re.source)}, ${JSON.stringify(re.flags)});
@@ -277,15 +290,24 @@ async function clipCurrentPage(label, port) {
   edge.cdp.listeners.add(listen);
   await edge.cdp.send('Log.enable', {}, edge.tab).catch(() => {});
   let popup;
+  // Counts window.open calls, to tell "the bookmarklet didn't run" from
+  // "it ran and the popup was refused".
+  await evaluate(edge.cdp, `(() => { if (window.__sweepOpens === undefined) { window.__sweepOpens = 0; const o = window.open; window.open = function (...a) { window.__sweepOpens++; return o.apply(this, a); }; } })()`, edge.tab).catch(() => {});
+  const opens = () => evaluate(edge.cdp, 'window.__sweepOpens ?? -1', edge.tab).catch(() => -2);
+  let how = 'a real click';
   try {
     await clickBookmark();
-    popup = await until('the clip popup', async () => {
-      const { targetInfos } = await edge.cdp.send('Target.getTargets');
-      return targetInfos.find((t) => t.type === 'page' && t.url.startsWith(`http://127.0.0.1:${port}/clip`));
-    }, 15000, 250);
+    popup = await until('the clip popup', findPopup(port), 6000, 250).catch(() => null);
+    if (!popup) {
+      // The mouse can miss (another window on top, a page still busy);
+      // UI Automation activates the favorite itself.
+      how = `UI Automation, after a click that opened nothing (window.open calls: ${await opens()})`;
+      await invokeBookmark();
+      popup = await until('the clip popup', findPopup(port), 12000, 250);
+    }
   } catch (err) {
     await shot(`no-popup-${label}`).catch(() => {});
-    throw new Error(`${err.message}; the tab said: ${said.slice(-6).join(' | ').slice(0, 500) || 'nothing'}`);
+    throw new Error(`${err.message}; window.open calls: ${await opens()}; the tab said: ${said.slice(-6).join(' | ').slice(0, 500) || 'nothing'}`);
   } finally {
     edge.cdp.listeners.delete(listen);
   }
@@ -309,7 +331,7 @@ async function clipCurrentPage(label, port) {
   const prompts = await edgeUi('*').catch(() => []);
   const lna = prompts.some((e) => /local network|devices on your/i.test(e.name));
   await edge.cdp.send('Target.closeTarget', { targetId: popup.targetId }).catch(() => {});
-  return { ...final, lna };
+  return { ...final, lna, how };
 }
 
 /** Adds a favorite by writing Edge's Bookmarks file, as pasting an address would. Edge must be closed. */
@@ -483,11 +505,12 @@ function saveAppLogs() {
   for (const f of findFiles(join(DATA, 'logs'), /./)) writeFileSync(join(dir, basename(f.path)), readFileSync(f.path));
 }
 
-/** Ends any uninstaller left from an earlier check (it runs as a _iu*.tmp copy). */
+/** Ends any Setup or uninstaller left from an earlier check, found by its windows. */
 async function stopUninstallers() {
-  await win.call('kill-name', { name: '_iu*' });
+  await win.call('kill-owners', { window: '*Uninstall*' });
+  await win.call('kill-owners', { window: 'Setup*' });
   await win.call('kill-name', { name: 'unins000' });
-  await sleep(500);
+  await sleep(800);
 }
 
 /** Which tables of WebView2's "Web Data" (Chromium's autofill store) hold the sentinels. */
@@ -675,7 +698,7 @@ async function mainPhase() {
         await sleep(1500);
         const row = apps().find((x) => !before.has(x.id));
         const fields = row ? `company "${row.company}", role "${row.role}", location "${row.location}"` : 'no new row';
-        const note = `${job.url}${href !== job.url ? ` (landed on ${href})` : ''}: popup "${r.status}"; ${fields}${r.lna ? '; LOCAL NETWORK PROMPT SEEN' : ''}`;
+        const note = `${job.url}${href !== job.url ? ` (landed on ${href})` : ''}: popup "${r.status}"; ${fields}${r.lna ? '; LOCAL NETWORK PROMPT SEEN' : ''}${r.how !== 'a real click' ? `; favorite activated by ${r.how}` : ''}`;
         const ok = /good/.test(r.kind) && row;
         if (job.site.startsWith('LinkedIn')) return { status: ok ? 'PASS' : 'FAIL', detail: `logged out (no account on the runner): ${note}` };
         return ok ? pass(note) : fail(note);
@@ -919,6 +942,7 @@ async function mainPhase() {
   await startApp();
   const PROMPT = /currently running|close (all|the) (instances|application)/i;
   await check('R38', 'Setup started while LeGaJ runs asks to close it first', async () => {
+    await stopUninstallers();
     const p = spawn(cfg.setup, [], { stdio: 'ignore' });
     try {
       const d = await dialog('*Setup*', /running|close|Welcome|Ready|Select/i, 30000);

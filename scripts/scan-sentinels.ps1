@@ -71,8 +71,11 @@ function Find-In([string]$Root, [hashtable]$Needles) {
     return $hits
 }
 
-$key = @{ 'API key' = (Get-Needles $Key) }
-$pii = @{
+# PowerShell names ignore case: a variable called $key would be the [string]
+# -Key parameter itself, and a table assigned to it would turn into the text
+# "System.Collections.Hashtable".
+$keyNeedles = @{ 'API key' = (Get-Needles $Key) }
+$allNeedles = @{
     'API key'     = (Get-Needles $Key)
     'email'       = (Get-Needles $Email)
     'phone'       = (Get-Needles $Phone)
@@ -80,16 +83,17 @@ $pii = @{
 }
 
 Write-Host "Data folder (key only): $DataDir"
-$hits = @(Find-In $DataDir $key)
+$hits = @(Find-In $DataDir $keyNeedles)
 Write-Host "Logs (key, email, phone, resume line): $(Join-Path $DataDir 'logs')"
-$hits += @(Find-In (Join-Path $DataDir 'logs') $pii)
+$hits += @(Find-In (Join-Path $DataDir 'logs') $allNeedles)
 Write-Host "WebView2 folder (key, email, phone, resume line): $WebViewDir"
-$hits += @(Find-In $WebViewDir $pii)
+$hits += @(Find-In $WebViewDir $allNeedles)
 
 if ($hits.Count -gt 0) {
     Write-Host ''
     Write-Host 'FOUND sentinel values:' -ForegroundColor Red
-    $hits | Sort-Object What, File -Unique | Format-Table -AutoSize | Out-String | Write-Host
+    # One line per hit with the whole path: a table cuts long paths short.
+    $hits | Sort-Object What, File -Unique | ForEach-Object { Write-Host "  $($_.What): $($_.File)" }
     exit 1
 }
 Write-Host 'scan-sentinels: nothing found' -ForegroundColor Green

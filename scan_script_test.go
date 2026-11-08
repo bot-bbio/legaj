@@ -87,6 +87,30 @@ func TestR34_ScanScriptFindsTheKeyAnywhereInTheDataFolder(t *testing.T) {
 	}
 }
 
+// WebView2's autofill store keeps what the user types into LeGaJ's own
+// forms, such as the profile's email and phone, and Wails offers no way to
+// turn it off; R34 accepts that file. The key must still never be there.
+func TestR34_ScanScriptAllowsTheAutofillStoreButNeverTheKey(t *testing.T) {
+	data, webview := t.TempDir(), t.TempDir()
+	store := filepath.Join(webview, "EBWebView", "Default")
+	writeScanFile(t, filepath.Join(store, "Web Data"), []byte("autofill "+sentinelEmail+" "+sentinelPhone))
+	writeScanFile(t, filepath.Join(store, "Web Data-journal"), utf16le(sentinelEmail))
+
+	code, out := runScanScript(t, data, webview)
+	if code != 0 || !strings.Contains(out, "nothing found") {
+		t.Fatalf("exit %d with only the email and phone in the autofill store; output:\n%s", code, out)
+	}
+
+	writeScanFile(t, filepath.Join(store, "Web Data"), []byte("autofill "+sentinelEmail+" "+sentinelKey))
+	code, out = runScanScript(t, data, webview)
+	if code != 1 || !strings.Contains(out, `  API key: `) || !strings.Contains(out, `Default\Web Data`) {
+		t.Fatalf("exit %d; the key in the autofill store was not reported; output:\n%s", code, out)
+	}
+	if strings.Contains(out, "  email: ") {
+		t.Fatalf("reported the email in the autofill store:\n%s", out)
+	}
+}
+
 func TestR34_ScanScriptFindsPersonalDataInLogsAndWebView(t *testing.T) {
 	data, webview := t.TempDir(), t.TempDir()
 	writeScanFile(t, filepath.Join(data, "logs", "legaj.log"), []byte(`{"msg":"parse","text":"`+sentinelEmail+`"}`))

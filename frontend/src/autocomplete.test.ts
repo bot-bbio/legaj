@@ -9,6 +9,8 @@ import { describe, expect, it } from 'vitest';
 // This is not the whole answer: the release sweep found that Edge's own
 // field-value store (autofill_edge_field_values in "Web Data") still keeps
 // the email and phone after the profile form is saved, despite the opt-out.
+// R34 accepts that one file (PRIVACY.md says so, and scan-sentinels.ps1
+// checks it for the key only).
 
 const sources = import.meta.glob('./**/*.svelte', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
 

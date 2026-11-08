@@ -13,7 +13,11 @@
   The key must appear in no file under the data folder or the WebView2
   folder. The email, phone and resume line must not appear in the logs or
   the WebView2 folder (the database and your documents hold them on
-  purpose). Text is searched as UTF-8 and UTF-16.
+  purpose), with one exception: WebView2's autofill store ("Web Data"),
+  which keeps what you type into LeGaJ's own forms, such as your profile's
+  email and phone. LeGaJ can't turn it off, and uninstalling with "No"
+  deletes it. The key is still looked for there. Text is searched as UTF-8
+  and UTF-16.
 
 .EXAMPLE
   powershell -NoProfile -File scripts/scan-sentinels.ps1 -Key 'AIzaSyD-SENTINEL-...' `
@@ -46,7 +50,11 @@ function Get-Needles([string]$Text) {
     )
 }
 
-function Find-In([string]$Root, [hashtable]$Needles) {
+# WebView2's autofill store and its journal: only the key is looked for in
+# them (see the description above).
+$autofillStore = @('Web Data', 'Web Data-journal')
+
+function Find-In([string]$Root, [hashtable]$Needles, [string[]]$KeyOnlyIn = @()) {
     $hits = @()
     if (-not (Test-Path $Root)) {
         Write-Host "  (not found: $Root)" -ForegroundColor Yellow
@@ -59,7 +67,8 @@ function Find-In([string]$Root, [hashtable]$Needles) {
             Write-Host "  skipped (unreadable): $($file.FullName)" -ForegroundColor Yellow
             continue
         }
-        foreach ($name in $Needles.Keys) {
+        $names = if ($KeyOnlyIn -contains $file.Name) { @('API key') } else { @($Needles.Keys) }
+        foreach ($name in $names) {
             foreach ($n in $Needles[$name]) {
                 if ($text.Contains($n)) {
                     $hits += [pscustomobject]@{ What = $name; File = $file.FullName }
@@ -86,8 +95,8 @@ Write-Host "Data folder (key only): $DataDir"
 $hits = @(Find-In $DataDir $keyNeedles)
 Write-Host "Logs (key, email, phone, resume line): $(Join-Path $DataDir 'logs')"
 $hits += @(Find-In (Join-Path $DataDir 'logs') $allNeedles)
-Write-Host "WebView2 folder (key, email, phone, resume line): $WebViewDir"
-$hits += @(Find-In $WebViewDir $allNeedles)
+Write-Host "WebView2 folder (key, email, phone, resume line; key only in its autofill store): $WebViewDir"
+$hits += @(Find-In $WebViewDir $allNeedles $autofillStore)
 
 if ($hits.Count -gt 0) {
     Write-Host ''

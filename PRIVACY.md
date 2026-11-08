@@ -17,7 +17,7 @@ Everything you put into LeGaJ is stored in your Windows user profile, in `%LOCAL
 
 Your **Gemini API key** is not in that folder. It's stored in **Windows Credential Manager** (entry `LeGaJ:gemini-api-key`), encrypted with your Windows login. LeGaJ only ever shows its last four characters.
 
-The app's window is drawn by Microsoft Edge WebView2, which keeps its own small browser profile in `%APPDATA%\legaj.exe` (for example, which mail client you chose on the Follow-ups screen).
+The app's window is drawn by Microsoft Edge WebView2, which keeps its own small browser profile in `%APPDATA%\legaj.exe` (for example, which mail client you chose on the Follow-ups screen). WebView2 also keeps a copy of some text you type into LeGaJ's forms, such as the email and phone number in your profile, in its autofill store in that folder. LeGaJ can't turn that off and never sends it anywhere. Your API key is never kept there.
 
 ## What leaves your computer
 

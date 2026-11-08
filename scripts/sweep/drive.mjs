@@ -263,11 +263,32 @@ async function clickIn(cdp, sessionId, re) {
 
 /** Clicks the favorite on the current page, saves in the popup, and returns what the popup said. */
 async function clipCurrentPage(label, port) {
-  await clickBookmark();
-  const popup = await until('the clip popup', async () => {
-    const { targetInfos } = await edge.cdp.send('Target.getTargets');
-    return targetInfos.find((t) => t.type === 'page' && t.url.startsWith(`http://127.0.0.1:${port}/clip`));
-  }, 15000, 250);
+  // What the tab reports around the click (a blocked script, a refused
+  // popup), so a missing popup can be explained.
+  const said = [];
+  const listen = (msg) => {
+    if (msg.sessionId !== edge.tab) return;
+    const p = msg.params ?? {};
+    if (msg.method === 'Log.entryAdded') said.push(`${p.entry.level} ${p.entry.source}: ${p.entry.text}`);
+    if (msg.method === 'Runtime.exceptionThrown') said.push(`exception: ${p.exceptionDetails?.exception?.description ?? p.exceptionDetails?.text}`);
+    if (msg.method === 'Runtime.consoleAPICalled' && /error|warn/.test(p.type)) said.push(`console.${p.type}: ${(p.args ?? []).map((a) => a.value ?? a.description).join(' ')}`);
+    if (msg.method === 'Page.windowOpen') said.push(`window.open ${p.url}`);
+  };
+  edge.cdp.listeners.add(listen);
+  await edge.cdp.send('Log.enable', {}, edge.tab).catch(() => {});
+  let popup;
+  try {
+    await clickBookmark();
+    popup = await until('the clip popup', async () => {
+      const { targetInfos } = await edge.cdp.send('Target.getTargets');
+      return targetInfos.find((t) => t.type === 'page' && t.url.startsWith(`http://127.0.0.1:${port}/clip`));
+    }, 15000, 250);
+  } catch (err) {
+    await shot(`no-popup-${label}`).catch(() => {});
+    throw new Error(`${err.message}; the tab said: ${said.slice(-6).join(' | ').slice(0, 500) || 'nothing'}`);
+  } finally {
+    edge.cdp.listeners.delete(listen);
+  }
   const { sessionId } = await edge.cdp.send('Target.attachToTarget', { targetId: popup.targetId, flatten: true });
   await edge.cdp.send('Runtime.enable', {}, sessionId);
   const state = () => evaluate(edge.cdp, `({ status: document.getElementById('status')?.textContent ?? '', kind: document.getElementById('status')?.className ?? '', save: !document.getElementById('save')?.hidden && !document.getElementById('save')?.disabled })`, sessionId);
@@ -462,6 +483,38 @@ function saveAppLogs() {
   for (const f of findFiles(join(DATA, 'logs'), /./)) writeFileSync(join(dir, basename(f.path)), readFileSync(f.path));
 }
 
+/** Ends any uninstaller left from an earlier check (it runs as a _iu*.tmp copy). */
+async function stopUninstallers() {
+  await win.call('kill-name', { name: '_iu*' });
+  await win.call('kill-name', { name: 'unins000' });
+  await sleep(500);
+}
+
+/** Which tables of WebView2's "Web Data" (Chromium's autofill store) hold the sentinels. */
+function webDataReport() {
+  const file = join(WEBVIEW_DATA, 'EBWebView', 'Default', 'Web Data');
+  if (!existsSync(file)) return 'no Web Data file';
+  const py = [
+    'import json, shutil, sqlite3, sys, tempfile, os',
+    'tmp = os.path.join(tempfile.mkdtemp(), "wd")',
+    'shutil.copyfile(sys.argv[1], tmp)',
+    'c = sqlite3.connect(tmp)',
+    'needles = json.loads(sys.argv[2])',
+    'out = []',
+    'for (t,) in c.execute("SELECT name FROM sqlite_master WHERE type = \'table\'"):',
+    '    cols = [r[1] for r in c.execute(f"PRAGMA table_info([{t}])")]',
+    '    for col in cols:',
+    '        for label, n in needles.items():',
+    '            q = f"SELECT count(*) FROM [{t}] WHERE CAST([{col}] AS TEXT) LIKE ?"',
+    '            k = c.execute(q, (f"%{n}%",)).fetchone()[0]',
+    '            if k: out.append(f"{label} in {t}.{col} ({k} rows)")',
+    'print("; ".join(out) or "no table holds them as text")',
+  ].join('\n');
+  const s = cfg.sentinel;
+  const r = spawnSync('python', ['-I', '-c', py, file, JSON.stringify({ email: s.email, phone: s.phone, 'resume line': s.line, 'API key': s.key })], { encoding: 'utf8' });
+  return r.status === 0 ? r.stdout.trim() : `could not read it: ${(r.stderr || '').trim().split('\n').pop()}`;
+}
+
 async function install(extra = []) {
   const log = join(cfg.out, `install-${Date.now()}.log`);
   const p = spawn(cfg.setup, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${log}`, ...extra], { stdio: 'ignore' });
@@ -479,8 +532,10 @@ const pressIn = (d, button) => win.call('press', { hwnd: d.hwnd, button });
 async function startWithWindows() {
   await nav('Settings');
   const box = await ui('Start LeGaJ with Windows*', 'find', { type: 'CheckBox' });
-  if (box.toggle !== 'On') await ui('Start LeGaJ with Windows*', 'toggle', { type: 'CheckBox' });
-  await press('Save settings');
+  if (box.toggle !== 'On') {
+    await ui('Start LeGaJ with Windows*', 'toggle', { type: 'CheckBox' });
+    await press('Save settings');
+  }
   return until('the Run value', () => win.call('regvalue', { key: RUN_KEY, name: 'LeGaJ' }), 10000, 300);
 }
 
@@ -550,7 +605,11 @@ async function mainPhase() {
     const bar = ui0.filter((e) => e.name === 'Favorites bar' && e.w > 0);
     const to = bar.length ? { x: Math.round(bar[0].x + bar[0].w - 120), y: Math.round(bar[0].y + bar[0].h / 2) } : { x: 880, y: EDGE_TOP + 96 };
     await shot('before-drag');
-    await win.call('drag', { x1: from.x, y1: from.y, x2: to.x, y2: to.y });
+    await win.call('down', { x: from.x, y: from.y });
+    await win.call('moveto', { x1: from.x + 12, y1: from.y + 6, x2: to.x, y2: to.y, steps: 40 });
+    await sleep(800);
+    await shot('mid-drag');
+    await win.call('up', { x: to.x, y: to.y });
     await sleep(1500);
     await shot('after-drag');
     dragWorked = (await bookmarks()).length > 0;
@@ -845,7 +904,10 @@ async function mainPhase() {
       args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', join(cfg.repo, 'scripts', 'scan-sentinels.ps1'), '-Key', s.key, '-Email', s.email, '-Phone', s.phone, '-ResumeLine', s.line],
     });
     writeFileSync(join(cfg.out, 'scan-sentinels.txt'), r.output);
-    return r.code === 0 && /nothing found/.test(r.output) ? pass('nothing found in the data folder, the logs or the WebView2 folder') : fail(r.output.slice(-400));
+    if (r.code === 0 && /nothing found/.test(r.output)) return pass('nothing found in the data folder, the logs or the WebView2 folder');
+    const hits = r.output.split('\n').filter((l) => /^\s+\S.*: /.test(l)).map((l) => l.trim().replace(/C:\\Users\\[^\\]+\\AppData\\(Local|Roaming)/, '%$1%'));
+    const webData = r.output.includes('Web Data') ? `; Web Data: ${webDataReport()}` : '';
+    return fail(`${hits.join(' | ') || r.output.slice(-300)}${webData}`);
   });
   await check('item45', 'The database holds the sentinel profile, so the scan looked where the data is', async () => {
     const hit = db("SELECT 1 FROM profile WHERE data LIKE ?", `%${s.email}%`).length > 0;
@@ -872,6 +934,7 @@ async function mainPhase() {
     }
   });
   await check('R38', 'The uninstaller started while LeGaJ runs asks to close it first, and removes nothing', async () => {
+    await stopUninstallers();
     spawn(UNINSTALLER, [], { stdio: 'ignore' });
     let d = await dialog('*Uninstall*', /running|close|sure/i, 30000);
     let text = d.text;
@@ -884,6 +947,9 @@ async function mainPhase() {
     const asks = PROMPT.test(d.text);
     for (const b of ['Cancel', 'No', 'OK']) if (d.buttons.includes(b)) { await pressIn(d, b); break; }
     await sleep(3000);
+    const left = (await win.call('dialogs', { window: '*Uninstall*' })).length;
+    await stopUninstallers();
+    if (left) text += ` || (the uninstaller still showed ${left} window(s) after Cancel)`;
     const intact = existsSync(cfg.exe) && existsSync(DB);
     return asks && intact ? pass(text.slice(0, 250)) : fail(`uninstaller showed: ${text.slice(0, 300)}; app and data intact: ${intact}`);
   });
@@ -893,6 +959,7 @@ async function mainPhase() {
   // unins000.exe copies itself to a temp folder and exits at once, so the
   // dialogs, not the process, tell when it's done.
   async function uninstall(keep) {
+    await stopUninstallers();
     spawn(UNINSTALLER, [], { stdio: 'ignore' });
     const seen = [];
     for (let i = 0; i < 5; i++) {

@@ -92,6 +92,23 @@ public static class SweepWin {
         Abs(x2, y2, 0x0004);
     }
 
+    // A drag in three parts, so a screenshot can be taken mid-drag.
+    public static void Down(int x, int y) {
+        Abs(x, y, 0); System.Threading.Thread.Sleep(200);
+        Abs(x, y, 0x0002); System.Threading.Thread.Sleep(200);
+        for (int i = 1; i <= 6; i++) { Abs(x + i * 2, y + i, 0); System.Threading.Thread.Sleep(40); }
+    }
+    public static void MoveSteps(int x1, int y1, int x2, int y2, int steps) {
+        for (int i = 1; i <= steps; i++) {
+            Abs(x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps, 0);
+            System.Threading.Thread.Sleep(30);
+        }
+    }
+    public static void Up(int x, int y) {
+        Abs(x, y, 0); System.Threading.Thread.Sleep(300);
+        Abs(x, y, 0x0004);
+    }
+
     public static void Key(byte vk) {
         keybd_event(vk, 0, 0, UIntPtr.Zero); System.Threading.Thread.Sleep(30);
         keybd_event(vk, 0, 2, UIntPtr.Zero);
@@ -211,8 +228,11 @@ function Find-InRow($w, [string]$RowName, [string]$Name, [string]$Type) {
     $cb = Find-Named $w $RowName ''
     if (-not $cb) { return $null }
     $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    $isBox = New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, [System.Windows.Automation.ControlType]::CheckBox)
     $p = $walker.GetParent($cb)
-    for ($i = 0; $i -lt 4 -and $p; $i++) {
+    # Climb to the row and never past it: an ancestor with a second checkbox
+    # is the table, and its first match would belong to another row.
+    while ($p -and $p.FindAll($Scope::Descendants, $isBox).Count -le 1) {
         $t = Find-Named $p $Name $Type
         if ($t) { return $t }
         $p = $walker.GetParent($p)
@@ -302,6 +322,10 @@ function Invoke-Sweep([string]$Json) {
             }
             'click' { [SweepWin]::Click($c.x, $c.y); $r = $true }
             'drag' { [SweepWin]::Drag($c.x1, $c.y1, $c.x2, $c.y2, 40); $r = $true }
+            'down' { [SweepWin]::Down($c.x, $c.y); $r = $true }
+            'moveto' { [SweepWin]::MoveSteps($c.x1, $c.y1, $c.x2, $c.y2, [int]$c.steps); $r = $true }
+            'up' { [SweepWin]::Up($c.x, $c.y); $r = $true }
+            'kill-name' { Get-Process -Name $c.name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; $r = $true }
             'screen' { Save-Screen $c.path; $r = $c.path }
             'clipboard' { $r = [System.Windows.Forms.Clipboard]::GetText() }
             'pids' { $r = @(Get-Pids $c.name) }
@@ -325,8 +349,24 @@ function Invoke-Sweep([string]$Json) {
                 }
                 if (-not $b) { $b = Find-Named $w $c.button '' }
                 if (-not $b) { throw "no button '$($c.button)' in: $(Text-Of $w)" }
+                # A press that worked closes the message box, and its button
+                # goes with it. If the button is still there, a real click.
+                $box = Box-Of $b.Current.BoundingRectangle
                 Invoke-Element $b
-                $r = $true
+                $gone = $false
+                for ($i = 0; $i -lt 10 -and -not $gone; $i++) {
+                    Start-Sleep -Milliseconds 200
+                    try { $null = $b.Current.Name; $gone = -not $b.Current.IsEnabled -or $b.Current.IsOffscreen } catch { $gone = $true }
+                }
+                if (-not $gone -and $box.w -gt 0) {
+                    [void][SweepWin]::Focus([IntPtr][long]$c.hwnd)
+                    [SweepWin]::Click([int]($box.x + $box.w / 2), [int]($box.y + $box.h / 2))
+                    for ($i = 0; $i -lt 10 -and -not $gone; $i++) {
+                        Start-Sleep -Milliseconds 200
+                        try { $null = $b.Current.Name } catch { $gone = $true }
+                    }
+                }
+                $r = $gone
             }
             'ui' {
                 # Finds a control in a window and acts on it like a user would.

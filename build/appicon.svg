@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="1024" height="1024">
+  <title>LeGaJ</title>
+  <rect width="256" height="256" rx="56" fill="#1f5fbf"/>
+  <g transform="translate(6 13)">
+    <path d="M182 52V166Q182 178 170 178H74Q62 178 62 166V134" fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M84 172A38 38 0 0 1 160 172Z" fill="#ffb43a"/>
+    <path d="M122 122V106M157.4 136.6L168.7 125.3M86.6 136.6L75.3 125.3" fill="none" stroke="#ffffff" stroke-opacity="0.85" stroke-width="6" stroke-linecap="round"/>
+  </g>
+</svg>

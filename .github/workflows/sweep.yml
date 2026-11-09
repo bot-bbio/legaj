@@ -3,12 +3,12 @@ name: sweep
 # The release sweep (docs/RELEASE_CHECKLIST.md) on fresh Windows runners:
 # each job installs the built installer on a clean machine and drives the
 # real app. The installer is cached by the app's sources, so changing only
-# the sweep scripts doesn't rebuild it. It runs on pushes to the V2 branch
+# the sweep scripts doesn't rebuild it. It runs on pushes to the V3 branch
 # until it merges, and by hand (Actions > sweep > Run workflow) before a
 # release.
 on:
   push:
-    branches: ['feat/v2']
+    branches: ['feat/v3']
   workflow_dispatch:
 
 permissions:

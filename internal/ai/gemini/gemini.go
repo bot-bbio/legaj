@@ -204,19 +204,28 @@ func (c *Client) attempt(ctx context.Context, model, key string, body []byte) (r
 	// The cause renders only the HTTP status and Google's enums, never the
 	// error message, which can echo request content (see APIError).
 	cause := newAPIError(resp.StatusCode, gerr)
+	// R63's order: a bad key first, since Gemini reports one as a 400 too.
 	switch {
+	case resp.StatusCode == http.StatusUnauthorized, resp.StatusCode == http.StatusForbidden, gerr.keyInvalid():
+		return res, apperr.Wrap(cause, apperr.CodeAIKeyRejected, "Gemini rejected the key. Check it in Settings.")
 	case resp.StatusCode == http.StatusTooManyRequests:
 		res.retryable = true
 		return res, apperr.Wrap(cause, apperr.CodeAIRateLimited, "Gemini's rate limit was reached. Wait a minute and try again.")
 	case resp.StatusCode >= 500:
 		res.retryable = true
 		return res, apperr.Wrap(cause, apperr.CodeAIUnavailable, "Gemini is busy or unavailable right now. Try again shortly.")
-	case resp.StatusCode == http.StatusUnauthorized, resp.StatusCode == http.StatusForbidden, gerr.keyInvalid():
-		return res, apperr.Wrap(cause, apperr.CodeAIKeyRejected, "Gemini rejected the key. Check it in Settings.")
 	case resp.StatusCode == http.StatusNotFound:
 		return res, apperr.Wrap(cause, apperr.CodeInvalid, "The selected Gemini model isn't available. Pick another model in Settings.")
+	case gerr.Status == "FAILED_PRECONDITION":
+		// Gemini's documented meaning: the free tier isn't offered in the
+		// user's country until billing is enabled.
+		return res, apperr.Wrap(cause, apperr.CodeAIBilling, "Gemini's free tier isn't available in your region. Enable billing in Google AI Studio.")
 	default:
-		return res, apperr.Wrap(cause, apperr.CodeInternal, "Gemini couldn't process this request.")
+		// Gemini named no reason the user could act on, so the likeliest
+		// cause is LeGaJ's own request (as with V2's resume schema). Callers
+		// that checked the input themselves may say more (resume: an
+		// encrypted PDF).
+		return res, apperr.Wrap(cause, apperr.CodeAIRequestRejected, "Gemini couldn't accept LeGaJ's request. If it keeps happening, please report it: it's most likely a LeGaJ bug.")
 	}
 }
 

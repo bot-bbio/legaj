@@ -364,6 +364,56 @@ func TestR8_InvalidModelJSONRejected(t *testing.T) {
 	})
 }
 
+// TestR63_TruncatedPDFRefusedBeforeAnyCall: a PDF with no end-of-file marker
+// is damaged, so LeGaJ says so itself and sends nothing.
+func TestR63_TruncatedPDFRefusedBeforeAnyCall(t *testing.T) {
+	f := newFixture(t)
+	truncated := []byte("%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\n2 0 obj << /Length 900 >> stream\nBT /F1 11 Tf")
+	info, err := f.svc.Store(ctx, "cv.pdf", truncated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.svc.Parse(ctx, info.ID)
+	if apperr.CodeOf(err) != apperr.CodeInvalid || !strings.Contains(err.Error(), "damaged or incomplete") {
+		t.Fatalf("err = %v, want the damaged-PDF message", err)
+	}
+	if len(f.ai.Requests()) != 0 {
+		t.Fatal("a damaged PDF was sent to Gemini")
+	}
+}
+
+// TestR63_RejectedPDFExplainedOnlyWhenEncrypted: when Gemini refuses a read,
+// the file is blamed only if LeGaJ itself found it password-protected; a
+// plain PDF keeps the "report it, likely a LeGaJ bug" message. An encrypted
+// PDF is still sent: owner-only encryption opens without a password.
+func TestR63_RejectedPDFExplainedOnlyWhenEncrypted(t *testing.T) {
+	const rejected = "Gemini couldn't accept LeGaJ's request. If it keeps happening, please report it: it's most likely a LeGaJ bug."
+	encrypted := []byte("%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R /Encrypt 5 0 R >>\n%%EOF\n")
+	for name, c := range map[string]struct {
+		data []byte
+		want string
+	}{
+		"encrypted": {encrypted, "password-protected"},
+		"plain":     {samplePDF, rejected},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			info, err := f.svc.Store(ctx, "cv.pdf", c.data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.ai.PushErr(apperr.New(apperr.CodeAIRequestRejected, rejected))
+			_, err = f.svc.Parse(ctx, info.ID)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("err = %v, want it to mention %q", err, c.want)
+			}
+			if len(f.ai.Requests()) != 1 {
+				t.Fatalf("%d requests, want the PDF sent once", len(f.ai.Requests()))
+			}
+		})
+	}
+}
+
 func TestR8_ParseUnknownFileNotFound(t *testing.T) {
 	f := newFixture(t)
 	if _, err := f.svc.Parse(ctx, 999); apperr.CodeOf(err) != apperr.CodeNotFound {

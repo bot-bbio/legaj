@@ -203,7 +203,8 @@ func TestR5_OtherErrorsMapped(t *testing.T) {
 		rp   reply
 		code apperr.Code
 	}{
-		{"bad request", reply{status: 400, body: errBody(400, "INVALID_ARGUMENT", "bad", "")}, apperr.CodeInternal},
+		// R63 (V3) gives an unexplained 400 its own code; V2 used CodeInternal.
+		{"bad request", reply{status: 400, body: errBody(400, "INVALID_ARGUMENT", "bad", "")}, apperr.CodeAIRequestRejected},
 		{"model not found", reply{status: 404, body: errBody(404, "NOT_FOUND", "no model", "")}, apperr.CodeInvalid},
 		{"blocked prompt", reply{status: 200, body: `{"promptFeedback": {"blockReason": "SAFETY"}}`}, apperr.CodeAIInvalidOutput},
 		{"truncated", reply{status: 200, body: strings.Replace(okBody("{\"a\""), "STOP", "MAX_TOKENS", 1)}, apperr.CodeAIInvalidOutput},

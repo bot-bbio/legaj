@@ -135,6 +135,9 @@ func (s *Service) SaveKey(ctx context.Context, raw string) (KeyResult, error) {
 			return KeyResult{}, err
 		case apperr.CodeAIRateLimited, apperr.CodeAIUnavailable:
 			res = KeyResult{Message: "Saved. Gemini couldn't be reached to check the key, so LeGaJ will check it on first use."}
+		case apperr.CodeAIBilling:
+			// The key is fine; Gemini needs billing on in this region (R63).
+			res = KeyResult{Message: "Saved. " + err.Error()}
 		default:
 			res = KeyResult{Message: "Saved, but LeGaJ couldn't confirm the key works."}
 		}

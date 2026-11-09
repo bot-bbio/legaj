@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -176,6 +177,25 @@ func TestR7_UnverifiableKeySavedWithNote(t *testing.T) {
 		if got, _ := f.keys.Get(); got != goodKey {
 			t.Fatalf("%s: key not saved", code)
 		}
+	}
+}
+
+// TestR63_RegionErrorSavesKeyWithReason: Gemini's region/billing refusal
+// means the key itself is valid, so it's saved, and the note says what to do
+// instead of "couldn't confirm the key works".
+func TestR63_RegionErrorSavesKeyWithReason(t *testing.T) {
+	f := newFixture(t)
+	const billing = "Gemini's free tier isn't available in your region. Enable billing in Google AI Studio."
+	f.result = apperr.New(apperr.CodeAIBilling, billing)
+	res, err := f.svc.SaveKey(ctx, goodKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Verified || !strings.Contains(res.Message, "Saved") || !strings.Contains(res.Message, billing) {
+		t.Fatalf("result = %+v, want saved with the region reason", res)
+	}
+	if got, _ := f.keys.Get(); got != goodKey {
+		t.Fatal("key not saved")
 	}
 }
 

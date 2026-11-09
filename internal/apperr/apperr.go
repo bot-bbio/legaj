@@ -26,6 +26,13 @@ const (
 	CodeAIRateLimited   Code = "ai.rate_limited"
 	CodeAIUnavailable   Code = "ai.unavailable"
 	CodeAIInvalidOutput Code = "ai.invalid_output"
+	// CodeAIBilling: the provider refuses the free tier here (Gemini's
+	// FAILED_PRECONDITION); the key works once billing is on (R63).
+	CodeAIBilling Code = "ai.billing_required"
+	// CodeAIRequestRejected: the provider refused LeGaJ's request for a
+	// reason it doesn't name: most likely LeGaJ's bug, never assumed to be
+	// the user's file (R63).
+	CodeAIRequestRejected Code = "ai.request_rejected"
 )
 
 // GenericMessage is shown for any error that isn't an *Error.

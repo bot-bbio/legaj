@@ -88,6 +88,9 @@ Invoke-Step 'gofmt' {
     }
 }
 Invoke-Step 'go vet' { & $go vet ./... }
+# The live suite (R69) never runs here (it needs a real key), but it must
+# always compile, or it rots between releases.
+Invoke-Step 'go vet (live suite)' { & $go vet -tags live ./internal/live/... }
 Invoke-Step 'gcc (for -race)' {
     if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) {
         Write-Host 'gcc not on PATH: go test -race needs cgo. Install MinGW-w64.' -ForegroundColor Red

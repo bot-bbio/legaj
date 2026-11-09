@@ -201,9 +201,9 @@ func (c *Client) attempt(ctx context.Context, model, key string, body []byte) (r
 	}
 	gerr := parseError(data)
 	res.retryAfter = retryAfter(resp.Header.Get("Retry-After"), gerr)
-	// The cause names only the HTTP status and Google's status enum, never
-	// the error message, which can echo request content.
-	cause := fmt.Errorf("gemini: HTTP %d %s", resp.StatusCode, gerr.Status)
+	// The cause renders only the HTTP status and Google's enums, never the
+	// error message, which can echo request content (see APIError).
+	cause := newAPIError(resp.StatusCode, gerr)
 	switch {
 	case resp.StatusCode == http.StatusTooManyRequests:
 		res.retryable = true
@@ -219,6 +219,44 @@ func (c *Client) attempt(ctx context.Context, model, key string, body []byte) (r
 		return res, apperr.Wrap(cause, apperr.CodeInternal, "Gemini couldn't process this request.")
 	}
 }
+
+// APIError is a Gemini HTTP error reduced to what LeGaJ may log: the HTTP
+// status, Google's status enum and the reason enums from the error details
+// (R34, R63). Every rendering of it (Error, %#v, JSON) holds only those.
+// Gemini's own message can echo request content, such as resume text or a
+// job description, so it is kept apart and read only through UnsafeMessage.
+type APIError struct {
+	HTTPStatus int
+	Status     string   // e.g. INVALID_ARGUMENT
+	Reasons    []string // e.g. API_KEY_INVALID
+	message    string
+}
+
+func newAPIError(httpStatus int, g googleError) *APIError {
+	e := &APIError{HTTPStatus: httpStatus, Status: g.Status, message: g.Message}
+	for _, d := range g.Details {
+		if enumValue.MatchString(d.Reason) {
+			e.Reasons = append(e.Reasons, d.Reason)
+		}
+	}
+	return e
+}
+
+func (e *APIError) Error() string {
+	s := fmt.Sprintf("gemini: HTTP %d %s", e.HTTPStatus, e.Status)
+	if len(e.Reasons) > 0 {
+		s += " (" + strings.Join(e.Reasons, ", ") + ")"
+	}
+	return s
+}
+
+// GoString keeps %#v from printing the unexported message.
+func (e *APIError) GoString() string { return e.Error() }
+
+// UnsafeMessage returns Gemini's error message, which can contain request
+// content: never log, show or store it. Only the live suite (R69) reads it,
+// with synthetic data; a static test keeps it there.
+func (e *APIError) UnsafeMessage() string { return e.message }
 
 // googleError is the error envelope of Google APIs.
 type googleError struct {

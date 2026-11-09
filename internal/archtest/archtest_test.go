@@ -199,6 +199,44 @@ func TestR6_NoProcessSpawnOutsideProc(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// R34/R69: Gemini's raw error message stays inside the live suite
+// ---------------------------------------------------------------------------
+
+// unsafeMessageAllowed says where gemini.APIError.UnsafeMessage may appear:
+// its definition, the gemini package's own tests, the live suite (synthetic
+// data only) and this check.
+func unsafeMessageAllowed(rel string) bool {
+	switch {
+	case rel == "internal/ai/gemini/gemini.go",
+		rel == "internal/archtest/archtest_test.go",
+		strings.HasPrefix(rel, "internal/ai/gemini/") && strings.HasSuffix(rel, "_test.go"),
+		strings.HasPrefix(rel, "internal/live/"):
+		return true
+	}
+	return false
+}
+
+func TestR34_UnsafeMessageOnlyInLiveSuite(t *testing.T) {
+	root := repoRoot(t)
+	var violations []string
+	walkFiles(t, root, func(rel, abs string) {
+		if !strings.HasSuffix(rel, ".go") || unsafeMessageAllowed(rel) {
+			return
+		}
+		src, err := os.ReadFile(abs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(src), "UnsafeMessage") {
+			violations = append(violations, rel)
+		}
+	})
+	if len(violations) > 0 {
+		t.Fatalf("Gemini's raw error message can echo request content; only the live suite may read it:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+// ---------------------------------------------------------------------------
 // R36: every test binary runs behind the real-data guard
 // ---------------------------------------------------------------------------
 

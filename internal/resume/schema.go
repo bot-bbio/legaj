@@ -86,6 +86,11 @@ const outputSchema = `{
   "additionalProperties": false
 }`
 
+// Schema returns the response schema sent with every resume read. The live
+// suite sends it on its own to tell a rejected schema from a rejected file
+// (D57).
+func Schema() []byte { return []byte(outputSchema) }
+
 // The model's answer, as the schema describes it.
 type (
 	modelLink struct {

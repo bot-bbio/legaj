@@ -1,0 +1,141 @@
+:root {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --text: #1c2430;
+  --muted: #5d6878;
+  --border: #e1e5eb;
+  --hover: #eef1f5;
+  --accent: #1f5fbf;
+  --accent-soft: #e4edfb;
+  --danger: #b42318;
+
+  color-scheme: light dark;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15191f;
+    --surface: #1c2129;
+    --text: #e6e9ee;
+    --muted: #9aa4b2;
+    --border: #2d343e;
+    --hover: #252c36;
+    --accent: #7fb0ff;
+    --accent-soft: #1f2d44;
+    --danger: #ff8a7a;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+}
+
+/* Shared form building blocks. */
+.card {
+  margin-bottom: 1.5rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+.card h3 {
+  margin: 1rem 0 0.5rem;
+  font-size: 0.95rem;
+}
+.cols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin-bottom: 0.75rem;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+fieldset.item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin: 0 0 1rem;
+}
+fieldset.item legend {
+  padding: 0 0.4rem;
+  color: var(--muted);
+}
+input[type='text'],
+input[type='email'],
+input[type='tel'],
+input[type='url'],
+input[type='number'],
+input[type='password'],
+select,
+textarea {
+  font: inherit;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+textarea {
+  resize: vertical;
+}
+[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+button {
+  font: inherit;
+  padding: 0.45rem 0.9rem;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+button.secondary {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border);
+}
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.muted {
+  color: var(--muted);
+}
+.error {
+  color: var(--danger);
+}
+.notice {
+  padding: 0.6rem 0.9rem;
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+}

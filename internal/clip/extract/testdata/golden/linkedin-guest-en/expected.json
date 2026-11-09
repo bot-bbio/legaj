@@ -1,0 +1,12 @@
+{
+  "company": "Fabrikam",
+  "role": "Senior Go Engineer, Payments",
+  "location": "Cracow, Małopolskie, Poland",
+  "description": "Meet the Team\nThe Payments team moves money for 2 million shops.\nYour Impact\nBuild ledgers in Go",
+  "from": {
+    "company": "adapter",
+    "role": "adapter",
+    "location": "adapter",
+    "description": "adapter"
+  }
+}

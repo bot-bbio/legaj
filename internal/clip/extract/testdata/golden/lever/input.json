@@ -1,0 +1,22 @@
+{
+  "type": "legaj-clip",
+  "v": 1,
+  "method": "pm",
+  "url": "https://jobs.lever.co/northwindrobotics/6f1c2b9e-0d4a-4c1e-9a55-3b8f2e7d1c40",
+  "title": "Northwind Robotics - Field Operations Lead",
+  "jsonld": [
+    "{\"@context\" : \"http://schema.org\",\"@type\" : \"JobPosting\",\"title\" : \"Field Operations Lead\",\"hiringOrganization\" : {\"@type\" : \"Organization\",\"name\": \"Northwind Robotics\",\"logo\": \"https://example.invalid/logo.png\"},\"jobLocation\" : {\"@type\" : \"Place\",\"address\" : {\"@type\" : \"PostalAddress\",\"addressLocality\" : \"Singapore, Singapore\",\"addressRegion\" : null,\"addressCountry\" : null,\"postalCode\" : null}},\"employmentType\" : \"Full-time\",\"datePosted\" : \"2026-08-11\",\"description\" : \"<p><strong><span style=\\\"font-size: 18px;\\\">A Fast-Moving Robotics Company</span></strong></p>\\n<p>&nbsp;</p>\\n<p>Northwind Robotics builds warehouse robots used by R&amp;D labs and retailers across Asia.</p>\\n<p>&nbsp;</p>\\n<p><strong>The Role</strong></p>\\n<p>You will lead a team of field technicians.</p>\\n<ul>\\n<li>Plan robot installs with customers.</li>\\n<li>Keep uptime above 99.5%.</li>\\n</ul>\"}"
+  ],
+  "meta": {
+    "twitter:card": "",
+    "twitter:title": "Northwind Robotics - Field Operations Lead",
+    "twitter:description": "A Fast-Moving Robotics Company Northwind Robotics builds warehouse robots used by R&D labs",
+    "og:title": "Northwind Robotics - Field Operations Lead",
+    "og:description": "A Fast-Moving Robotics Company Northwind Robotics builds warehouse robots used by R&D labs",
+    "og:url": "https://jobs.lever.co/northwindrobotics/6f1c2b9e-0d4a-4c1e-9a55-3b8f2e7d1c40",
+    "og:image": "https://example.invalid/share.png"
+  },
+  "h1": [],
+  "selection": "",
+  "text": "Northwind Robotics\nField Operations Lead\nSingapore, Singapore\nOperations / Full-time / On-site\nApply for this job\nA Fast-Moving Robotics Company\nNorthwind Robotics builds warehouse robots used by R&D labs and retailers across Asia."
+}

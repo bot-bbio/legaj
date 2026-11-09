@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="legaj-session" content="{{.Session}}">
+<title>Clip to LeGaJ</title>
+<link rel="stylesheet" href="/clip.css">
+</head>
+<body>
+<main>
+  <h1>Clip to LeGaJ</h1>
+  <p id="status" class="status" role="status">Waiting for the job page…</p>
+  <section id="preview" class="preview" hidden>
+    <p id="page-title" class="page-title"></p>
+    <p id="page-host" class="page-host"></p>
+  </section>
+  <button id="save" type="button" hidden>Save to LeGaJ</button>
+</main>
+<script src="/clip.js"></script>
+</body>
+</html>

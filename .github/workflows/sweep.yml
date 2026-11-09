@@ -1,0 +1,112 @@
+name: sweep
+
+# The release sweep (docs/RELEASE_CHECKLIST.md) on fresh Windows runners:
+# each job installs the built installer on a clean machine and drives the
+# real app. The installer is cached by the app's sources, so changing only
+# the sweep scripts doesn't rebuild it. It runs on pushes to the V2 branch
+# until it merges, and by hand (Actions > sweep > Run workflow) before a
+# release.
+on:
+  push:
+    branches: ['feat/v2']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sweep-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: dist
+          key: installer-2-${{ hashFiles('*.go', 'go.mod', 'go.sum', 'internal/**', 'frontend/src/**', 'frontend/package.json', 'frontend/package-lock.json', 'frontend/*.ts', 'frontend/*.js', 'frontend/index.html', 'packaging/**', 'wails.json', 'build/**', 'LICENSE', '.github/workflows/sweep.yml') }}
+
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build the exe and the installer as a release would
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $v = go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2
+          go install "github.com/wailsapp/wails/v2/cmd/wails@$v"
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+          $version = (Get-Content wails.json -Raw | ConvertFrom-Json).info.productVersion
+          # The bindings and the frontend are built as verify.ps1 builds them
+          # before release.yml runs the same wails build command.
+          wails generate module
+          if ($LASTEXITCODE -ne 0) { throw 'wails generate module failed' }
+          Push-Location frontend
+          npm ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw 'frontend build failed' }
+          Pop-Location
+          if (-not (Test-Path frontend\dist\index.html)) { throw 'the frontend was not built' }
+          wails build -s -m -skipbindings -trimpath -ldflags "-X main.version=$version"
+          if ($LASTEXITCODE -ne 0) { throw 'wails build failed' }
+          $bootstrap = Join-Path $env:RUNNER_TEMP 'MicrosoftEdgeWebview2Setup.exe'
+          Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $bootstrap
+          $sig = Get-AuthenticodeSignature $bootstrap
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') { throw "bootstrapper signature: $($sig.Status)" }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Q "/DMyAppVersion=$version" "/DWebView2Bootstrapper=$bootstrap" packaging\legaj.iss
+          if ($LASTEXITCODE -ne 0) { throw 'ISCC failed' }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "packaging\dist\LeGaJ-Setup-$version.exe" dist\
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: dist/*.exe
+          if-no-files-found: error
+
+  # Each phase gets its own fresh machine.
+  sweep:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [main, standard, nowebview2]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer
+          path: dist
+      - name: Sweep (${{ matrix.phase }})
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sweep/sweep.ps1 -Phase ${{ matrix.phase }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sweep-${{ matrix.phase }}
+          path: out/

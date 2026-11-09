@@ -1,0 +1,12 @@
+{
+  "company": "Northwind Robotics USA",
+  "role": "Product Marketing Manager - Robotics",
+  "location": "US, CA, Santa Clara, United States of America",
+  "description": "We are looking for an experienced Product Marketing Manager to guide go-to-market strategy for Northwind’s robot fleet. What you’ll be doing: Own launch plans. Work with sales on pricing. Northwind is an equal opportunity employer.",
+  "from": {
+    "company": "jsonld",
+    "role": "jsonld",
+    "location": "jsonld",
+    "description": "jsonld"
+  }
+}

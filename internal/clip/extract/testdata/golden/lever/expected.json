@@ -1,0 +1,12 @@
+{
+  "company": "Northwind Robotics",
+  "role": "Field Operations Lead",
+  "location": "Singapore",
+  "description": "A Fast-Moving Robotics Company\n\nNorthwind Robotics builds warehouse robots used by R&D labs and retailers across Asia.\n\nThe Role\n\nYou will lead a team of field technicians.\n\n• Plan robot installs with customers.\n• Keep uptime above 99.5%.",
+  "from": {
+    "company": "jsonld",
+    "role": "jsonld",
+    "location": "jsonld",
+    "description": "jsonld"
+  }
+}

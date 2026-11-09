@@ -1,0 +1,20 @@
+{
+  "type": "legaj-clip",
+  "v": 1,
+  "method": "pm",
+  "url": "https://job-boards.greenhouse.io/northwindrobotics/jobs/4012345002?gh_src=7c1a",
+  "title": "Job Application for Platform Engineer, Billing at Northwind Robotics",
+  "jsonld": [],
+  "meta": {
+    "og:image": "https://example.invalid/logo.png",
+    "og:type": "article",
+    "og:title": "Platform Engineer, Billing",
+    "og:description": "Remote, Poland",
+    "og:url": "https://job-boards.greenhouse.io/northwindrobotics/jobs/4012345002"
+  },
+  "h1": [
+    "Platform Engineer, Billing"
+  ],
+  "selection": "",
+  "text": "Back to jobs\nNew\nPlatform Engineer, Billing\nRemote, Poland\nApply\nNorthwind Robotics builds the robots that keep warehouses moving. We are a remote-first team of 300 people.\nAn overview of this role\nThe Platform Engineer owns the billing platform: invoicing, usage metering and payment integrations.\nWhat you'll do\nDesign and run the services that turn robot usage into invoices.\nKeep the card and bank-transfer integrations fast and correct.\nWhat you'll bring\nSeveral years of backend experience in Go or Java.\nComfort with SQL and event-driven systems.\nPoland Salary Range\nPLN 25,000 - 32,000 per month\nNorthwind Robotics is an equal opportunity employer.\nCreate a Job Alert\nInterested in building your career at Northwind Robotics? Get future opportunities sent straight to your email.\nCreate alert\nApply for this job\n*\nindicates a required field\nFirst Name*\nLast Name*\nEmail*\nPhone\nResume/CV*\nAttach\nEnter manually\nAccepted file types: pdf, doc, docx, txt, rtf\nSubmit application\nPowered by"
+}

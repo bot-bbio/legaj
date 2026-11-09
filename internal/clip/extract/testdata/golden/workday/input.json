@@ -1,0 +1,22 @@
+{
+  "type": "legaj-clip",
+  "v": 1,
+  "method": "pm",
+  "url": "https://northwind.wd5.myworkdayjobs.com/en-US/NorthwindCareers/job/US-CA-Santa-Clara/Product-Marketing-Manager---Robotics_JR2029262",
+  "title": "",
+  "jsonld": [
+    "\n        {\n  \"jobLocation\" : {\n    \"@type\" : \"Place\",\n    \"address\" : {\n      \"@type\" : \"PostalAddress\",\n      \"addressCountry\" : \"United States of America\",\n      \"addressLocality\" : \"US, CA, Santa Clara\"\n    }\n  },\n  \"hiringOrganization\" : {\n    \"name\" : \"2100 Northwind Robotics USA\",\n    \"@type\" : \"Organization\",\n    \"sameAs\" : \"\"\n  },\n  \"identifier\" : {\n    \"name\" : \"Product Marketing Manager - Robotics\",\n    \"@type\" : \"PropertyValue\",\n    \"value\" : \"JR2029262\"\n  },\n  \"datePosted\" : \"2026-11-03\",\n  \"employmentType\" : \"FULL_TIME\",\n  \"title\" : \"Product Marketing Manager - Robotics\",\n  \"@context\" : \"http://schema.org\",\n  \"@type\" : \"JobPosting\",\n  \"description\" : \"We are looking for an experienced Product Marketing Manager to guide go-to-market strategy for Northwind’s robot fleet. What you’ll be doing: Own launch plans. Work with sales on pricing. Northwind is an equal opportunity employer.\"\n}\n      "
+  ],
+  "meta": {
+    "og:title": "Product Marketing Manager - Robotics",
+    "og:description": "We are looking for an experienced Product Marketing Manager to guide go-to-market strategy",
+    "og:image": "https://example.invalid/logo",
+    "og:type": "website",
+    "og:url": "https://northwind.wd5.myworkdayjobs.com/en-US/NorthwindCareers/job/US-CA-Santa-Clara/Product-Marketing-Manager---Robotics_JR2029262"
+  },
+  "h1": [
+    "Product Marketing Manager - Robotics"
+  ],
+  "selection": "",
+  "text": "Skip to main content\nProduct Marketing Manager - Robotics\nApply\nlocations\nUS, CA, Santa Clara\ntime type\nFull time"
+}

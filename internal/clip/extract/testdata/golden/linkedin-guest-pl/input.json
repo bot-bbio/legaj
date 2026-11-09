@@ -1,0 +1,21 @@
+{
+  "type": "legaj-clip",
+  "v": 1,
+  "method": "pm",
+  "url": "https://pl.linkedin.com/jobs/view/senior-go-engineer-payments-at-fabrikam-4012345678",
+  "title": "Senior Go Engineer, Payments w firmie Fabrikam — Kraków | Oferty pracy na LinkedIn",
+  "jsonld": [
+    "\n      {\"@context\":\"http://schema.org\",\"@type\":\"JobPosting\",\"datePosted\":\"2026-10-20T17:23:39.000Z\",\"description\":\"&lt;strong&gt;Meet the Team&lt;br&gt;&lt;br&gt;&lt;/strong&gt;The Payments team moves money for 2 million shops.&lt;br&gt;&lt;br&gt;&lt;strong&gt;Your Impact&lt;/strong&gt;&lt;br&gt;&lt;ul&gt;&lt;li&gt;Build ledgers in Go&lt;/li&gt;&lt;li&gt;Run Kafka &amp;amp; PostgreSQL&lt;/li&gt;&lt;/ul&gt;We are Fabrikam.\",\"employmentType\":\"FULL_TIME\",\"hiringOrganization\":{\"@type\":\"Organization\",\"name\":\"Fabrikam\",\"sameAs\":\"https://www.linkedin.com/company/fabrikam\",\"logo\":\"https://example.invalid/logo.png\"},\"identifier\":{\"@type\":\"PropertyValue\",\"name\":\"Fabrikam\",\"value\":\"2024712\"},\"industry\":\"Tworzenie oprogramowania\",\"jobLocation\":{\"@type\":\"Place\",\"address\":{\"@type\":\"PostalAddress\",\"addressCountry\":\"PL\",\"addressLocality\":\"Kraków\",\"addressRegion\":null,\"streetAddress\":null},\"latitude\":50.04479,\"longitude\":19.9717},\"skills\":\"\",\"title\":\"Senior Go Engineer, Payments\",\"validThrough\":\"2026-12-06T16:04:04.000Z\",\"educationRequirements\":{\"@type\":\"EducationalOccupationalCredential\",\"credentialCategory\":\"bachelor degree\"}}\n    "
+  ],
+  "meta": {
+    "description": "Aplikuj na stanowisko Senior Go Engineer, Payments w firmie Fabrikam w lokalizacji Kraków. Rola: Pełny etat Kadra średniego szczebla.",
+    "og:type": "website",
+    "og:title": "Senior Go Engineer, Payments w firmie Fabrikam — Kraków | Oferty pracy na LinkedIn",
+    "og:url": "https://pl.linkedin.com/jobs/view/senior-go-engineer-payments-at-fabrikam-4012345678"
+  },
+  "h1": [
+    "Senior Go Engineer, Payments"
+  ],
+  "selection": "",
+  "text": " Senior Go Engineer, Payments\n Fabrikam\n Kraków\n Aplikuj"
+}

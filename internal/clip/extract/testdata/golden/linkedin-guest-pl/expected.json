@@ -1,0 +1,12 @@
+{
+  "company": "Fabrikam",
+  "role": "Senior Go Engineer, Payments",
+  "location": "Kraków, PL",
+  "description": "Meet the Team\n\nThe Payments team moves money for 2 million shops.\n\nYour Impact\n\n• Build ledgers in Go\n• Run Kafka & PostgreSQL\n\nWe are Fabrikam.",
+  "from": {
+    "company": "jsonld",
+    "role": "jsonld",
+    "location": "jsonld",
+    "description": "jsonld"
+  }
+}

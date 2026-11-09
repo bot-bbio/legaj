@@ -1,0 +1,12 @@
+{
+  "company": "Contoso Pay",
+  "role": "Security Engineer, Cloud",
+  "location": "Remote (Canada, United States, USA); New York City, NY, USA",
+  "description": "About Contoso Pay\n\nContoso Pay builds payment software for finance teams.\n\nAbout the Role\n\nYou will secure our cloud estate.\n\n• Own cloud IAM and network policy\n• Respond to incidents & run reviews",
+  "from": {
+    "company": "jsonld",
+    "role": "jsonld",
+    "location": "jsonld",
+    "description": "jsonld"
+  }
+}

@@ -1,0 +1,12 @@
+# LF in the repository and in every checkout, whatever core.autocrlf says.
+# Otherwise a Windows checkout gets CRLF and `gofmt -l` flags every Go file.
+* text=auto eol=lf
+
+# Golden files are compared byte for byte; some (RFC 5545 .ics) require CRLF.
+**/testdata/** -text
+
+*.png binary
+*.ico binary
+*.ttf binary
+*.pdf binary
+*.docx binary

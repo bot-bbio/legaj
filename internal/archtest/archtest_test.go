@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -233,6 +234,33 @@ func TestR34_UnsafeMessageOnlyInLiveSuite(t *testing.T) {
 	})
 	if len(violations) > 0 {
 		t.Fatalf("Gemini's raw error message can echo request content; only the live suite may read it:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// R67: no model ID is built into the app outside the seed
+// ---------------------------------------------------------------------------
+
+// modelIDLiteral is a quoted Gemini model ID such as "gemini-3.1-flash-lite".
+var modelIDLiteral = regexp.MustCompile("[\"`]gemini-[0-9]")
+
+func TestR67_NoModelIDOutsideTheSeed(t *testing.T) {
+	root := repoRoot(t)
+	var violations []string
+	walkFiles(t, root, func(rel, abs string) {
+		if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") || rel == "internal/ai/gemini/gemini.go" {
+			return
+		}
+		src, err := os.ReadFile(abs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if modelIDLiteral.Match(src) {
+			violations = append(violations, rel)
+		}
+	})
+	if len(violations) > 0 {
+		t.Fatalf("model IDs belong only in the seed (gemini.DefaultModel); everything else comes from the live listing (R67, D42):\n%s", strings.Join(violations, "\n"))
 	}
 }
 

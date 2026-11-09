@@ -55,3 +55,16 @@ type Response struct {
 type Provider interface {
 	Generate(ctx context.Context, req Request) (Response, error)
 }
+
+// ModelInfo is a model the key can use, as the provider lists it (R67).
+type ModelInfo struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
+}
+
+// ModelLister is a provider that can list the models its key may use,
+// already filtered to the ones LeGaJ can work with and in Automatic order,
+// so no model name has to be built into the app (R67, D42).
+type ModelLister interface {
+	ListModels(ctx context.Context) ([]ModelInfo, error)
+}

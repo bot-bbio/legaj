@@ -71,6 +71,29 @@ func explain(t *testing.T, what string, err error) {
 	t.Fatalf("%s: %v (model %s)", what, err, liveModel())
 }
 
+// TestLive_ModelList (R67): the key's real model listing yields at least one
+// model LeGaJ works with, and the built-in seed is still among them, so a
+// retirement of the default shows up here before users hit it.
+func TestLive_ModelList(t *testing.T) {
+	models, err := liveClient(t).ListModels(liveCtx(t))
+	if err != nil {
+		explain(t, "listing models", err)
+	}
+	if len(models) == 0 {
+		t.Fatal("no stable Flash or Flash-Lite model in the listing: check the eligibility pattern against Gemini's current names")
+	}
+	listed := map[string]bool{}
+	for _, m := range models {
+		listed[m.ID] = true
+		t.Logf("eligible: %s (%s)", m.ID, m.DisplayName)
+	}
+	for _, seed := range gemini.SeedModels() {
+		if !listed[seed] {
+			t.Errorf("seed model %s is no longer listed: update gemini.DefaultModel", seed)
+		}
+	}
+}
+
 // TestLive_StructuredOutputFieldsAccepted confirms D24: the request fields
 // LeGaJ uses for JSON output (responseMimeType + responseJsonSchema) are
 // accepted by the live API and the answer matches the schema.

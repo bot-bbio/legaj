@@ -33,7 +33,9 @@ import (
 )
 
 const (
-	// DefaultModel is carried over from V1, where it worked on the free tier (D21).
+	// DefaultModel is carried over from V1, where it worked on the free tier
+	// (D21). It is the built-in seed (SeedModels): the only model ID in
+	// LeGaJ's code, used when the live listing can't be had (R67).
 	DefaultModel = "gemini-3.1-flash-lite"
 	// MaxAttempts bounds retries of 429 and 5xx responses.
 	MaxAttempts = 4
@@ -179,8 +181,14 @@ func (c *Client) attempt(ctx context.Context, model, key string, body []byte) (r
 		return result{}, apperr.Wrap(err, apperr.CodeInternal, apperr.GenericMessage)
 	}
 	hreq.Header.Set("Content-Type", "application/json")
-	hreq.Header.Set("x-goog-api-key", key)
+	return c.send(ctx, hreq, key)
+}
 
+// send runs one HTTP request with the key in its header (never the URL) and
+// maps Gemini's answer to a result or a user-safe error (R63). Generation and
+// model listing share it.
+func (c *Client) send(ctx context.Context, hreq *http.Request, key string) (result, error) {
+	hreq.Header.Set("x-goog-api-key", key)
 	resp, err := c.http.Do(hreq)
 	if err != nil {
 		if ctx.Err() != nil {

@@ -46,7 +46,10 @@ type transport struct {
 func (tr *transport) RoundTrip(r *http.Request) (*http.Response, error) {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
-	body, _ := io.ReadAll(r.Body)
+	var body []byte
+	if r.Body != nil { // a GET (model listing) has none
+		body, _ = io.ReadAll(r.Body)
+	}
 	tr.requests = append(tr.requests, r)
 	tr.bodies = append(tr.bodies, body)
 	if len(tr.replies) == 0 {

@@ -112,6 +112,9 @@ try {
 Invoke-Step 'svelte-check' { Invoke-InFrontend { & $npm run check } }
 Invoke-Step 'eslint' { Invoke-InFrontend { & $npm run lint } }
 Invoke-Step 'vitest' { Invoke-InFrontend { & $npm run test } }
+# Layout in a real browser (R70): the build from above, served on loopback,
+# in Microsoft Edge (WebView2's engine) against a fake backend.
+Invoke-Step 'layout suite (Edge)' { Invoke-InFrontend { & $npm run e2e } }
 
 # --- App -------------------------------------------------------------------
 if ($SkipAppBuild) {

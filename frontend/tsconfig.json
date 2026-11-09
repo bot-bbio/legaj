@@ -20,5 +20,5 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte", "wailsjs/**/*.d.ts", "vite.config.ts", "vite-plugin-bookmarklet.ts", "vitest-setup.ts"]
+  "include": ["src/**/*.ts", "src/**/*.svelte", "wailsjs/**/*.d.ts", "vite.config.ts", "vite-plugin-bookmarklet.ts", "vitest-setup.ts", "e2e/**/*.ts", "playwright.config.ts"]
 }

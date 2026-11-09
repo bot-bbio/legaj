@@ -22,6 +22,8 @@ frontend/dist/*
 !frontend/dist/.gitkeep
 # Generated from Go by `wails generate module` on every verify/build.
 frontend/wailsjs/
+# The layout suite's screenshots and run output (R70).
+frontend/e2e/out/
 
 # Clipper spike output: captures can contain personal data (plan item 2).
 spike/bookmarklet/out/
